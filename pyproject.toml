@@ -1,0 +1,11 @@
+[project]
+name = "cloudedx"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "pandas>=3.0.5",
+    "selenium>=4.46.0",
+    "webdriver-manager>=4.1.2",
+]
