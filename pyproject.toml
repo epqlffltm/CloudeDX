@@ -5,7 +5,9 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "fastapi>=0.141.1",
     "pandas>=3.0.5",
     "selenium>=4.46.0",
+    "uvicorn[standard]>=0.52.1",
     "webdriver-manager>=4.1.2",
 ]
