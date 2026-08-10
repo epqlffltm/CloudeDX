@@ -1,47 +1,69 @@
 #app/crawler/scheduler.py
 
 """
-크롤링 자동화
+크롤링 자동화.
+당근마켓/중고나라 모두 Playwright 기반 비동기 크롤러로 통일했기 때문에,
+더 이상 asyncio.to_thread 없이 순서대로 await하면 된다.
 """
 
 import asyncio
 from pathlib import Path
 
-from app.crawler.config import CrawlerConfig
-from app.crawler.crawler import DaangnCrawler
-from app.crawler.run import save_json
-
+from app.crawler.base import save_json
+from app.crawler.daangn.config import DaangnCrawlerConfig
+from app.crawler.daangn.crawler import DaangnCrawler
+from app.crawler.joongna.config import JoongnaCrawlerConfig
+from app.crawler.joongna.crawler import JoongnaCrawler
 
 CRAWL_INTERVAL_SECONDS = 30 * 60  # 30분
 
 
-def crawl_once() -> None:
-    print("[crawler] 자동 크롤링 시작")
+async def crawl_daangn_once() -> None:
+    print("[crawler] 당근마켓 자동 크롤링 시작")
 
     crawler = DaangnCrawler(
-        CrawlerConfig(
+        DaangnCrawlerConfig(
+            query="아이폰",
             headless=True,
             scroll_count=6,
         )
     )
 
-    items = crawler.crawl(
-        query="아이폰",
+    items = await crawler.crawl()
+
+    save_json(items, Path("data/crawled_items.json"))
+
+    print(f"[crawler] 당근마켓 자동 크롤링 완료: {len(items)}건")
+
+
+async def crawl_joongna_once() -> None:
+    print("[crawler] 중고나라 자동 크롤링 시작")
+
+    crawler = JoongnaCrawler(
+        JoongnaCrawlerConfig(
+            keyword="구찌",
+            headless=True,
+            max_pages=5,
+        )
     )
 
-    save_json(
-        items,
-        Path("data/crawled_items.json"),
-    )
+    items = await crawler.crawl()
 
-    print(f"[crawler] 자동 크롤링 완료: {len(items)}건")
+    save_json(items, Path("data/joongna_crawled_items.json"))
+
+    print(f"[crawler] 중고나라 자동 크롤링 완료: {len(items)}건")
+
+
+# 순서대로 실행할 크롤링 작업 목록. 사이트를 추가하고 싶으면 여기에 함수 하나만 더 넣으면 된다.
+CRAWL_JOBS = (crawl_daangn_once, crawl_joongna_once)
 
 
 async def crawler_loop() -> None:
     while True:
-        try:
-            await asyncio.to_thread(crawl_once)
-        except Exception as exc:
-            print(f"[crawler] 크롤링 실패: {exc}")
+        for job in CRAWL_JOBS:
+            try:
+                await job()
+            except Exception as exc:
+                print(f"[crawler] {job.__name__} 실패: {exc}")
 
         await asyncio.sleep(CRAWL_INTERVAL_SECONDS)

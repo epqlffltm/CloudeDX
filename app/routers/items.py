@@ -1,3 +1,12 @@
+# app/routers/items.py
+
+"""
+당근마켓 매물 조회 라우터.
+data_loader가 CSV 스냅샷(daangn_with_images.csv)에서 읽어온 결과를
+검색/가격 필터 + 페이지네이션해서 반환한다.
+main.py에서 app.include_router(router)로 등록한다.
+"""
+
 import json
 from pathlib import Path
 

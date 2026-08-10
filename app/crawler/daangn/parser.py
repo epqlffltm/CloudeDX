@@ -1,19 +1,13 @@
-#app/crawler/parser.py
+# app/crawler/daangn/parser.py
 
 """
-파서
+당근마켓 상품 카드 텍스트 파싱.
+Playwright 요소 없이도 테스트할 수 있는 순수 함수로 분리 (joongna/parser.py와 동일한 방침).
+파싱 규칙 자체는 기존 Selenium 버전(app/crawler/parser.py)과 동일하다.
 """
 
 import re
 from urllib.parse import urlparse
-
-from typing import TYPE_CHECKING
-
-from app.crawler.models import CrawledItem
-
-if TYPE_CHECKING:
-    from selenium.webdriver.remote.webelement import WebElement
-
 
 _PRICE_PATTERN = re.compile(r"(?:\d[\d,]*\s*원|나눔)")
 _TIME_PATTERN = re.compile(
@@ -51,7 +45,6 @@ def is_item_detail_url(url: str | None) -> bool:
     /kr/buy-sell/abc-xyz-123/  -> True
     /kr/buy-sell/              -> False
     """
-
     if not url:
         return False
 
@@ -71,7 +64,6 @@ def _extract_lines(text: str) -> list[str]:
         if not line:
             continue
 
-        # 판매완료가 제목 앞에 붙어서 들어오는 경우도 대비한다.
         if line.startswith("판매완료") and line != "판매완료":
             line = normalize_text(line.removeprefix("판매완료"))
 
@@ -117,11 +109,9 @@ def _find_region(
 ) -> str | None:
     """
     제목/가격/시간/상태가 아닌 카드 텍스트를 지역 후보로 선택한다.
-
-    기존 코드처럼 '첫 번째 애매한 줄'을 바로 지역으로 잡지 않기 때문에
-    제목이 지역 필드에 중복되는 문제를 줄인다.
+    "첫 번째 애매한 줄"을 바로 지역으로 잡지 않기 때문에 제목이 지역 필드에
+    중복되는 문제(dangun.py 시절 버그)를 반복하지 않는다.
     """
-
     candidates: list[str] = []
 
     for line in lines:
@@ -148,11 +138,12 @@ def parse_card_text(
     *,
     url: str,
     image_url: str | None = None,
-) -> CrawledItem | None:
+) -> dict | None:
     """
-    Selenium 요소 없이도 테스트할 수 있는 순수 파싱 함수.
+    카드 텍스트를 파싱해서 dict로 반환. 실패하면 None.
+    (예전에는 여기서 바로 CrawledItem을 만들었는데, joongna와 형태를 맞추기 위해
+    dict만 반환하고 CrawledItem 조립은 crawler.py의 _to_item()이 담당한다.)
     """
-
     lines = _extract_lines(text)
 
     if not lines:
@@ -173,60 +164,12 @@ def parse_card_text(
         time_text=time_text,
     )
 
-    return CrawledItem(
-        title=title,
-        price=price,
-        price_value=parse_price_value(price),
-        region=region,
-        time_text=time_text,
-        image_url=image_url,
-        url=url,
-        is_sold=is_sold,
-    )
-
-
-def parse_anchor(anchor: "WebElement") -> CrawledItem | None:
-    """
-    당근 매물 <a> 요소 하나를 CrawledItem으로 변환한다.
-
-    Selenium 관련 import는 이 함수 안에서만 수행한다.
-    덕분에 순수 텍스트 파서 테스트는 Selenium 설치 없이도 실행 가능하다.
-    """
-
-    from selenium.common.exceptions import (
-        NoSuchElementException,
-        StaleElementReferenceException,
-    )
-    from selenium.webdriver.common.by import By
-
-    try:
-        url = anchor.get_attribute("href")
-
-        if not is_item_detail_url(url):
-            return None
-
-        text = anchor.text.strip()
-        if not text:
-            return None
-
-        image_url: str | None = None
-
-        try:
-            image = anchor.find_element(By.TAG_NAME, "img")
-            image_url = (
-                image.get_attribute("src")
-                or image.get_attribute("data-src")
-                or image.get_attribute("data-lazy-src")
-            )
-        except NoSuchElementException:
-            pass
-
-        return parse_card_text(
-            text,
-            url=url,
-            image_url=image_url,
-        )
-
-    except StaleElementReferenceException:
-        # 스크롤 중 DOM이 갱신된 경우 해당 요소 하나만 건너뛴다.
-        return None
+    return {
+        "title": title,
+        "price": price,
+        "region": region,
+        "time_text": time_text,
+        "image_url": image_url,
+        "url": url,
+        "is_sold": is_sold,
+    }

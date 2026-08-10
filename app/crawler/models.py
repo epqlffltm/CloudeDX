@@ -8,6 +8,7 @@ from dataclasses import asdict, dataclass
 
 @dataclass(slots=True, frozen=True)
 class CrawledItem:
+    source: str  # 예: "당근마켓", "중고나라"
     title: str
     price: str | None
     price_value: int | None
