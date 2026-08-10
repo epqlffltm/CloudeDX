@@ -16,11 +16,14 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.crawler.scheduler import crawler_loop
+from app.routers.items import router as items_router
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    crawler_task = asyncio.create_task(crawler_loop())
+    crawler_task = asyncio.create_task(
+        crawler_loop()
+    )
 
     yield
 
@@ -33,14 +36,27 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="당근마켓 API",
+    title="CloudeDX API",
     version="0.2.0",
     lifespan=lifespan,
+)
+
+
+app.include_router(
+    items_router,
+    prefix="/api",
 )
 
 
 @app.get("/")
 def root():
     return {
-        "message": "당근마켓 API",
+        "message": "CloudeDX API",
+    }
+
+
+@app.get("/health")
+def health():
+    return {
+        "status": "ok",
     }
