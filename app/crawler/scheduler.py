@@ -58,12 +58,21 @@ async def crawl_joongna_once() -> None:
 CRAWL_JOBS = (crawl_daangn_once, crawl_joongna_once)
 
 
-async def crawler_loop() -> None:
-    while True:
-        for job in CRAWL_JOBS:
-            try:
-                await job()
-            except Exception as exc:
-                print(f"[crawler] {job.__name__} 실패: {exc}")
+async def run_crawl_round() -> None:
+    """등록된 크롤링 작업을 순서대로 한 바퀴 실행. 하나가 실패해도 나머지는 계속 진행한다."""
+    for job in CRAWL_JOBS:
+        try:
+            await job()
+        except Exception as exc:
+            print(f"[crawler] {job.__name__} 실패: {exc}")
 
+
+async def crawler_loop() -> None:
+    """
+    30분마다 반복 실행하는 백그라운드 루프.
+    최초 1회는 main.py의 lifespan에서 run_crawl_round()로 먼저(서버 시작을 막으면서)
+    실행하기 때문에, 여기서는 sleep을 먼저 하고 그 다음부터 반복한다.
+    """
+    while True:
         await asyncio.sleep(CRAWL_INTERVAL_SECONDS)
+        await run_crawl_round()

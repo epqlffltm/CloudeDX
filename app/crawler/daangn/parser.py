@@ -39,11 +39,12 @@ def parse_price_value(price: str | None) -> int | None:
 
 def is_item_detail_url(url: str | None) -> bool:
     """
-    검색 목록 자체가 아니라 실제 매물 상세 URL인지 확인한다.
+    검색 목록/카테고리 페이지가 아니라 실제 매물 상세 URL인지 확인한다.
 
     예:
-    /kr/buy-sell/abc-xyz-123/  -> True
-    /kr/buy-sell/              -> False
+    /kr/buy-sell/abc-xyz-123/           -> True  (진짜 매물 상세)
+    /kr/buy-sell/                        -> False (검색 홈)
+    /kr/buy-sell/s/?search=자전거         -> False (관련 검색어/카테고리 칩. /s 경로는 검색 결과 페이지지 매물이 아니다)
     """
     if not url:
         return False
@@ -52,7 +53,19 @@ def is_item_detail_url(url: str | None) -> bool:
     path = parsed.path.rstrip("/")
 
     prefix = "/kr/buy-sell/"
-    return path.startswith(prefix) and path != prefix.rstrip("/")
+    if not path.startswith(prefix):
+        return False
+
+    remainder = path[len(prefix):]
+    if not remainder:
+        return False
+
+    # '/kr/buy-sell/s' 이하는 검색결과/카테고리 경로다. 관련 검색어, 인기 카테고리
+    # 바로가기 칩이 전부 이 경로를 쓰기 때문에 명시적으로 제외한다.
+    if remainder == "s" or remainder.startswith("s/"):
+        return False
+
+    return True
 
 
 def _extract_lines(text: str) -> list[str]:
@@ -163,6 +176,11 @@ def parse_card_text(
         price=price,
         time_text=time_text,
     )
+
+    if price is None and region is None and time_text is None:
+        # 진짜 매물 카드라면 가격/지역/시간 중 최소 하나는 거의 항상 있다.
+        # 셋 다 없으면 '인기 검색어'나 카테고리 바로가기 같은 비-매물 카드로 보고 버린다.
+        return None
 
     return {
         "title": title,
