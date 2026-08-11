@@ -11,9 +11,9 @@ crawler.py에서 콜백으로 주입한다.
 
 import asyncio
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 from playwright.async_api import Browser, BrowserContext, Page, Playwright
 

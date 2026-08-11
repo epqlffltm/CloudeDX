@@ -55,3 +55,4 @@ def test_parse_price_value_extracts_digits_and_handles_donation():
     assert parse_price_value("4,500,000원") == 4500000
     assert parse_price_value("나눔") == 0
     assert parse_price_value(None) is None
+

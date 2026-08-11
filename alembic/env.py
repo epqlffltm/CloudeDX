@@ -14,10 +14,11 @@ run_sync()로 감싸 돌려야 한다.
 import asyncio
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
+
+from alembic import context
 
 # app.config가 load_dotenv()를 호출하므로 임포트 순서를 신경 쓸 필요가 없다.
 from app.config import DATABASE_URL

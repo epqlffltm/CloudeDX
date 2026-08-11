@@ -88,7 +88,7 @@ async def wait_for_db(retries: int = 5, delay: float = 2.0) -> None:
     ) from last_exc
 
 
-async def get_session() -> AsyncGenerator[AsyncSession, None]:
+async def get_session() -> AsyncGenerator[AsyncSession]:
     """FastAPI Depends로 라우터에 세션을 주입하기 위한 제너레이터."""
     async with async_session() as session:
         yield session
