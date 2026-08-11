@@ -24,10 +24,11 @@ from app.db.models import ItemRecord
 from app.schemas.requests import CrawledItemFilterParams
 
 # 한 INSERT 문에 넣을 최대 행 수. 너무 크면 바인드 파라미터가 폭증해서
-# Postgres 한계(문당 65535개)에 걸린다. 컬럼 10개 기준 여유 있는 값으로 잡는다.
+# Postgres 한계(문당 65535개)에 걸린다. 컬럼 11개 기준 여유 있는 값으로 잡는다.
 UPSERT_CHUNK_SIZE = 500
 
-# 크롤링 결과에서 갱신 대상이 되는 컬럼들. first_seen_at은 여기 없다 — 의도적이다.
+# 크롤링 결과에서 매번 덮어쓰는 컬럼들.
+# first_seen_at과 posted_at은 여기 없다 — 둘 다 아래에서 따로 처리한다.
 _UPDATABLE_COLUMNS = (
     "source",
     "brand",
@@ -69,6 +70,23 @@ def _apply_filters(stmt: Select, filters: CrawledItemFilterParams) -> Select:
     return stmt
 
 
+def _order_key():
+    """
+    목록 정렬 기준: 최근에 올라온 글이 위로.
+
+    posted_at은 사이트가 시각을 표기하지 않으면 NULL이라, 그런 행은 first_seen_at으로
+    대체해서 정렬한다(coalesce). 안 그러면 NULL 행이 전부 맨 뒤나 맨 앞으로 몰린다.
+
+    id를 2차 정렬에 넣는 이유: "3일 전"으로 표기된 매물은 환산 결과가 초 단위까지
+    같아질 수 있고, 그러면 정렬 순서가 매 요청마다 달라진다. 페이지를 넘길 때 같은
+    매물이 두 번 보이거나 아예 건너뛰어지는 문제가 생긴다.
+    """
+    return (
+        func.coalesce(ItemRecord.posted_at, ItemRecord.first_seen_at).desc(),
+        ItemRecord.id.desc(),
+    )
+
+
 async def count_items(session: AsyncSession, filters: CrawledItemFilterParams) -> int:
     """필터 조건에 맞는 전체 건수. 페이지네이션의 total로 쓴다."""
     stmt = _apply_filters(select(ItemRecord.id), filters)
@@ -80,20 +98,9 @@ async def count_items(session: AsyncSession, filters: CrawledItemFilterParams) -
 async def list_items(
     session: AsyncSession, filters: CrawledItemFilterParams
 ) -> Sequence[ItemRecord]:
-    """
-    필터 + 페이지네이션을 적용한 매물 목록.
-
-    정렬은 last_seen_at 내림차순(최근에 다시 확인된 것 우선) + id 내림차순이다.
-    id를 2차 정렬에 넣는 이유: 같은 크롤링 라운드에서 들어온 행들은 last_seen_at이
-    사실상 동일해서, 이것만으로는 정렬 순서가 매 요청마다 달라질 수 있다. 그러면
-    페이지를 넘길 때 같은 매물이 두 번 보이거나 아예 건너뛰어지는 문제가 생긴다.
-    """
+    """필터 + 페이지네이션을 적용한 매물 목록."""
     stmt = _apply_filters(select(ItemRecord), filters)
-    stmt = (
-        stmt.order_by(ItemRecord.last_seen_at.desc(), ItemRecord.id.desc())
-        .limit(filters.limit)
-        .offset(filters.offset)
-    )
+    stmt = stmt.order_by(*_order_key()).limit(filters.limit).offset(filters.offset)
     result = await session.execute(stmt)
 
     return result.scalars().all()
@@ -137,6 +144,7 @@ def _dedupe_by_url(items: list[CrawledItem]) -> list[dict]:
             "image_url": item.image_url,
             "url": item.url,
             "is_sold": item.is_sold,
+            "posted_at": item.posted_at,
         }
 
     return list(merged.values())
@@ -147,8 +155,12 @@ async def upsert_items(items: list[CrawledItem]) -> int:
     크롤링 결과를 url 기준으로 insert-or-update 하고, 처리한 건수를 반환한다.
 
     이미 있는 매물이면 가격/상태 등만 갱신하고 last_seen_at을 지금으로 찍는다.
-    first_seen_at은 건드리지 않는다 — 이 값이 유지돼야 나중에
-    (last_seen_at - first_seen_at)으로 "며칠째 안 팔리는 매물인지"를 계산할 수 있다.
+    first_seen_at은 건드리지 않는다 — 이 값이 유지돼야 posted_at을 못 구한 매물의
+    화면 표기를 대체할 수 있다.
+
+    posted_at은 coalesce로 처리한다. 상대 시각 표기는 시간이 지날수록 거칠어지기
+    때문이다("3시간 전"이 다음 날엔 "1일 전"이 된다). 한 번 값을 구했으면 그때 것이
+    가장 정확하므로 유지하고, 아직 NULL인 행에만 새 값을 채운다.
 
     행을 하나씩 보내면 건수만큼 왕복이 생기므로 UPSERT_CHUNK_SIZE 단위로 묶어서 보낸다.
     전체가 한 트랜잭션이라, 중간에 실패하면 그 라운드 결과는 통째로 롤백된다.
@@ -167,6 +179,9 @@ async def upsert_items(items: list[CrawledItem]) -> int:
                 index_elements=[ItemRecord.url],
                 set_={
                     **{col: getattr(stmt.excluded, col) for col in _UPDATABLE_COLUMNS},
+                    "posted_at": func.coalesce(
+                        ItemRecord.posted_at, stmt.excluded.posted_at
+                    ),
                     "last_seen_at": func.now(),
                 },
             )

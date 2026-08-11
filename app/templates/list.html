@@ -5,6 +5,9 @@
   필터는 평범한 GET form이다. 자바스크립트 없이도 동작하고, 필터를 건 상태의 주소가
   그대로 공유 가능한 링크가 된다. 페이지 이동 링크도 현재 쿼리스트링을 유지한 채
   offset만 바꾸므로, 3페이지에서 검색어가 풀리는 일이 없다.
+
+  제목은 상세 화면으로, 'ORIGIN'은 원글로 간다. 목록에서 바로 원본을 열고 싶은 경우와
+  우리 쪽 상세를 보고 싶은 경우가 다르기 때문에 둘 다 둔다.
 #}
 {% extends "base.html" %}
 
@@ -82,16 +85,20 @@
               <span class="tag">{{ v.item.source }}</span>
               <span class="tag">{{ v.item.brand }}</span>
               {% if v.item.region %}{{ v.item.region }} · {% endif %}
-              {{ v.last_seen_text }} 확인{% if v.item.is_sold %} · 판매완료{% endif %}
+              {% if v.item.is_sold %}판매완료 · {% endif %}
+              <a class="origin" href="{{ v.item.url }}" target="_blank" rel="noopener noreferrer">원글 ↗</a>
             </p>
           </div>
 
-          {# 관측 기간 막대 — first_seen_at을 upsert에서 보존하기 때문에 계산할 수 있는 값 #}
-          <div class="stale">
+          {# 등록 후 경과 막대. posted_at이 없으면 수집 시각으로 대체하고 흐리게 표시한다 #}
+          <div class="stale {% if v.is_estimated %}est{% endif %}">
             <span class="stale-track">
               <span class="stale-fill" style="width: {{ '%.0f' | format(v.stale_ratio) }}%"></span>
             </span>
-            <span class="stale-label">{{ v.observed_days }}일째</span>
+            <span class="stale-label"
+                  title="{{ v.posted_at.strftime('%Y-%m-%d %H:%M') }}{% if v.is_estimated %} (수집 시각 기준 추정){% endif %}">
+              {{ v.posted_text }}{% if v.is_estimated %} 수집{% else %} 등록{% endif %}
+            </span>
           </div>
 
           <p class="price">{{ v.price_text }}</p>

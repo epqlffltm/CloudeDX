@@ -1,13 +1,17 @@
 # app/main.py
 
 """
-당근마켓/중고나라 크롤링 결과를 게시판과 REST API로 제공하는 FastAPI 앱.
+당근마켓/중고나라 크롤링 결과를 게시판과 JSON API로 제공하는 FastAPI 앱.
 
 파이프라인은 하나다: 크롤러가 수집 -> DB(items 테이블)에 upsert -> 그 DB를 서빙.
 서빙 경로만 둘로 나뉜다.
-    /board          Jinja2로 그린 게시판 화면 (목록 -> 제목 클릭 -> 상세)
-    /crawled-items  같은 데이터를 주는 JSON API (나중에 프론트를 붙일 자리)
-둘 다 app.db.repository를 통해 조회하므로 필터/정렬 동작이 갈라지지 않는다.
+    /board              Jinja2로 그린 게시판 화면 (목록 -> 제목 클릭 -> 상세)
+    /api/crawled-items  같은 데이터를 주는 JSON API
+    /api/meta           프론트가 필터 선택지를 채우는 데 쓰는 값들
+셋 다 app.db.repository를 통해 조회하므로 필터/정렬 동작이 갈라지지 않는다.
+
+게시판은 시연용이고, 프론트엔드를 붙이면 /api만 쓰면 된다. 그때 app/routers/web.py와
+app/templates/를 통째로 걷어내도 API는 그대로 남는다.
 
 실행 (프로젝트 루트에서, Postgres가 떠 있어야 함 — docker compose up -d):
     uv run uvicorn app.main:app
@@ -43,6 +47,7 @@ from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 
 # app.* 임포트보다 반드시 먼저 실행돼야 한다 (위 docstring의 "환경변수에 대해" 참고).
@@ -51,12 +56,27 @@ load_dotenv()
 from app.crawler.scheduler import crawler_loop, run_crawl_round  # noqa: E402
 from app.db.engine import init_db  # noqa: E402
 from app.routers.crawled import router as crawled_router  # noqa: E402
+from app.routers.meta import router as meta_router  # noqa: E402
 from app.routers.web import router as web_router  # noqa: E402
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 ENABLE_CRAWLER = os.getenv("ENABLE_CRAWLER", "true").lower() == "true"
+
+# 프론트엔드를 별도 개발 서버(Vite 5173, CRA 3000 등)로 띄우면 브라우저가 다른 출처로
+# 보고 요청을 막는다. 허용할 출처를 .env의 ALLOWED_ORIGINS에 쉼표로 나열한다.
+# 비워두면 CORS 미들웨어를 아예 붙이지 않는다 — 프론트가 없는 지금 상태에서 불필요하게
+# 열어두지 않기 위해서다.
+ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("ALLOWED_ORIGINS", "").split(",")
+    if origin.strip()
+]
+
+# API 경로 접두어. 화면(/board)과 분리해 두면 리버스 프록시에서 /api만 백엔드로
+# 넘기는 구성이 쉬워지고, 나중에 /api/v2를 병행하는 것도 가능해진다.
+API_PREFIX = "/api"
 
 
 @asynccontextmanager
@@ -87,12 +107,27 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="중고 명품 가방 조회 API",
-    version="0.3.0",
+    version="0.4.0",
+    description=(
+        "당근마켓·중고나라에서 수집한 중고 명품 가방 매물을 조회한다. "
+        "모든 목록 응답은 total/count/limit/offset/has_next를 포함한다."
+    ),
     lifespan=lifespan,
 )
 
+if ALLOWED_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=ALLOWED_ORIGINS,
+        # 조회 전용 API라 GET만 열어둔다. 쓰기 엔드포인트가 생기면 그때 늘린다.
+        allow_methods=["GET"],
+        allow_headers=["*"],
+    )
+    print(f"[cors] 허용 출처: {', '.join(ALLOWED_ORIGINS)}")
+
 app.include_router(web_router)
-app.include_router(crawled_router)
+app.include_router(crawled_router, prefix=API_PREFIX)
+app.include_router(meta_router, prefix=API_PREFIX)
 
 
 @app.get("/", status_code=status.HTTP_307_TEMPORARY_REDIRECT, include_in_schema=False)
@@ -101,7 +136,12 @@ def root():
     return RedirectResponse(url="/board")
 
 
-@app.get("/health", status_code=status.HTTP_200_OK, tags=["health"])
+@app.get(
+    "/health",
+    status_code=status.HTTP_200_OK,
+    operation_id="getHealth",
+    tags=["health"],
+)
 def health():
     """프로세스가 살아있는지만 알려주는 엔드포인트 (DB 상태는 확인하지 않는다)."""
     return {"status": "ok"}

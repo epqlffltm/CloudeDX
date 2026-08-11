@@ -46,7 +46,9 @@ class JoongnaCrawler:
             price=parsed["price"],
             price_value=parse_price_value(parsed["price"]),
             region=None,  # 중고나라 카드에는 지역 정보가 없다
-            time_text=None,  # 중고나라 카드에는 등록 시각 정보가 없다
+            # 카드 원문에 '3일 전' 같은 표기가 있으면 파서가 뽑아준다. 없으면 None이고,
+            # CrawledItem.posted_at도 따라서 None이 된다.
+            time_text=parsed.get("time_text"),
             image_url=parsed["image_url"],
             url=parsed["url"],
             is_sold=False,  # 원본 스크립트에 판매완료 판별 로직이 없어 기본값으로 둔다

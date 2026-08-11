@@ -220,9 +220,9 @@
     .sold .price { text-decoration: line-through; }
 
     /*
-      이 화면의 signature. 우리가 이 매물을 며칠째 보고 있는지를 막대로 보여준다.
-      first_seen_at을 upsert에서 갱신하지 않는 설계 덕분에 만들 수 있는 값이고,
-      "안 팔리고 오래 걸려 있는 매물"을 훑어보며 찾을 수 있게 하는 것이 목적이다.
+      이 화면의 signature. 원글이 올라온 지 얼마나 됐는지를 막대로 보여준다.
+      가격만 나열하는 목록과 달리, 오래 걸려 있는 매물(= 가격 협상 여지가 있는 매물)을
+      훑어보며 찾을 수 있게 하는 것이 목적이다.
     */
     .stale { display: flex; flex-direction: column; gap: 4px; }
 
@@ -245,6 +245,19 @@
       color: var(--muted);
       letter-spacing: 0.04em;
     }
+
+    /* 등록 시각을 사이트가 표기하지 않아 수집 시각으로 대체한 경우 */
+    .est { opacity: 0.65; }
+
+    .origin {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--muted);
+      text-decoration: none;
+      border-bottom: 1px solid var(--rule);
+    }
+
+    .origin:hover { color: var(--accent); border-color: var(--accent); }
 
     /* ---- 페이지 이동 ---- */
 

@@ -34,7 +34,7 @@ router = APIRouter(prefix="/board", tags=["board"], include_in_schema=False)
 TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
-# 관측 기간 막대가 꽉 차는 기준일. 2주 이상 안 팔린 매물은 전부 최대치로 보여준다.
+# 경과 막대가 꽉 차는 기준일. 2주 넘게 안 팔린 매물은 전부 최대치로 보여준다.
 STALE_DAYS = 14
 
 
@@ -49,19 +49,8 @@ def _as_utc(moment: datetime) -> datetime:
     return moment if moment.tzinfo else moment.replace(tzinfo=UTC)
 
 
-def _observed_days(item: ItemRecord) -> int:
-    """
-    우리가 이 매물을 관측한 일수.
-
-    "등록 후 며칠"이 아니라 "우리가 처음 본 뒤 며칠"이다. 크롤링을 시작하기 전에
-    올라온 매물은 실제 등록일을 알 수 없으므로, 정직하게 관측 기준으로 표기한다.
-    첫날도 1일로 세도록 +1 한다.
-    """
-    return (_as_utc(item.last_seen_at) - _as_utc(item.first_seen_at)).days + 1
-
-
 def _relative_time(moment: datetime | None) -> str:
-    """'3분 전' 같은 상대 시각 문자열. 값이 없으면 빈 문자열."""
+    """'3일 전' 같은 상대 시각 문자열. 값이 없으면 빈 문자열."""
     if moment is None:
         return ""
 
@@ -92,15 +81,26 @@ def _price_text(item: ItemRecord) -> str:
 
 
 def _to_view(item: ItemRecord) -> dict:
-    """템플릿이 바로 쓸 수 있게 표시용 값을 미리 계산해 붙인다."""
-    days = _observed_days(item)
+    """
+    템플릿이 바로 쓸 수 있게 표시용 값을 미리 계산해 붙인다.
+
+    등록 시각(posted_at)이 없는 매물은 first_seen_at으로 대체하고, 대체했다는 사실을
+    is_estimated로 알려준다. 사이트가 시각을 표기하지 않은 경우인데, "우리가 처음 본
+    시점"을 등록일인 것처럼 보여주면 실제보다 최근 글로 오해할 수 있기 때문이다.
+    """
+    posted_at = item.posted_at or item.first_seen_at
+    is_estimated = item.posted_at is None
+
+    elapsed_days = (datetime.now(UTC) - _as_utc(posted_at)).days
 
     return {
         "item": item,
         "price_text": _price_text(item),
-        "observed_days": days,
-        # 막대 길이(%). 오래 안 팔린 매물일수록 길어진다.
-        "stale_ratio": min(days / STALE_DAYS, 1.0) * 100,
+        "posted_at": posted_at,
+        "posted_text": _relative_time(posted_at),
+        "is_estimated": is_estimated,
+        # 막대 길이(%). 오래된 글일수록 길어진다.
+        "stale_ratio": min(max(elapsed_days, 0) / STALE_DAYS, 1.0) * 100,
         "last_seen_text": _relative_time(item.last_seen_at),
     }
 
@@ -161,7 +161,7 @@ async def board_detail(
 
     본문(상품 설명)은 아직 수집하지 않는다. 지금 크롤러는 검색 결과의 카드 목록만
     훑기 때문에, 상세 내용을 채우려면 개별 매물 페이지를 한 번 더 방문해야 한다.
-    그때까지는 원본 링크로 안내한다.
+    그때까지는 원글 링크로 안내한다.
     """
     item = await repository.get_item(session, item_id)
 
@@ -176,5 +176,5 @@ async def board_detail(
     return templates.TemplateResponse(
         request=request,
         name="detail.html",
-        context={"view": _to_view(item), "stale_days": STALE_DAYS},
+        context={"view": _to_view(item)},
     )

@@ -32,6 +32,14 @@ class ItemRecord(Base):
     url: Mapped[str] = mapped_column(String(500), nullable=False, unique=True)
     is_sold: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
+    # 원글이 올라간 시각. time_text("3시간 전")를 수집 시점 기준으로 환산한 값이라
+    # 시간 단위의 오차가 있고, 사이트가 표기를 안 하면 NULL이다. 그래서 nullable이며
+    # 화면에서는 이 값이 없을 때 first_seen_at으로 대체한다.
+    # 정렬/필터에 쓸 수 있게 인덱스를 건다.
+    posted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), index=True
+    )
+
     # 이 매물을 처음/마지막으로 본 시점. url이 같으면 first_seen_at은 그대로 두고
     # last_seen_at만 갱신한다 (repository.py의 upsert 로직).
     first_seen_at: Mapped[datetime] = mapped_column(
