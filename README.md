@@ -15,6 +15,26 @@
 세 서빙 경로는 같은 `app/db/repository.py`를 통해 조회한다. 화면과 API가 서로 다른
 쿼리를 쓰기 시작하면 "API로는 나오는데 화면엔 없는" 상황이 생기기 때문이다.
 
+## 현재 상태
+
+| | |
+|---|---|
+| 실행 단위 | 백엔드(564MB) · 크롤러(3.59GB) 두 이미지, compose 4개 서비스 |
+| 스키마 | Alembic 마이그레이션 |
+| 테스트 | 77개, 실제 Postgres 위에서 실행 |
+| CI | GitHub Actions — lint · test · 이미지 빌드 |
+
+한 번에 띄우려면:
+
+```
+copy .env.example .env
+docker compose up -d --build
+```
+
+게시판 http://localhost:8000/board · 문서 http://localhost:8000/docs
+
+로컬에서 코드를 고치며 개발하는 방법은 아래 "실행" 절을 참고한다.
+
 ## 왜 사이트를 두 개 쓰는가 — 역할 분담
 
 당근마켓과 중고나라는 겉보기엔 둘 다 "중고거래 사이트"지만 실제 쓰임새가 다르다.
@@ -85,11 +105,14 @@ app/
 ├── schemas/
 │   ├── requests.py                # 쿼리 파라미터 모델 + 검증
 │   └── responses.py                # JSON 응답 모델
-└── templates/
-    ├── base.html                  # 공통 레이아웃 + 스타일
-    ├── list.html                   # 목록
-    ├── detail.html                  # 상세
-    └── not_found.html                # 없는 매물
+├── templates/
+│   ├── base.html                  # 공통 레이아웃 + 스타일
+│   ├── list.html                   # 목록
+│   ├── detail.html                  # 상세
+│   └── not_found.html                # 없는 매물
+└── tests/                         # pytest (실제 Postgres에 붙는다)
+    ├── conftest.py                 # 픽스처: 마이그레이션, 세션, 클라이언트
+    └── test_*.py
 ```
 
 ## 화면
@@ -286,6 +309,7 @@ docker compose -f docker-compose.yml up -d
 | `JOONGNA_PAGES_PER_BRAND` | `3` | 중고나라 브랜드당 수집 페이지 수 |
 | `CRAWL_RUN_TIMEOUT_MINUTES` | `60` | 이 시간을 넘겨 `running`으로 남은 기록은 죽은 것으로 본다 |
 | `BACKEND_PORT` | `8000` | 백엔드 컨테이너를 호스트에 노출할 포트 |
+| `TEST_DATABASE_URL` | `...@127.0.0.1:5432/cloudedx_test` | 테스트 전용 DB. 개발용과 분리해야 안전하다 |
 | `ALLOWED_ORIGINS` | (비어 있음) | CORS 허용 출처. 쉼표로 구분. 비우면 미들웨어를 붙이지 않는다 |
 
 compose로 띄울 때 `DATABASE_URL`은 `.env` 값이 아니라 compose가 주입하는
@@ -410,14 +434,20 @@ row a second time` 에러를 낸다. 그래서 `_dedupe_by_url()`로 url 기준 
 
 ## 실행
 
+컨테이너로 전부 띄우는 방법은 위 "compose로 전체 띄우기"에 있다. 여기는 코드를 고치며
+개발할 때 쓰는 로컬 실행이다 — DB만 컨테이너로 띄우고 앱은 호스트에서 돌린다.
+
 ```
 uv sync --extra crawler
 uv run playwright install chromium
 copy .env.example .env
-docker compose up -d
+docker compose up -d db          # DB만 띄운다
 uv run alembic upgrade head
 uv run uvicorn app.main:app
 ```
+
+`docker compose up -d`(서비스 이름 없이)를 치면 백엔드·크롤러 컨테이너까지 함께 떠서
+8000 포트가 겹치고 크롤러가 두 벌 돈다. 로컬 개발에서는 `db`만 지정한다.
 
 - 게시판: http://127.0.0.1:8000/board
 - Swagger UI: http://127.0.0.1:8000/docs
@@ -600,6 +630,84 @@ LUXURY_BRANDS = ("구찌", "에르메스", "샤넬", "루이비통")
   "가격 미상"을 조건에 맞다고 보면 최저가 비교가 오염되기 때문이다.
 - 크롤러는 `data/*.json`에도 계속 저장한다 (DB랑 이중 저장) — 디버깅/백업용이다.
 
+## 테스트
+
+```
+uv sync --extra crawler
+docker compose exec db createdb -U cloudedx cloudedx_test
+uv run pytest
+```
+
+77개가 5~10초에 돈다. 접속 정보는 `.env`의 `TEST_DATABASE_URL`에서 읽고, 없으면
+`cloudedx_test`를 기본값으로 쓴다 — **개발용 DB와 분리해야** 테스트가 데이터를 지워도
+안전하다.
+
+**실제 Postgres에 붙는다.** SQLite로 대체하지 않은 이유는 검증 대상 대부분이 Postgres
+고유 동작이기 때문이다 — upsert의 `INSERT ... ON CONFLICT DO UPDATE`, `timestamptz`의
+타임존 처리, `ilike`. SQLite에서 통과한 테스트가 운영에서 실패하면 테스트가 없느니만
+못하다.
+
+스키마는 `create_all`이 아니라 **`alembic upgrade head`로 만든다.** 그래야 마이그레이션
+자체가 테스트 대상이 된다. 모델만 고치고 마이그레이션을 안 만들면 여기서 걸린다.
+
+| 파일 | 대상 |
+|---|---|
+| `test_repository.py` | 필터, 정렬, 페이지네이션, upsert |
+| `test_api.py` | 응답 계약, 422/404, 게시판 렌더링 |
+| `test_crawl_runs.py` | 라운드 상태 전이, stale 판정 |
+| `test_timeparse.py` | 상대 시각 환산 |
+| `test_health.py` | `/health`, `/ready` 분기 |
+| `test_crawler_parser.py`, `test_joongna_parser.py` | 카드 텍스트 파싱 |
+
+특히 지키려는 것 넷:
+
+- `test_health_survives_database_outage` — DB가 죽어도 `/health`가 200을 유지하는지.
+  깨지면 DB 장애가 전체 컨테이너 재시작 폭풍으로 번진다.
+- `test_upsert_preserves_first_seen_at` — `_UPDATABLE_COLUMNS`에 실수로
+  `first_seen_at`을 넣으면 걸린다.
+- `test_pagination_does_not_repeat_or_skip` — `id` 2차 정렬을 빼면 실패한다.
+- `test_backend_sees_crawler_state` — `crawl_runs` 테이블의 존재 이유 그 자체다.
+
+### 픽스처가 앱의 전역 엔진을 쓰는 이유
+
+`conftest.py`의 `session` 픽스처는 별도 엔진을 만들지 않고 `app.db.engine.engine`을
+그대로 쓴 뒤 테스트마다 `dispose()`한다.
+
+`upsert_items()`가 자체 세션을 만들 때 전역 엔진을 쓰기 때문이다. 테스트가 별도 엔진을
+만들면 두 엔진이 공존하게 되고, pytest-asyncio가 테스트마다 새 이벤트 루프를 만드는
+순간 풀에 남은 커넥션이 이전 루프에 묶여 `Task attached to a different loop` 오류가 난다.
+
+같은 이유로 롤백 격리도 쓰지 않는다. `upsert_items()`가 직접 커밋하므로 바깥
+트랜잭션으로 감싸도 격리되지 않아서, 매 테스트 시작에 `TRUNCATE`로 지운다.
+
+## CI
+
+`.github/workflows/ci.yml`. 푸시와 PR마다 돈다.
+
+```
+lint  ─┐
+       ├─> build (backend, crawler 병렬)
+test  ─┘
+```
+
+| 잡 | 하는 일 |
+|---|---|
+| `lint` | `ruff check .` (크롤러 코드까지 검사하므로 `--extra crawler`로 설치) |
+| `test` | Postgres 서비스 컨테이너 → `alembic upgrade head` → `alembic check` → `pytest` |
+| `build` | 이미지 두 개 빌드, 백엔드는 실제로 실행해 임포트 확인 |
+
+설계상 노린 것 셋:
+
+**test 잡은 `--extra crawler` 없이 설치한다.** 백엔드 이미지와 같은 구성이라, 백엔드
+코드가 실수로 크롤러 모듈을 최상단에서 임포트하면 CI가 잡아낸다. 위 "임포트 사슬을
+끊어 둔 것"을 지키는 장치다.
+
+**`alembic check`을 넣었다.** 자동 생성할 것이 남아 있으면 실패한다. 모델을 고치고
+마이그레이션을 만들지 않은 경우가 여기서 걸린다.
+
+**build 잡이 백엔드 이미지를 실제로 실행한다.** `python -c "import app.main"`으로
+Playwright 없이 임포트되는지 확인한다. 이미지가 빌드되는 것과 실행되는 것은 다르다.
+
 ## 트러블슈팅
 
 ### Windows에서 `--reload` + Playwright `NotImplementedError`
@@ -677,12 +785,6 @@ netstat -ano | findstr :5432
   지금은 150만원" 같은 추적이 불가능하다. 필요하면 `item_price_history` 테이블을 두고
   값이 바뀔 때만 insert하는 방식을 고려할 것.
 - `CrawledItem`/`items` 테이블에 중고나라의 "무료배송" 여부에 대응하는 필드가 아직 없음
-- 테스트가 파서 두 개뿐이다. repository와 API 통합 테스트가 필요하다 — 실제 Postgres를
-  띄우고 마이그레이션을 적용한 뒤 돌리는 형태여야 의미가 있다.
-- CI가 없다. 위 테스트가 갖춰지면 GitHub Actions에서 서비스 컨테이너로 Postgres를 띄우고
-  `alembic upgrade head` 후 실행하는 구성을 붙인다.
-- `Dockerfile`이 없어서 아직 배포할 수 없다. Playwright + Chromium을 포함해야 해서
-  이미지가 1GB를 넘어간다.
 - 브랜드 4개 x 사이트 2개 = 검색 8회라 한 라운드가 오래 걸린다. 병렬화나 브랜드별
   스케줄 분산을 고려할 수 있음.
 - `_should_crawl_now()`의 중복 수집 억제는 진짜 잠금이 아니다. 두 프로세스가 동시에
@@ -693,9 +795,23 @@ netstat -ano | findstr :5432
 - 로그가 전부 `print`다. 배포하면 타임스탬프와 레벨이 있는 구조화 로그가 필요하다.
 - 게시판 스타일이 `base.html` 안에 인라인으로 들어가 있다. 시연용으로 정적 파일 마운트
   없이 돌리려는 선택이고, 프론트를 분리하면 통째로 버릴 코드다.
-- Playwright는 실제 Chromium이 설치된 환경에서만 온전히 동작
-  (컨테이너/CI 환경에서 돌리려면 `playwright install` 별도 실행 필요)
+- 크롤러 테스트가 파서(순수 함수)에만 있다. 브라우저를 띄우는 부분은 실제 사이트에
+  의존해서 CI에서 돌릴 수 없다. HTML 픽스처를 저장해 두고 셀렉터만 검증하는 방식을
+  고려할 수 있다.
+- CI가 이미지 빌드까지만 확인한다. compose 전체를 띄워 `/ready`가 200을 주는지까지
+  보면 "문서대로 하면 돌아간다"가 보장되지만, 실행 시간이 늘어난다.
+
+## 배포 전 남은 것
+
+지금 상태로 컨테이너는 굴러가지만 실제 배포에는 몇 가지가 더 필요하다.
+
+- **레지스트리 푸시**: CI가 이미지를 빌드만 하고 버린다. ECR에 올리는 단계를 붙여야 한다.
+- **비밀 관리**: `DATABASE_URL`을 compose 파일에 평문으로 두고 있다. 배포에서는
+  Secrets Manager나 SSM 파라미터로 주입해야 한다.
+- **크롤러 실행 방식**: 상시 컨테이너 대신 EventBridge 스케줄 태스크로 띄우면 유휴
+  시간에 브라우저를 안 올려 비용이 크게 준다. 그 경우 `crawler_loop()` 대신
+  `run_crawl_round()`를 한 번만 실행하는 진입점이 필요하다.
 
 ## 스택
 
-FastAPI · Jinja2 · Playwright · PostgreSQL · SQLAlchemy(async) · Alembic · uv
+FastAPI · Jinja2 · Playwright · PostgreSQL · SQLAlchemy(async) · Alembic · pytest · Docker · GitHub Actions · uv
