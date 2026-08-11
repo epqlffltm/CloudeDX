@@ -10,10 +10,14 @@ DATABASE_URL 환경변수로 접속 정보를 받는다. 기본값은 docker-com
 create_all()로 테이블을 만들었는데, create_all은 없는 테이블만 만들 뿐 기존 테이블에
 컬럼을 추가하지 못해서 스키마가 바뀔 때마다 DB를 밀어야 했다. 운영 DB에서는 쓸 수 없는
 방식이라 Alembic으로 옮겼다.
+
+접속 정보를 로그에 남길 때는 반드시 mask_url()을 거친다. 접속 문자열에는 비밀번호가
+들어 있고, 컨테이너 로그는 CloudWatch 같은 곳에 그대로 쌓여서 접근 권한이 훨씬 넓다.
 """
 
 import asyncio
 import os
+import re
 from collections.abc import AsyncGenerator
 
 from sqlalchemy import text
@@ -26,6 +30,23 @@ DATABASE_URL = os.getenv(
     # 경우가 있어서, 이를 피하려고 IPv4를 강제한다.
     "postgresql+asyncpg://cloudedx:cloudedx@127.0.0.1:5432/cloudedx",
 )
+
+# scheme://user:password@host  에서 password 부분만 잡는다.
+_PASSWORD_PATTERN = re.compile(r"(://[^:/@]+:)[^@]*(@)")
+
+
+def mask_url(url: str) -> str:
+    """
+    접속 문자열에서 비밀번호를 가린다. 로그와 에러 메시지에 쓴다.
+
+    호스트/포트/DB 이름은 남긴다 — 접속이 안 될 때 확인해야 하는 정보가 대부분
+    그쪽이고, 그것까지 가리면 로그를 봐도 원인을 못 찾는다.
+
+    >>> mask_url("postgresql+asyncpg://user:secret@db:5432/cloudedx")
+    'postgresql+asyncpg://user:***@db:5432/cloudedx'
+    """
+    return _PASSWORD_PATTERN.sub(r"\1***\2", url)
+
 
 engine = create_async_engine(
     DATABASE_URL,
@@ -66,7 +87,7 @@ async def wait_for_db(retries: int = 5, delay: float = 2.0) -> None:
 
     raise RuntimeError(
         f"Postgres 연결에 {retries}회 실패했습니다.\n"
-        f"  - 사용한 접속 정보: {DATABASE_URL}\n"
+        f"  - 사용한 접속 정보: {mask_url(DATABASE_URL)}\n"
         f"  - docker compose ps 로 db 컨테이너가 healthy인지 확인하세요.\n"
         f"  - PORTS 열에 0.0.0.0:5432->5432/tcp 처럼 화살표가 있어야 합니다."
     ) from last_exc

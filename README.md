@@ -72,10 +72,12 @@ app/
 │       └── config.py · parser.py · crawler.py · run.py
 ├── db/
 │   ├── models.py                  # SQLAlchemy ORM: ItemRecord (items 테이블)
-│   ├── engine.py                   # 비동기 엔진, 세션 팩토리, wait_for_db(재시도 포함)
+│   ├── engine.py                   # 비동기 엔진, 세션 팩토리, wait_for_db, mask_url
+│   ├── migrations.py                # 적용된 리비전 조회 (/ready가 사용)
 │   └── repository.py                # items 테이블 접근 전담: 조회/카운트/배치 upsert
 ├── routers/
-│   ├── web.py                     # /board — 게시판 화면 (목록 → 상세)
+│   ├── health.py                  # /health, /ready — 운영용 상태 확인
+│   ├── web.py                      # /board — 게시판 화면 (목록 → 상세)
 │   ├── crawled.py                  # /api/crawled-items — 매물 JSON API
 │   └── meta.py                      # /api/meta — 필터 선택지/수집 현황
 ├── schemas/
@@ -179,6 +181,12 @@ lifespan이 `create_task`로 띄우고 바로 요청을 받기 시작하므로 �
 `DATABASE_URL`에 `localhost` 대신 `127.0.0.1`을 쓰는 이유: Windows + Docker Desktop
 조합에서 `localhost`가 IPv6(`::1`)로 먼저 풀리는데 포트 포워딩은 IPv4만 열려 있어
 연결이 거부되는 경우가 있다.
+
+접속 정보를 로그나 에러 메시지에 남길 때는 `mask_url()`을 거쳐 비밀번호를 가린다
+(`postgresql+asyncpg://cloudedx:***@127.0.0.1:5432/cloudedx`). 컨테이너 로그는
+CloudWatch 같은 곳에 그대로 쌓이고 접근 권한이 훨씬 넓기 때문이다. 호스트·포트·DB
+이름은 남긴다 — 접속이 안 될 때 확인해야 하는 게 대부분 그쪽이라, 거기까지 가리면
+로그를 봐도 원인을 못 찾는다.
 
 ## DB
 
@@ -308,7 +316,8 @@ uv run python -m app.crawler.daangn.debug_cards --query "냉장고"
 | 메서드 | 경로 | 설명 |
 |---|---|---|
 | GET | `/` | `/board`로 리다이렉트 |
-| GET | `/health` | 프로세스 상태 확인 (DB는 확인하지 않음) |
+| GET | `/health` | 프로세스 생존 확인 (liveness) |
+| GET | `/ready` | 트래픽 수용 가능 여부 (readiness). 준비 안 됐으면 503 |
 | GET | `/board` | 게시판 목록 화면 |
 | GET | `/board/{item_id}` | 게시판 상세 화면 |
 | GET | `/api/crawled-items` | 매물 목록 JSON |
@@ -385,6 +394,40 @@ ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 **에러 형태**: 404 등은 FastAPI 기본인 `{"detail": "..."}`, 검증 실패(422)는
 `{"detail": [{...}]}` 배열이다. 프론트에서 `detail`이 문자열인지 배열인지 구분해서
 처리해야 한다.
+
+## 상태 확인 — /health 와 /ready
+
+목적이 다르다. 오케스트레이터(ECS, Kubernetes 등)가 서로 다른 판단에 쓰기 때문에
+섞으면 안 된다.
+
+| | 질문 | 실패하면 | 확인하는 것 |
+|---|---|---|---|
+| `/health` | 프로세스가 살아있나? | 컨테이너를 죽이고 재시작 | 아무것도 (프로세스 자체) |
+| `/ready` | 트래픽을 받아도 되나? | 로드밸런서에서만 제외 | DB 연결 + 스키마 리비전 |
+
+`/health`가 DB를 확인하지 않는 것은 의도적이다. DB가 잠깐 끊겼다고 앱을 재시작하는 건
+상황을 악화시킬 뿐이고, DB가 돌아오면 앱은 알아서 회복한다.
+
+`/ready`에 마이그레이션 검사를 넣은 이유는 배포 순서 때문이다. 새 코드를 올렸는데
+`alembic upgrade`가 아직 안 돌았다면 그 인스턴스는 없는 컬럼을 조회하다 500을 뱉는다.
+서버는 멀쩡히 떠 있으니 liveness는 통과하고, 결국 깨진 인스턴스로 트래픽이 흘러간다.
+
+```json
+{
+  "ready": false,
+  "database": { "connected": true, "error": null },
+  "migration": {
+    "current": null,
+    "head": "862c742d32c6",
+    "heads": ["862c742d32c6"],
+    "up_to_date": false
+  }
+}
+```
+
+준비되지 않았을 때도 본문은 그대로 내려간다(상태 코드만 503). 무엇 때문에 실패했는지
+알아야 조치할 수 있기 때문이다. `database.error`에는 예외 타입 이름만 담는다 —
+메시지에는 접속 정보가 섞여 나올 수 있다.
 
 ## 브랜드
 

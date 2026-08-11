@@ -5,6 +5,7 @@
 
 파이프라인은 하나다: 크롤러가 수집 -> DB(items 테이블)에 upsert -> 그 DB를 서빙.
 서빙 경로만 둘로 나뉜다.
+    /health, /ready     운영용 상태 확인 (app/routers/health.py의 설명 참고)
     /board              Jinja2로 그린 게시판 화면 (목록 -> 제목 클릭 -> 상세)
     /api/crawled-items  같은 데이터를 주는 JSON API
     /api/meta           필터 선택지와 수집 현황
@@ -63,8 +64,9 @@ from fastapi.responses import RedirectResponse
 load_dotenv()
 
 from app.crawler.scheduler import crawler_loop  # noqa: E402
-from app.db.engine import wait_for_db  # noqa: E402
+from app.db.engine import DATABASE_URL, mask_url, wait_for_db  # noqa: E402
 from app.routers.crawled import router as crawled_router  # noqa: E402
+from app.routers.health import router as health_router  # noqa: E402
 from app.routers.meta import router as meta_router  # noqa: E402
 from app.routers.web import router as web_router  # noqa: E402
 
@@ -109,7 +111,7 @@ def _log_crawler_exit(task: asyncio.Task) -> None:
 async def lifespan(app: FastAPI):
     # 테이블을 만들지는 않는다 — 스키마는 Alembic이 관리한다. 여기서는 DB가 응답하는지만
     # 확인하고, 컨테이너가 아직 기동 중이면 잠깐 기다린다.
-    print("[db] 연결 확인 중...")
+    print(f"[db] 연결 확인 중... ({mask_url(DATABASE_URL)})")
     await wait_for_db()
     print("[db] 연결 확인 완료")
 
@@ -153,6 +155,7 @@ if ALLOWED_ORIGINS:
     )
     print(f"[cors] 허용 출처: {', '.join(ALLOWED_ORIGINS)}")
 
+app.include_router(health_router)
 app.include_router(web_router)
 app.include_router(crawled_router, prefix=API_PREFIX)
 app.include_router(meta_router, prefix=API_PREFIX)
@@ -162,20 +165,3 @@ app.include_router(meta_router, prefix=API_PREFIX)
 def root():
     """루트로 들어온 사람은 게시판으로 보낸다. 상태 확인은 /health를 쓴다."""
     return RedirectResponse(url="/board")
-
-
-@app.get(
-    "/health",
-    status_code=status.HTTP_200_OK,
-    operation_id="getHealth",
-    tags=["health"],
-)
-def health():
-    """
-    프로세스가 살아있는지만 알려주는 엔드포인트.
-
-    일부러 DB도 크롤러도 확인하지 않는다. 오케스트레이터는 이 응답을 보고 컨테이너를
-    죽일지 결정하는데, DB가 잠깐 끊겼다고 앱을 재시작하는 건 상황을 악화시킨다.
-    수집 현황은 /api/meta에서 본다.
-    """
-    return {"status": "ok"}

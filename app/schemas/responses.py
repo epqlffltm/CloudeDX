@@ -112,3 +112,46 @@ class MetaResponse(BaseModel):
         description="DB 기준 마지막 수집 시각. 데이터가 한 건도 없으면 null",
     )
     crawler: CrawlerStatus = Field(description="백그라운드 수집기의 현재 상태")
+
+
+class DatabaseCheck(BaseModel):
+    """/ready의 DB 연결 확인 결과."""
+
+    connected: bool = Field(description="DB에 쿼리를 보낼 수 있는지")
+    error: str | None = Field(
+        default=None,
+        description=(
+            "연결에 실패했다면 예외 타입 이름. 예외 메시지에는 접속 정보가 섞여 나올 수 "
+            "있어서 타입만 노출한다"
+        ),
+    )
+
+
+class MigrationCheck(BaseModel):
+    """/ready의 스키마 버전 확인 결과."""
+
+    current: str | None = Field(
+        default=None,
+        description="DB에 실제로 적용된 리비전. 마이그레이션을 한 번도 안 돌렸으면 null",
+    )
+    head: str | None = Field(
+        default=None,
+        description="코드가 기대하는 최신 리비전. head가 여럿이면 null이고 heads를 본다",
+    )
+    heads: list[str] = Field(
+        description="코드가 기대하는 최신 리비전 목록. 브랜치가 갈리면 둘 이상이 된다"
+    )
+    up_to_date: bool = Field(description="DB 스키마가 코드가 기대하는 버전인지")
+
+
+class ReadyResponse(BaseModel):
+    """
+    /ready 응답.
+
+    준비되지 않았을 때도 본문은 그대로 내려간다(상태 코드만 503). 무엇 때문에
+    실패했는지 알아야 조치할 수 있기 때문이다.
+    """
+
+    ready: bool = Field(description="트래픽을 받아도 되는 상태인지")
+    database: DatabaseCheck
+    migration: MigrationCheck
