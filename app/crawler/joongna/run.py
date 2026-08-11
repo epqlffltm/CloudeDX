@@ -2,36 +2,43 @@
 
 """
 중고나라 크롤러 터미널 진입점.
-사용: uv run python -m app.crawler.joongna.run --keyword "구찌" --pages 5
+사용: uv run python -m app.crawler.joongna.run --brand "구찌" --pages 5
+     uv run python -m app.crawler.joongna.run --all-brands
 """
 
 import argparse
 import asyncio
-import json
 from pathlib import Path
 
+from app.crawler.base import save_json
+from app.crawler.brands import LUXURY_BRANDS
 from app.crawler.joongna.config import JoongnaCrawlerConfig
 from app.crawler.joongna.crawler import JoongnaCrawler
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="중고나라 검색 결과 크롤러")
+    parser = argparse.ArgumentParser(description="중고나라 명품 가방 검색 결과 크롤러")
 
     parser.add_argument(
-        "--keyword",
+        "--brand",
         default="구찌",
-        help='검색어. 예: --keyword "구찌"',
+        help='브랜드명. 예: --brand "구찌" (검색어는 "구찌 가방"으로 자동 생성됨)',
+    )
+    parser.add_argument(
+        "--all-brands",
+        action="store_true",
+        help=f"--brand 대신 기본 브랜드 목록({', '.join(LUXURY_BRANDS)})을 전부 순회한다.",
     )
     parser.add_argument(
         "--category",
         default="103",
-        help="카테고리 코드",
+        help="카테고리 코드 (기본값은 여성 가방 카테고리로 추정)",
     )
     parser.add_argument(
         "--pages",
         type=int,
         default=5,
-        help="최대 페이지 수",
+        help="브랜드당 최대 페이지 수",
     )
     parser.add_argument(
         "--output",
@@ -47,34 +54,36 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-async def _run(args: argparse.Namespace) -> None:
+async def _crawl_brand(args: argparse.Namespace, brand: str) -> list:
     config = JoongnaCrawlerConfig(
-        keyword=args.keyword,
+        brand=brand,
         category=args.category,
         max_pages=args.pages,
         headless=not args.show_browser,
     )
     crawler = JoongnaCrawler(config)
 
-    print(f"[joongna] 검색 시작: {args.keyword}")
+    print(f"[joongna] 검색 시작: {config.keyword}")
     items = await crawler.crawl()
+    print(f"[joongna] '{brand}' {len(items)}건")
+    return items
+
+
+async def _run(args: argparse.Namespace) -> None:
+    brands = list(LUXURY_BRANDS) if args.all_brands else [args.brand]
+
+    all_items = []
+    for brand in brands:
+        all_items.extend(await _crawl_brand(args, brand))
 
     output_path = Path(args.output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(
-        json.dumps(
-            [item.to_dict() for item in items],
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
+    save_json(all_items, output_path)
 
-    print(f"[joongna] 수집 완료: {len(items)}건")
+    print(f"[joongna] 전체 수집 완료: {len(all_items)}건")
     print(f"[joongna] 임시 저장: {output_path.resolve()}")
 
-    for item in items[:5]:
-        print(f"- {item.title} | {item.price or '가격정보없음'}")
+    for item in all_items[:5]:
+        print(f"- [{item.brand}] {item.title} | {item.price or '가격정보없음'}")
 
 
 def main() -> None:

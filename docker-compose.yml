@@ -1,0 +1,19 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: cloudedx
+      POSTGRES_PASSWORD: cloudedx
+      POSTGRES_DB: cloudedx
+    ports:
+      - "5432:5432"
+    volumes:
+      - cloudedx_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cloudedx"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  cloudedx_pgdata:

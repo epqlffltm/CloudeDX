@@ -8,6 +8,7 @@ DB 저장은 여기서 하지 않는다.
 """
 
 import asyncio
+from urllib.parse import quote
 
 from playwright.async_api import async_playwright
 
@@ -24,8 +25,10 @@ class JoongnaCrawler:
         self.config = config or JoongnaCrawlerConfig()
 
     def _build_url(self, page_num: int) -> str:
+        # keyword가 "구찌 가방"처럼 공백을 포함할 수 있어서 경로 세그먼트로 넣기 전에 인코딩한다.
+        encoded_keyword = quote(self.config.keyword)
         return (
-            f"https://web.joongna.com/search/{self.config.keyword}"
+            f"https://web.joongna.com/search/{encoded_keyword}"
             f"?page={page_num}&category={self.config.category}"
         )
 
@@ -38,6 +41,7 @@ class JoongnaCrawler:
     def _to_item(self, parsed: dict) -> CrawledItem:
         return CrawledItem(
             source="중고나라",
+            brand=self.config.brand,
             title=parsed["title"],
             price=parsed["price"],
             price_value=parse_price_value(parsed["price"]),

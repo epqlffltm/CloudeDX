@@ -1,23 +1,25 @@
 # app/main.py
 
 """
-당근마켓 크롤링 결과를 조회용 REST API로 제공하는 FastAPI 앱.
-서버 시작 시(lifespan) 첫 크롤링을 먼저 끝낸 뒤에야 요청을 받기 시작하고,
-이후로는 30분마다 백그라운드에서 크롤러(app.crawler)가 최신 매물을 갱신한다.
-/items 라우터(app.routers.items)는 CSV 스냅샷을, /crawled-items는 크롤러
-JSON 결과를 서빙한다.
+당근마켓/중고나라 크롤링 결과를 조회용 REST API로 제공하는 FastAPI 앱.
+서버 시작 시(lifespan) DB 테이블을 준비하고, 첫 크롤링을 먼저 끝낸 뒤에야 요청을
+받기 시작한다. 이후로는 30분마다 백그라운드에서 크롤러(app.crawler)가 최신 매물을
+DB(items 테이블)에 upsert한다.
+/items 라우터(app.routers.items)는 CSV 스냅샷을, /crawled-items는 DB에 저장된
+실제 크롤링 결과를 서빙한다.
 
-실행 (프로젝트 루트에서):
+실행 (프로젝트 루트에서, Postgres가 떠 있어야 함 — docker compose up -d):
     uv run uvicorn app.main:app --reload
 문서(Swagger UI): http://127.0.0.1:8000/docs
 문서(ReDoc):      http://127.0.0.1:8000/redoc
 
 첫 크롤링을 기다리는 것에 대해:
     ENABLE_CRAWLER=true(기본값)면 서버가 요청을 받기 시작하기 전에 당근마켓+중고나라
-    크롤링을 한 바퀴 다 돌린다. 그래야 서버가 뜨자마자 /crawled-items에 데이터가 있다.
-    다만 --reload는 파일을 고칠 때마다 프로세스를 통째로 재시작하는데, 그때마다 이
-    대기(수십 초)가 매번 다시 발생한다. API 코드만 빠르게 고칠 땐 ENABLE_CRAWLER=false로
-    꺼두는 걸 권장한다.
+    크롤링을 한 바퀴 다 돌린다. 브랜드 4개 x 사이트 2개라 수 분 걸릴 수 있다.
+    ENABLE_CRAWLER=false여도 DB 테이블 준비는 항상 하기 때문에, 이전에 크롤링해둔
+    데이터가 있으면 /crawled-items는 정상적으로 조회된다. --reload는 파일을 고칠
+    때마다 프로세스를 통째로 재시작하는데, 그때마다 크롤링 대기가 매번 다시 발생하니
+    API 코드만 빠르게 고칠 땐 ENABLE_CRAWLER=false로 꺼두는 걸 권장한다.
 
 Windows 참고:
     Windows에서 --reload를 쓰면 uvicorn이 "reloader process"와 별도의 "server process"를
@@ -36,6 +38,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, status
 
 from app.crawler.scheduler import crawler_loop, run_crawl_round
+from app.db.engine import init_db
 from app.routers.crawled import router as crawled_router
 from app.routers.items import router as items_router
 
@@ -47,6 +50,14 @@ ENABLE_CRAWLER = os.getenv("ENABLE_CRAWLER", "true").lower() == "true"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    print("[db] 테이블 준비 중...")
+    try:
+        await init_db()
+    except Exception as exc:
+        print(f"[db] DB 연결/초기화 실패: {exc}")
+        print("[db] docker compose up -d 로 Postgres가 떠 있는지, DATABASE_URL이 맞는지 확인하세요.")
+        raise
+
     crawler_task: asyncio.Task | None = None
 
     if ENABLE_CRAWLER:
@@ -69,7 +80,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="당근마켓 API",
+    title="중고 명품 가방 조회 API",
     version="0.2.0",
     lifespan=lifespan,
 )
@@ -81,5 +92,5 @@ app.include_router(crawled_router)
 @app.get("/", status_code=status.HTTP_200_OK)
 def root():
     return {
-        "message": "당근마켓 API",
+        "message": "중고 명품 가방 조회 API",
     }

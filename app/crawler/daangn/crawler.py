@@ -53,6 +53,7 @@ class DaangnCrawler:
     def _to_item(self, parsed: dict) -> CrawledItem:
         return CrawledItem(
             source="당근마켓",
+            brand=self.config.brand,
             title=parsed["title"],
             price=parsed["price"],
             price_value=parse_price_value(parsed["price"]),
