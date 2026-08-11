@@ -72,7 +72,7 @@ app/
 │       └── config.py · parser.py · crawler.py · run.py
 ├── db/
 │   ├── models.py                  # SQLAlchemy ORM: ItemRecord (items 테이블)
-│   ├── engine.py                   # 비동기 엔진, 세션 팩토리, init_db(재시도 포함)
+│   ├── engine.py                   # 비동기 엔진, 세션 팩토리, wait_for_db(재시도 포함)
 │   └── repository.py                # items 테이블 접근 전담: 조회/카운트/배치 upsert
 ├── routers/
 │   ├── web.py                     # /board — 게시판 화면 (목록 → 상세)
@@ -188,22 +188,51 @@ lifespan이 `create_task`로 띄우고 바로 요청을 받기 시작하므로 �
 docker compose up -d
 ```
 
-서버가 뜰 때(`main.py`의 lifespan) `init_db()`가 테이블이 없으면 만든다 — 아직 스키마가
-안정되지 않은 초기 단계라 Alembic 없이 `create_all()`로 시작했다. 컨테이너가 완전히
-기동되기 전에 앱이 먼저 붙는 경우가 있어서, 연결 계열 오류(`OSError`)에 한해 2초 간격으로
-5회까지 재시도한다. 비밀번호 오류나 SQL 오류는 기다려도 해결되지 않으므로 즉시 올린다.
+스키마는 **Alembic이 관리한다.** 서버는 테이블을 만들지 않고, 뜰 때 DB가 응답하는지만
+확인한다(`wait_for_db`). 컨테이너가 완전히 기동되기 전에 앱이 먼저 붙는 경우가 있어서,
+연결 계열 오류(`OSError`)에 한해 2초 간격으로 5회까지 재시도한다. 비밀번호 오류는
+기다려도 해결되지 않으므로 즉시 올린다.
 
-> **스키마를 바꿨으면 DB를 다시 만들어야 한다.** `create_all()`은 없는 테이블만 만들
-> 뿐, 이미 있는 테이블에 컬럼을 추가하지 않는다. 모델만 고치면 서버는 멀쩡히 뜨는데
-> 쿼리에서 터진다.
->
-> ```
-> docker compose down -v
-> docker compose up -d
-> ```
->
-> `-v`가 볼륨까지 지운다. 지금은 수집 데이터를 언제든 다시 긁을 수 있어서 이 방식이
-> 가장 간단하다. 보존해야 할 데이터가 생기면 Alembic을 도입한다 (TODO 참고).
+### 마이그레이션
+
+처음 받았거나 팀원이 새 마이그레이션을 푸시했으면:
+
+```
+uv run alembic upgrade head
+```
+
+**모델(`app/db/models.py`)을 고쳤다면 반드시:**
+
+```
+uv run alembic revision --autogenerate -m "설명"   # 초안 생성
+# alembic/versions/ 에 생긴 파일을 읽어본다 ← 건너뛰지 말 것
+uv run alembic upgrade head                        # 적용
+```
+
+생성된 파일을 확인하라고 강조하는 이유는 autogenerate가 완벽하지 않아서다. 특히
+**컬럼 이름 변경을 "삭제 + 추가"로 만들어서 데이터를 날린다.** 그런 경우
+`op.alter_column(..., new_column_name=...)`으로 직접 고쳐야 한다. NOT NULL 컬럼을
+추가할 때도 기존 행이 있으면 실패하므로, nullable로 추가 → 값 채우기 → NOT NULL 변경
+세 단계로 나눠야 한다.
+
+```
+uv run alembic current      # 지금 어느 리비전인지
+uv run alembic history      # 전체 이력
+uv run alembic downgrade -1 # 한 단계 되돌리기
+```
+
+마이그레이션은 앱 시작 시 자동 실행하지 않는다. 인스턴스를 여러 개 띄우면 동시에 같은
+마이그레이션을 돌리려 들기 때문이다. 배포에서는 컨테이너 진입점이나 별도 태스크에서
+한 번만 실행한다.
+
+**제약조건 이름 규칙**을 `Base.metadata`의 `naming_convention`으로 못 박아 뒀다.
+지정하지 않으면 DB가 알아서 이름을 붙이는데, 그 이름을 Alembic이 예측할 수 없어서
+"이 제약을 삭제해라"는 마이그레이션이 실패하거나 환경마다 이름이 달라진다.
+
+`alembic/env.py`는 기본 템플릿이 아니다. Alembic의 실행부는 동기 코드인데 이 프로젝트는
+asyncpg를 쓰기 때문에, 비동기 엔진으로 접속한 뒤 `run_sync()`로 감싸 돌린다.
+접속 정보도 `alembic.ini`가 아니라 `.env`의 `DATABASE_URL`에서 읽는다 — 설정 파일에
+비밀번호를 박으면 그대로 커밋되기 때문이다.
 
 **upsert 방식**: `items` 테이블은 `url`을 유니크 키로 쓴다. 같은 매물이면 가격/상태 등만
 갱신하고 `last_seen_at`을 찍고, 새 매물이면 insert한다 (PostgreSQL의
@@ -239,6 +268,7 @@ uv sync
 uv run playwright install chromium
 copy .env.example .env
 docker compose up -d
+uv run alembic upgrade head
 uv run uvicorn app.main:app
 ```
 
@@ -465,8 +495,12 @@ netstat -ano | findstr :5432
   지금은 150만원" 같은 추적이 불가능하다. 필요하면 `item_price_history` 테이블을 두고
   값이 바뀔 때만 insert하는 방식을 고려할 것.
 - `CrawledItem`/`items` 테이블에 중고나라의 "무료배송" 여부에 대응하는 필드가 아직 없음
-- **Alembic 도입.** 지금은 스키마가 바뀔 때마다 `docker compose down -v`로 밀고 다시
-  수집한다. 데이터를 보존해야 하는 시점(가격 이력 누적 등)이 오면 Alembic으로 옮긴다.
+- 테스트가 파서 두 개뿐이다. repository와 API 통합 테스트가 필요하다 — 실제 Postgres를
+  띄우고 마이그레이션을 적용한 뒤 돌리는 형태여야 의미가 있다.
+- CI가 없다. 위 테스트가 갖춰지면 GitHub Actions에서 서비스 컨테이너로 Postgres를 띄우고
+  `alembic upgrade head` 후 실행하는 구성을 붙인다.
+- `Dockerfile`이 없어서 아직 배포할 수 없다. Playwright + Chromium을 포함해야 해서
+  이미지가 1GB를 넘어간다.
 - 브랜드 4개 x 사이트 2개 = 검색 8회라 한 라운드가 오래 걸린다. 병렬화나 브랜드별
   스케줄 분산을 고려할 수 있음.
 - 크롤러 상태(`app/crawler/state.py`)가 프로세스 안의 단일 인스턴스다. uvicorn을 워커
@@ -480,4 +514,4 @@ netstat -ano | findstr :5432
 
 ## 스택
 
-FastAPI · Jinja2 · Playwright · PostgreSQL · SQLAlchemy(async) · uv
+FastAPI · Jinja2 · Playwright · PostgreSQL · SQLAlchemy(async) · Alembic · uv

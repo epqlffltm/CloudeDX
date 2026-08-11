@@ -13,14 +13,20 @@
 게시판은 시연용이고, 프론트엔드를 붙이면 /api만 쓰면 된다. 그때 app/routers/web.py와
 app/templates/를 통째로 걷어내도 API는 그대로 남는다.
 
-실행 (프로젝트 루트에서, Postgres가 떠 있어야 함 — docker compose up -d):
+실행 (프로젝트 루트에서):
+    docker compose up -d
+    uv run alembic upgrade head    # 스키마 반영. 모델을 고쳤다면 반드시 먼저 실행한다
     uv run uvicorn app.main:app
 게시판:           http://127.0.0.1:8000/board
 문서(Swagger UI): http://127.0.0.1:8000/docs
 문서(ReDoc):      http://127.0.0.1:8000/redoc
 
 서버 시작에 대해:
-    DB 테이블 준비만 마치면 바로 요청을 받는다. 크롤링은 백그라운드 태스크로 돌기
+    DB 연결만 확인되면 바로 요청을 받는다. 테이블 생성/변경은 하지 않으므로,
+    스키마가 최신이 아니면 서버는 뜨지만 쿼리에서 터진다 — alembic upgrade head를
+    먼저 돌려야 한다. 마이그레이션을 앱 시작 시 자동 실행하지 않는 이유는, 인스턴스를
+    여러 개 띄우면 동시에 같은 마이그레이션을 돌리려 들기 때문이다. 배포에서는
+    컨테이너 진입점이나 별도 태스크에서 한 번만 실행한다. 크롤링은 백그라운드 태스크로 돌기
     때문에 시작을 막지 않는다. 수집 전이라면 목록이 비어 있을 뿐 API와 화면은 정상
     응답한다. 진행 상황은 /api/meta의 crawler 항목에서 볼 수 있다.
 
@@ -57,7 +63,7 @@ from fastapi.responses import RedirectResponse
 load_dotenv()
 
 from app.crawler.scheduler import crawler_loop  # noqa: E402
-from app.db.engine import init_db  # noqa: E402
+from app.db.engine import wait_for_db  # noqa: E402
 from app.routers.crawled import router as crawled_router  # noqa: E402
 from app.routers.meta import router as meta_router  # noqa: E402
 from app.routers.web import router as web_router  # noqa: E402
@@ -101,8 +107,11 @@ def _log_crawler_exit(task: asyncio.Task) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("[db] 테이블 준비 중...")
-    await init_db()
+    # 테이블을 만들지는 않는다 — 스키마는 Alembic이 관리한다. 여기서는 DB가 응답하는지만
+    # 확인하고, 컨테이너가 아직 기동 중이면 잠깐 기다린다.
+    print("[db] 연결 확인 중...")
+    await wait_for_db()
+    print("[db] 연결 확인 완료")
 
     crawler_task: asyncio.Task | None = None
 

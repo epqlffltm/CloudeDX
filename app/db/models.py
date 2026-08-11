@@ -4,16 +4,35 @@
 SQLAlchemy ORM 모델.
 크롤링 결과를 저장하는 items 테이블 하나만 우선 둔다. url을 유니크 키로 써서
 같은 매물은 갱신, 새 매물은 추가하는 upsert 방식으로 쓴다 (app/db/repository.py 참고).
+
+스키마 변경은 Alembic으로 관리한다. 이 파일을 고친 뒤에는 반드시
+    uv run alembic revision --autogenerate -m "설명"
+    uv run alembic upgrade head
+를 실행해야 실제 DB에 반영된다. 모델만 고치면 앱은 멀쩡히 뜨는데 쿼리에서 터진다.
 """
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, String, Text, func
+from sqlalchemy import BigInteger, Boolean, DateTime, MetaData, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+# 제약조건/인덱스 이름 규칙.
+#
+# 지정하지 않으면 DB가 알아서 이름을 붙이는데, 그 이름은 Alembic이 예측할 수 없다.
+# 나중에 "이 유니크 제약을 삭제해라"는 마이그레이션을 자동 생성할 때 이름을 몰라서
+# 실패하거나, 개발/운영 DB의 제약 이름이 서로 달라지는 문제가 생긴다.
+# 규칙을 먼저 못 박아두면 어느 환경에서 만들어도 같은 이름이 나온다.
+NAMING_CONVENTION = {
+    "ix": "ix_%(table_name)s_%(column_0_N_name)s",
+    "uq": "uq_%(table_name)s_%(column_0_N_name)s",
+    "ck": "ck_%(table_name)s_%(constraint_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_N_name)s_%(referred_table_name)s",
+    "pk": "pk_%(table_name)s",
+}
 
 
 class Base(DeclarativeBase):
-    pass
+    metadata = MetaData(naming_convention=NAMING_CONVENTION)
 
 
 class ItemRecord(Base):
