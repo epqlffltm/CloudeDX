@@ -2,8 +2,10 @@
 
 """
 SQLAlchemy ORM 모델.
-크롤링 결과를 저장하는 items 테이블 하나만 우선 둔다. url을 유니크 키로 써서
-같은 매물은 갱신, 새 매물은 추가하는 upsert 방식으로 쓴다 (app/db/repository.py 참고).
+- items      : 크롤링한 매물. url을 유니크 키로 써서 같은 매물은 갱신, 새 매물은 추가하는
+               upsert 방식이다 (app/db/repository.py 참고).
+- crawl_runs : 수집 라운드 기록. 크롤러와 백엔드가 별도 프로세스로 갈라져도 상태를
+               공유하기 위한 것이다 (app/db/crawl_runs.py 참고).
 
 스키마 변경은 Alembic으로 관리한다. 이 파일을 고친 뒤에는 반드시
     uv run alembic revision --autogenerate -m "설명"
@@ -12,8 +14,18 @@ SQLAlchemy ORM 모델.
 """
 
 from datetime import datetime
+from enum import StrEnum
 
-from sqlalchemy import BigInteger, Boolean, DateTime, MetaData, String, Text, func
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    Integer,
+    MetaData,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 # 제약조건/인덱스 이름 규칙.
@@ -67,3 +79,52 @@ class ItemRecord(Base):
     last_seen_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class CrawlRunStatus(StrEnum):
+    """
+    수집 라운드의 상태.
+
+    Postgres의 enum 타입 대신 문자열로 저장한다. enum 타입은 값을 추가할 때마다
+    ALTER TYPE 마이그레이션이 필요하고 트랜잭션 안에서 다루기 까다로운데, 얻는 이점이
+    이 규모에서는 없다.
+    """
+
+    RUNNING = "running"
+    SUCCESS = "success"
+    FAILED = "failed"
+
+
+class CrawlRun(Base):
+    """
+    수집 라운드 한 번의 기록.
+
+    예전에는 이 상태를 프로세스 메모리(app/crawler/state.py)에 들고 있었다. 크롤러를
+    별도 컨테이너로 분리하면서 그 방식이 깨졌다 — 백엔드 프로세스가 크롤러 프로세스의
+    메모리를 볼 수 없으니 /api/meta가 항상 빈 상태를 내려주게 된다. DB에 남기면 두
+    프로세스가 같은 곳을 보게 되고, 서버를 재시작해도 이력이 남는다.
+
+    부수적으로 얻는 것이 둘 있다. 크롤러 프로세스가 두 개 뜨면 서로의 running 기록을
+    보고 한쪽이 양보할 수 있고(scheduler._should_crawl_now), 수집이 언제부터 실패하기
+    시작했는지 시간순으로 추적할 수 있다.
+    """
+
+    __tablename__ = "crawl_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+
+    # running / success / failed. 최신 상태를 자주 조회하므로 인덱스를 건다.
+    status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
+    )
+    # 아직 도는 중이면 NULL이다.
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # 이 라운드에서 저장(upsert)한 건수. 실패하면 NULL.
+    item_count: Mapped[int | None] = mapped_column(Integer)
+
+    # 실패 사유. 일부 사이트만 실패한 경우 status는 success지만 여기에 기록이 남는다.
+    # 어떤 사이트가 왜 막혔는지가 나중에 셀렉터를 고칠 때 유일한 단서라 길이 제한을 두지 않는다.
+    error: Mapped[str | None] = mapped_column(Text)

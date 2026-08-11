@@ -1,4 +1,4 @@
-# CloudeDX — 중고 명품 가방(여성) 수집 게시판
+﻿# CloudeDX — 중고 명품 가방(여성) 수집 게시판
 
 당근마켓 · 중고나라에서 중고 명품 가방(여성용) 매물을 주기적으로 수집해 PostgreSQL에
 쌓고, 그 결과를 게시판 화면과 REST API로 보여주는 FastAPI 프로젝트. 브랜드는 구찌 ·
@@ -67,13 +67,13 @@ app/
 │   ├── models.py                    # CrawledItem
 │   ├── __main__.py                   # 크롤러 단독 실행 진입점 (python -m app.crawler)
 │   ├── scheduler.py                   # 백그라운드 수집 루프 (주기, 재시도, 실패 처리)
-│   ├── state.py                       # 수집기 현재 상태 (/api/meta로 노출)
 │   ├── daangn/                        # 당근마켓 (Playwright)
 │   │   ├── config.py · parser.py · crawler.py · run.py · debug_cards.py
 │   └── joongna/                       # 중고나라 (Playwright)
 │       └── config.py · parser.py · crawler.py · run.py
 ├── db/
-│   ├── models.py                  # SQLAlchemy ORM: ItemRecord (items 테이블)
+│   ├── models.py                  # SQLAlchemy ORM: ItemRecord, CrawlRun
+│   ├── crawl_runs.py               # crawl_runs 접근: 라운드 기록/조회
 │   ├── engine.py                   # 비동기 엔진, 세션 팩토리, wait_for_db, mask_url
 │   ├── migrations.py                # 적용된 리비전 조회 (/ready가 사용)
 │   └── repository.py                # items 테이블 접근 전담: 조회/카운트/배치 upsert
@@ -145,10 +145,18 @@ app/
 `app/crawler/scheduler.py`의 `crawler_loop()`가 백그라운드에서 돈다. `main.py`의
 lifespan이 `create_task`로 띄우고 바로 요청을 받기 시작하므로 서버 시작을 막지 않는다.
 
-**첫 라운드는 조건부로 즉시 실행한다.** DB가 비어 있거나 마지막 수집이 주기보다 오래됐으면
-바로 시작하고, 최근이면 건너뛰고 다음 주기를 기다린다. 개발 중에는 서버를 하루에도 몇
-번씩 재시작하는데 그때마다 검색 8회를 새로 도는 건 사이트에도 부담이고 봇 감지 위험도
-올리기 때문이다.
+**첫 라운드는 조건부로 즉시 실행한다.** `crawl_runs`의 마지막 기록을 보고, 주기보다
+오래됐거나 기록이 없으면 바로 시작하고 최근이면 건너뛴다. 개발 중에는 서버를 하루에도
+몇 번씩 재시작하는데 그때마다 검색 8회를 새로 도는 건 사이트에도 부담이고 봇 감지
+위험도 올리기 때문이다.
+
+`items.last_seen_at`이 아니라 `crawl_runs`를 보는 이유는 실패한 라운드도 세기
+위해서다. 전부 실패한 라운드는 아무것도 저장하지 않아 `last_seen_at`이 갱신되지 않는데,
+그러면 재시작할 때마다 곧바로 다시 긁으러 간다 — 봇 감지로 막힌 상황이라면 그게
+제일 안 좋은 행동이다.
+
+다른 프로세스가 수집 중(`running`)이면 양보한다. 배포 중에 크롤러 컨테이너가 잠깐
+두 개가 되는 상황에서 중복 수집을 줄여준다.
 
 **실패해도 루프는 죽지 않는다.** 층위가 셋이다:
 
@@ -161,7 +169,7 @@ lifespan이 `create_task`로 띄우고 바로 요청을 받기 시작하므로 �
 전부 실패했을 때 예외를 올리는 이유는, 그러지 않으면 "0건 수집 성공"으로 기록돼서
 사이트가 전부 막힌 상태와 정말 매물이 없는 상태를 구분할 수 없기 때문이다.
 
-수집 결과는 `app/crawler/state.py`에 기록되고 `/api/meta`로 노출된다.
+수집 결과는 `crawl_runs` 테이블에 기록되고 `/api/meta`로 노출된다.
 
 ## 프로세스 구성
 
@@ -170,7 +178,7 @@ lifespan이 `create_task`로 띄우고 바로 요청을 받기 시작하므로 �
 | | 백엔드 | 크롤러 |
 |---|---|---|
 | 진입점 | `uvicorn app.main:app` | `python -m app.crawler` |
-| 이미지 | `Dockerfile.backend` (300MB 안팎) | `Dockerfile.crawler` (1.5GB 안팎) |
+| 이미지 | `dockerfile.backend` (300MB 안팎) | `dockerfile.crawler` (1.5GB 안팎) |
 | Playwright | **없음** | Chromium 포함 |
 | 포트 | 8000 | 없음 |
 
@@ -202,8 +210,8 @@ lifespan이 `create_task`로 띄우고 바로 요청을 받기 시작하므로 �
 ### 이미지 빌드
 
 ```
-docker build -f Dockerfile.backend -t cloudedx-backend .
-docker build -f Dockerfile.crawler -t cloudedx-crawler .
+docker build -f dockerfile.backend -t cloudedx-backend .
+docker build -f dockerfile.crawler -t cloudedx-crawler .
 ```
 
 Playwright는 optional dependency(`crawler` extra)라, 백엔드 이미지는 `uv sync`만,
@@ -228,6 +236,7 @@ Playwright 없이 뜨는지 로컬에서 바로 확인할 수 있다.
 | `CRAWL_INTERVAL_MINUTES` | `30` | 수집 주기(분) |
 | `CRAWL_RETRY_MINUTES` | `5` | 라운드가 통째로 실패했을 때 재시도까지 대기(분) |
 | `JOONGNA_PAGES_PER_BRAND` | `3` | 중고나라 브랜드당 수집 페이지 수 |
+| `CRAWL_RUN_TIMEOUT_MINUTES` | `60` | 이 시간을 넘겨 `running`으로 남은 기록은 죽은 것으로 본다 |
 | `ALLOWED_ORIGINS` | (비어 있음) | CORS 허용 출처. 쉼표로 구분. 비우면 미들웨어를 붙이지 않는다 |
 
 `.env` 로딩은 `main.py` 최상단의 `load_dotenv()`가 담당하며, **`app.*` 임포트보다 먼저**
@@ -298,6 +307,25 @@ uv run alembic downgrade -1 # 한 단계 되돌리기
 asyncpg를 쓰기 때문에, 비동기 엔진으로 접속한 뒤 `run_sync()`로 감싸 돌린다.
 접속 정보도 `alembic.ini`가 아니라 `.env`의 `DATABASE_URL`에서 읽는다 — 설정 파일에
 비밀번호를 박으면 그대로 커밋되기 때문이다.
+
+### crawl_runs — 수집 상태
+
+수집 라운드마다 한 행을 남긴다. `status`(running/success/failed), `started_at`,
+`finished_at`, `item_count`, `error`.
+
+프로세스 메모리가 아니라 DB에 두는 이유는 **크롤러와 백엔드가 별도 컨테이너로 갈라질
+수 있기 때문이다.** 백엔드는 크롤러 프로세스의 메모리를 볼 수 없으니, DB를 거쳐야
+`/api/meta`로 상태를 내려줄 수 있다. 덤으로 서버를 재시작해도 이력이 남고,
+`_should_crawl_now()`가 다른 프로세스의 `running` 기록을 보고 양보할 수 있다.
+
+일부 사이트만 실패한 라운드는 `status=success`에 `error`만 기록한다. 당근이 막혔어도
+중고나라 결과는 들어왔으니 "수집이 아예 안 되는 상태"와 구분해야 한다.
+
+**좀비 기록 처리**: 크롤러가 `SIGKILL`이나 전원 차단으로 죽으면 `finished_at`을 못
+남긴다. 그 기록을 그대로 믿으면 `/api/meta`가 영원히 "수집 중"이라 답하고,
+`_should_crawl_now()`는 영원히 다른 인스턴스가 돌고 있다고 착각해 수집이 멈춘다.
+`CRAWL_RUN_TIMEOUT_MINUTES`(기본 60)를 넘긴 `running` 기록은 죽은 것으로 보고,
+응답에 `stale: true`로 표시한다.
 
 **upsert 방식**: `items` 테이블은 `url`을 유니크 키로 쓴다. 같은 매물이면 가격/상태 등만
 갱신하고 `last_seen_at`을 찍고, 새 매물이면 insert한다 (PostgreSQL의
@@ -599,14 +627,13 @@ netstat -ano | findstr :5432
   띄우고 마이그레이션을 적용한 뒤 돌리는 형태여야 의미가 있다.
 - CI가 없다. 위 테스트가 갖춰지면 GitHub Actions에서 서비스 컨테이너로 Postgres를 띄우고
   `alembic upgrade head` 후 실행하는 구성을 붙인다.
-- `Dockerfile`이 없어서 아직 배포할 수 없다. Playwright + Chromium을 포함해야 해서
-  이미지가 1GB를 넘어간다.
 - 브랜드 4개 x 사이트 2개 = 검색 8회라 한 라운드가 오래 걸린다. 병렬화나 브랜드별
   스케줄 분산을 고려할 수 있음.
-- **크롤러를 별도 컨테이너로 띄우면 `/api/meta`의 `crawler` 상태가 비어 있다.**
-  `crawler_state`가 프로세스 메모리에 있어서 백엔드가 크롤러 프로세스의 상태를 볼 수
-  없다. 크롤러가 DB에 라운드 기록을 남기고 백엔드가 그걸 조회하는 구조로 바꿔야 한다
-  (`crawl_runs` 테이블).
+- `_should_crawl_now()`의 중복 수집 억제는 진짜 잠금이 아니다. 두 프로세스가 동시에
+  확인하면 둘 다 통과할 수 있다. 완전한 상호 배제가 필요해지면 Postgres 어드바이저리
+  락으로 올려야 한다.
+- `crawl_runs`가 계속 쌓인다. 30분 주기면 하루 48건, 1년에 1만7천 건이라 당장은 문제가
+  없지만, 오래된 기록을 정리하는 작업이 언젠가 필요하다.
 - 로그가 전부 `print`다. 배포하면 타임스탬프와 레벨이 있는 구조화 로그가 필요하다.
 - 게시판 스타일이 `base.html` 안에 인라인으로 들어가 있다. 시연용으로 정적 파일 마운트
   없이 돌리려는 선택이고, 프론트를 분리하면 통째로 버릴 코드다.

@@ -12,8 +12,11 @@
 
 이 루프는 서버 시작을 막지 않는다. main.py의 lifespan이 create_task로 띄우고 바로
 요청을 받기 시작하므로, 수집이 도는 동안에도 게시판과 API는 정상 응답한다
-(수집 전이면 빈 목록). 진행 상황은 app.crawler.state.crawler_state에 기록되고
-/api/meta로 노출된다.
+(수집 전이면 빈 목록). 크롤러를 별도 프로세스로 띄울 때는 app/crawler/__main__.py가
+이 루프만 돌린다.
+
+진행 상황은 crawl_runs 테이블에 기록되고 /api/meta로 노출된다. 프로세스 메모리가
+아니라 DB에 남기는 이유는 크롤러와 백엔드가 별도 컨테이너로 갈라질 수 있기 때문이다.
 
 실패에 대한 방침:
     한 브랜드가 실패해도 나머지 브랜드는 계속하고, 한 사이트가 통째로 실패해도 다른
@@ -27,16 +30,21 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
-from app.config import CRAWL_INTERVAL_MINUTES, CRAWL_RETRY_MINUTES, JOONGNA_PAGES_PER_BRAND
+from app.config import (
+    CRAWL_INTERVAL_MINUTES,
+    CRAWL_RETRY_MINUTES,
+    CRAWL_RUN_TIMEOUT_MINUTES,
+    JOONGNA_PAGES_PER_BRAND,
+)
 from app.crawler.base import save_json
 from app.crawler.brands import LUXURY_BRANDS
 from app.crawler.daangn.config import DaangnCrawlerConfig
 from app.crawler.daangn.crawler import DaangnCrawler
 from app.crawler.joongna.config import JoongnaCrawlerConfig
 from app.crawler.joongna.crawler import JoongnaCrawler
-from app.crawler.state import crawler_state
-from app.db.engine import async_session
-from app.db.repository import get_last_crawled_at, upsert_items
+from app.db import crawl_runs
+from app.db.models import CrawlRunStatus
+from app.db.repository import upsert_items
 
 # 설정값은 app/config.py에서 가져온다. 백엔드(/api/meta)도 수집 주기를 알아야 하는데,
 # 그 상수를 여기 두면 백엔드가 이 모듈을 임포트하게 되고 Playwright까지 딸려 온다.
@@ -120,7 +128,7 @@ async def run_crawl_round() -> int:
     없는 상태를 구분할 수 없게 된다. 호출하는 루프는 이 예외를 보고 짧은 간격으로
     재시도한다.
     """
-    crawler_state.mark_started()
+    run_id = await crawl_runs.start_run()
     total = 0
     errors: list[str] = []
 
@@ -135,35 +143,56 @@ async def run_crawl_round() -> int:
         if errors and len(errors) == len(CRAWL_JOBS):
             raise RuntimeError("모든 수집 작업이 실패했습니다 — " + " / ".join(errors))
     except BaseException as exc:
-        # 취소(CancelledError)도 여기로 온다. 상태를 running으로 남겨두면 서버를
+        # 취소(CancelledError)도 여기로 온다. 기록을 running으로 남겨두면 프로세스를
         # 껐다 켜도 "수집 중"으로 보이므로 반드시 정리한다.
-        crawler_state.mark_failed(exc)
+        await crawl_runs.fail_run(run_id, f"{type(exc).__name__}: {exc}")
         raise
 
-    crawler_state.mark_finished(total, errors=errors)
+    await crawl_runs.finish_run(run_id, total, errors=errors)
 
     return total
 
 
 async def _should_crawl_now() -> bool:
     """
-    서버가 뜨자마자 수집을 시작해야 하는지 판단한다.
+    프로세스가 뜨자마자 수집을 시작해야 하는지 판단한다.
 
     개발 중에는 서버를 하루에도 몇 번씩 재시작하는데, 그때마다 8회 검색을 새로 도는 건
-    사이트에도 부담이고 봇 감지 위험도 올린다. 마지막 수집이 주기 안에 있으면 건너뛰고
-    다음 주기를 기다린다. DB가 비어 있으면(첫 실행) 당연히 바로 시작한다.
-    """
-    async with async_session() as session:
-        last_crawled_at = await get_last_crawled_at(session)
+    사이트에도 부담이고 봇 감지 위험도 올린다. 마지막 라운드가 주기 안에 있으면
+    건너뛰고 다음 주기를 기다린다. 기록이 없으면(첫 실행) 당연히 바로 시작한다.
 
-    if last_crawled_at is None:
-        print("[crawler] 저장된 데이터가 없어 즉시 수집을 시작합니다.")
+    items.last_seen_at이 아니라 crawl_runs를 보는 이유는 실패한 라운드도 세기 위해서다.
+    전부 실패한 라운드는 아무것도 저장하지 않으므로 last_seen_at이 갱신되지 않고,
+    그러면 재시작할 때마다 곧바로 다시 긁으러 간다.
+
+    다른 프로세스가 수집 중이면 양보한다. 크롤러 컨테이너가 배포 중에 잠깐 두 개가 되는
+    상황에서 같은 매물을 두 번 긁는 걸 줄여준다. 다만 이건 진짜 잠금이 아니다 —
+    두 프로세스가 동시에 확인하면 둘 다 통과할 수 있다. 완전한 상호 배제가 필요해지면
+    Postgres 어드바이저리 락으로 올려야 한다.
+    """
+    latest = await crawl_runs.get_latest_run()
+
+    if latest is None:
+        print("[crawler] 수집 기록이 없어 즉시 시작합니다.")
         return True
 
-    if last_crawled_at.tzinfo is None:
-        last_crawled_at = last_crawled_at.replace(tzinfo=UTC)
+    if latest.status == CrawlRunStatus.RUNNING:
+        if not crawl_runs.is_stale(latest, CRAWL_RUN_TIMEOUT_MINUTES):
+            print("[crawler] 다른 프로세스가 수집 중이라 이번 차례는 건너뜁니다.")
+            return False
 
-    elapsed = (datetime.now(UTC) - last_crawled_at).total_seconds()
+        print(
+            f"[crawler] {CRAWL_RUN_TIMEOUT_MINUTES}분 넘게 running으로 남은 기록이 있습니다. "
+            "비정상 종료로 보고 새로 시작합니다."
+        )
+        return True
+
+    reference = latest.finished_at or latest.started_at
+
+    if reference.tzinfo is None:
+        reference = reference.replace(tzinfo=UTC)
+
+    elapsed = (datetime.now(UTC) - reference).total_seconds()
 
     if elapsed >= CRAWL_INTERVAL_SECONDS:
         print(f"[crawler] 마지막 수집이 {int(elapsed // 60)}분 전이라 즉시 시작합니다.")

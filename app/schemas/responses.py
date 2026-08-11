@@ -74,9 +74,20 @@ class CrawlerStatus(BaseModel):
 
     서버는 크롤링을 기다리지 않고 바로 열리기 때문에, 방금 뜬 서버는 목록이 비어 있다.
     그게 "매물이 없다"인지 "아직 수집 중"인지 클라이언트가 구분할 수 있어야 한다.
+
+    값은 crawl_runs 테이블에서 읽는다. 크롤러가 별도 컨테이너로 돌고 있어도
+    백엔드가 상태를 알 수 있다.
     """
 
     is_running: bool = Field(description="지금 수집이 진행 중인지")
+    stale: bool = Field(
+        default=False,
+        description=(
+            "마지막 기록이 '수집 중'인 채로 너무 오래 방치됐는지. 크롤러가 비정상 "
+            "종료되면 종료 시각을 못 남기는데, 그걸 그대로 믿으면 영원히 수집 중으로 "
+            "보인다. true면 is_running은 false로 내려간다"
+        ),
+    )
     started_at: datetime | None = Field(
         default=None, description="현재(또는 마지막) 라운드가 시작된 시각"
     )

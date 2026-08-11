@@ -12,6 +12,9 @@ crawler 항목이 있는 이유: 서버가 크롤링을 기다리지 않고 바�
 서버는 목록이 비어 있다. 그게 "매물이 없다"인지 "아직 수집 중"인지 클라이언트가
 구분할 수 있어야 한다.
 
+이 값은 crawl_runs 테이블에서 읽는다. 프로세스 메모리가 아니라 DB를 보기 때문에,
+크롤러가 별도 컨테이너로 돌고 있어도 백엔드가 상태를 알 수 있다.
+
 수집 주기는 app.crawler.scheduler가 아니라 app.config에서 가져온다. scheduler를
 임포트하면 Playwright까지 딸려 오는데, 백엔드 이미지에는 Playwright가 없다.
 
@@ -23,11 +26,11 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import CRAWL_INTERVAL_MINUTES
+from app.config import CRAWL_INTERVAL_MINUTES, CRAWL_RUN_TIMEOUT_MINUTES
 from app.crawler.brands import LUXURY_BRANDS
 from app.crawler.sources import SOURCES
-from app.crawler.state import crawler_state
-from app.db import repository
+from app.db import crawl_runs, repository
+from app.db.models import CrawlRunStatus
 from app.db.engine import get_session
 from app.schemas.requests import CrawledItemFilterParams
 from app.schemas.responses import CrawlerStatus, MetaResponse
@@ -53,18 +56,29 @@ async def get_meta(session: Annotated[AsyncSession, Depends(get_session)]):
     total = await repository.count_items(session, CrawledItemFilterParams())
     last_crawled_at = await repository.get_last_crawled_at(session)
 
+    latest = await crawl_runs.get_latest_run(session)
+    rounds_completed = await crawl_runs.count_successful_runs(session)
+
+    # running으로 남아 있어도 너무 오래됐으면 죽은 프로세스의 흔적으로 본다.
+    # 그대로 믿으면 화면이 영원히 "수집 중"이라고 표시한다.
+    stale = latest is not None and crawl_runs.is_stale(latest, CRAWL_RUN_TIMEOUT_MINUTES)
+    running = (
+        latest is not None and latest.status == CrawlRunStatus.RUNNING and not stale
+    )
+
     return MetaResponse(
         sources=list(SOURCES),
         brands=list(LUXURY_BRANDS),
         total_items=total,
         last_crawled_at=last_crawled_at,
         crawler=CrawlerStatus(
-            is_running=crawler_state.is_running,
-            started_at=crawler_state.started_at,
-            last_finished_at=crawler_state.last_finished_at,
-            last_item_count=crawler_state.last_item_count,
-            last_error=crawler_state.last_error,
-            rounds_completed=crawler_state.rounds_completed,
+            is_running=running,
+            stale=stale,
+            started_at=latest.started_at if latest else None,
+            last_finished_at=latest.finished_at if latest else None,
+            last_item_count=latest.item_count if latest else None,
+            last_error=latest.error if latest else None,
+            rounds_completed=rounds_completed,
             interval_minutes=CRAWL_INTERVAL_MINUTES,
         ),
     )
