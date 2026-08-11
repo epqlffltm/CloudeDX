@@ -64,7 +64,8 @@ app/
 │   ├── brands.py                  # LUXURY_BRANDS = 구찌/에르메스/샤넬/루이비통
 │   ├── sources.py                  # SOURCES = 당근마켓/중고나라 (source 문자열 상수)
 │   ├── models.py                    # CrawledItem
-│   ├── scheduler.py                  # 30분 주기, 사이트별로 브랜드를 순회해서 DB에 upsert
+│   ├── scheduler.py                  # 백그라운드 수집 루프 (주기, 재시도, 실패 처리)
+│   ├── state.py                       # 수집기 현재 상태 (/api/meta로 노출)
 │   ├── daangn/                        # 당근마켓 (Playwright)
 │   │   ├── config.py · parser.py · crawler.py · run.py · debug_cards.py
 │   └── joongna/                       # 중고나라 (Playwright)
@@ -135,6 +136,29 @@ app/
 게시판은 시연용이다. 나중에 프론트엔드를 따로 붙이면 `app/routers/web.py`와
 `app/templates/`만 걷어내면 되고, `/api` 아래는 그대로 남는다.
 
+## 수집 동작
+
+`app/crawler/scheduler.py`의 `crawler_loop()`가 백그라운드에서 돈다. `main.py`의
+lifespan이 `create_task`로 띄우고 바로 요청을 받기 시작하므로 서버 시작을 막지 않는다.
+
+**첫 라운드는 조건부로 즉시 실행한다.** DB가 비어 있거나 마지막 수집이 주기보다 오래됐으면
+바로 시작하고, 최근이면 건너뛰고 다음 주기를 기다린다. 개발 중에는 서버를 하루에도 몇
+번씩 재시작하는데 그때마다 검색 8회를 새로 도는 건 사이트에도 부담이고 봇 감지 위험도
+올리기 때문이다.
+
+**실패해도 루프는 죽지 않는다.** 층위가 셋이다:
+
+| 범위 | 처리 |
+|---|---|
+| 브랜드 하나 실패 | 나머지 브랜드 계속 |
+| 사이트 하나 실패 | 다른 사이트 계속, `last_error`에 기록하고 라운드는 성공으로 집계 |
+| 전부 실패 | 라운드 실패로 처리하고 5분 뒤 재시도 (정상 주기 30분보다 짧게) |
+
+전부 실패했을 때 예외를 올리는 이유는, 그러지 않으면 "0건 수집 성공"으로 기록돼서
+사이트가 전부 막힌 상태와 정말 매물이 없는 상태를 구분할 수 없기 때문이다.
+
+수집 결과는 `app/crawler/state.py`에 기록되고 `/api/meta`로 노출된다.
+
 ## 환경 변수
 
 프로젝트 루트의 `.env`를 읽는다. `.env.example`을 복사해서 시작하면 된다.
@@ -144,6 +168,7 @@ app/
 | `DATABASE_URL` | `postgresql+asyncpg://cloudedx:cloudedx@127.0.0.1:5432/cloudedx` | DB 접속 정보 |
 | `DB_PORT` | `5432` | docker-compose가 호스트에 열 포트. 5432가 이미 점유돼 있으면 여기만 바꾼다 |
 | `ENABLE_CRAWLER` | `true` | `false`면 백그라운드 크롤러를 돌리지 않는다 |
+| `CRAWL_INTERVAL_MINUTES` | `30` | 수집 주기(분) |
 | `ALLOWED_ORIGINS` | (비어 있음) | CORS 허용 출처. 쉼표로 구분. 비우면 미들웨어를 붙이지 않는다 |
 
 `.env` 로딩은 `main.py` 최상단의 `load_dotenv()`가 담당하며, **`app.*` 임포트보다 먼저**
@@ -221,13 +246,17 @@ uv run uvicorn app.main:app
 - Swagger UI: http://127.0.0.1:8000/docs
 - ReDoc: http://127.0.0.1:8000/redoc
 
-화면/API 코드만 빠르게 고칠 땐 백그라운드 크롤러를 꺼둘 수 있다 (`.env`에서
-`ENABLE_CRAWLER=false`). 크롤러를 끄더라도 DB 테이블 준비는 항상 하기 때문에, 이전에
-수집해둔 데이터가 있으면 게시판과 API 모두 정상적으로 조회된다.
+**서버는 크롤링을 기다리지 않고 바로 열린다.** DB 테이블 준비만 끝나면 요청을 받기
+시작하고, 수집은 백그라운드 태스크로 돈다. 수집 전이면 목록이 비어 있을 뿐 게시판과
+API는 정상 응답한다.
 
-`ENABLE_CRAWLER=true`(기본값)면 **서버가 요청을 받기 시작하기 전에 당근마켓 → 중고나라
-크롤링을 한 바퀴 먼저 끝낸다** — 브랜드 4개를 사이트마다 순서대로 검색하기 때문에(검색
-8회) 이 대기가 **수 분 단위**로 걸릴 수 있다.
+이 구조가 필요한 이유는 배포 환경 때문이다. ECS나 App Runner 같은 오케스트레이터는
+헬스체크가 정해진 시간 안에 응답하지 않으면 컨테이너를 죽이고 다시 띄운다. 시작 시
+수 분짜리 크롤링을 기다리면 서버가 뜨기도 전에 재시작되는 무한 루프에 빠진다.
+
+브라우저를 계속 띄우는 게 부담되면 `.env`에서 `ENABLE_CRAWLER=false`로 꺼둘 수 있다.
+꺼두더라도 DB 테이블 준비는 항상 하기 때문에, 이전에 수집해둔 데이터가 있으면 게시판과
+API 모두 정상적으로 조회된다.
 
 크롤러만 단독으로 돌리고 싶으면 (브랜드 하나 또는 전체, DB에도 upsert됨):
 
@@ -255,6 +284,27 @@ uv run python -m app.crawler.daangn.debug_cards --query "냉장고"
 | GET | `/api/crawled-items` | 매물 목록 JSON |
 | GET | `/api/crawled-items/{item_id}` | 매물 단건 JSON |
 | GET | `/api/meta` | 필터 선택지(브랜드/수집처)와 수집 현황 |
+
+`/api/meta`의 `crawler` 항목은 백그라운드 수집기의 상태다. 서버가 크롤링을 기다리지
+않고 바로 열리기 때문에, 방금 뜬 서버는 목록이 비어 있다. 그게 "매물이 없다"인지
+"아직 수집 중"인지 클라이언트가 구분할 수 있어야 해서 넣었다:
+
+```json
+{
+  "crawler": {
+    "is_running": true,
+    "started_at": "2026-08-11T05:10:00Z",
+    "last_finished_at": null,
+    "last_item_count": null,
+    "last_error": null,
+    "rounds_completed": 0,
+    "interval_minutes": 30
+  }
+}
+```
+
+`rounds_completed`가 0이면 아직 한 번도 성공하지 못했다는 뜻이다. `last_error`는
+일부 사이트만 실패했을 때도 기록되므로, 값이 있다고 해서 수집이 멈춘 건 아니다.
 
 목록의 쿼리 파라미터는 게시판과 API가 동일하다: `source`, `brand`, `search`, `is_sold`,
 `min_price`, `max_price`, `limit`(1~100), `offset`.
@@ -419,8 +469,10 @@ netstat -ano | findstr :5432
   수집한다. 데이터를 보존해야 하는 시점(가격 이력 누적 등)이 오면 Alembic으로 옮긴다.
 - 브랜드 4개 x 사이트 2개 = 검색 8회라 한 라운드가 오래 걸린다. 병렬화나 브랜드별
   스케줄 분산을 고려할 수 있음.
-- lifespan이 첫 크롤링을 끝낼 때까지 서버를 열지 않아서, 수 분간 `/health`조차 응답하지
-  못한다. 배포를 염두에 둔다면 첫 라운드도 백그라운드 태스크로 빼는 편이 낫다.
+- 크롤러 상태(`app/crawler/state.py`)가 프로세스 안의 단일 인스턴스다. uvicorn을 워커
+  여러 개로 띄우면 워커마다 각자 크롤링을 돌린다. 그때는 크롤러를 앱에서 떼어내 별도
+  프로세스나 스케줄러(ECS 스케줄 태스크 등)로 옮겨야 한다.
+- 로그가 전부 `print`다. 배포하면 타임스탬프와 레벨이 있는 구조화 로그가 필요하다.
 - 게시판 스타일이 `base.html` 안에 인라인으로 들어가 있다. 시연용으로 정적 파일 마운트
   없이 돌리려는 선택이고, 프론트를 분리하면 통째로 버릴 코드다.
 - Playwright는 실제 Chromium이 설치된 환경에서만 온전히 동작

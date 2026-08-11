@@ -68,6 +68,34 @@ class CrawledItemListResponse(PagedResponse):
     items: list[CrawledItemOut]
 
 
+class CrawlerStatus(BaseModel):
+    """
+    백그라운드 수집기의 현재 상태.
+
+    서버는 크롤링을 기다리지 않고 바로 열리기 때문에, 방금 뜬 서버는 목록이 비어 있다.
+    그게 "매물이 없다"인지 "아직 수집 중"인지 클라이언트가 구분할 수 있어야 한다.
+    """
+
+    is_running: bool = Field(description="지금 수집이 진행 중인지")
+    started_at: datetime | None = Field(
+        default=None, description="현재(또는 마지막) 라운드가 시작된 시각"
+    )
+    last_finished_at: datetime | None = Field(
+        default=None, description="마지막 라운드가 끝난 시각. 성공/실패 모두 기록된다"
+    )
+    last_item_count: int | None = Field(
+        default=None, description="마지막으로 성공한 라운드에서 저장한 건수"
+    )
+    last_error: str | None = Field(
+        default=None,
+        description="마지막 라운드가 실패했다면 그 이유. 성공하면 null로 초기화된다",
+    )
+    rounds_completed: int = Field(
+        description="성공한 라운드 수. 0이면 아직 한 번도 성공하지 못했다는 뜻"
+    )
+    interval_minutes: int = Field(description="수집 주기(분)")
+
+
 class MetaResponse(BaseModel):
     """
     필터 UI를 그리는 데 필요한 값들.
@@ -81,5 +109,6 @@ class MetaResponse(BaseModel):
     total_items: int = Field(description="현재 DB에 저장된 전체 매물 수")
     last_crawled_at: datetime | None = Field(
         default=None,
-        description="마지막 수집 시각. 데이터가 한 건도 없으면 null",
+        description="DB 기준 마지막 수집 시각. 데이터가 한 건도 없으면 null",
     )
+    crawler: CrawlerStatus = Field(description="백그라운드 수집기의 현재 상태")

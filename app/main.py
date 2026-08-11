@@ -7,7 +7,7 @@
 서빙 경로만 둘로 나뉜다.
     /board              Jinja2로 그린 게시판 화면 (목록 -> 제목 클릭 -> 상세)
     /api/crawled-items  같은 데이터를 주는 JSON API
-    /api/meta           프론트가 필터 선택지를 채우는 데 쓰는 값들
+    /api/meta           필터 선택지와 수집 현황
 셋 다 app.db.repository를 통해 조회하므로 필터/정렬 동작이 갈라지지 않는다.
 
 게시판은 시연용이고, 프론트엔드를 붙이면 /api만 쓰면 된다. 그때 app/routers/web.py와
@@ -19,17 +19,20 @@ app/templates/를 통째로 걷어내도 API는 그대로 남는다.
 문서(Swagger UI): http://127.0.0.1:8000/docs
 문서(ReDoc):      http://127.0.0.1:8000/redoc
 
+서버 시작에 대해:
+    DB 테이블 준비만 마치면 바로 요청을 받는다. 크롤링은 백그라운드 태스크로 돌기
+    때문에 시작을 막지 않는다. 수집 전이라면 목록이 비어 있을 뿐 API와 화면은 정상
+    응답한다. 진행 상황은 /api/meta의 crawler 항목에서 볼 수 있다.
+
+    이 구조가 필요한 이유는 배포 환경 때문이다. ECS나 App Runner 같은 오케스트레이터는
+    헬스체크가 정해진 시간 안에 응답하지 않으면 컨테이너를 죽이고 다시 띄운다. 시작 시
+    수 분짜리 크롤링을 기다리면 서버가 뜨기도 전에 재시작되는 무한 루프에 빠진다.
+
 환경변수에 대해:
     프로젝트 루트의 .env 파일을 읽는다 (.env.example 참고). load_dotenv()는 아래에서
     app.* 모듈보다 먼저 호출되는데, app.db.engine이 모듈을 읽어들이는 시점에
     os.getenv로 DATABASE_URL을 확정하기 때문이다. 순서가 바뀌면 .env를 읽어도
     이미 늦어서 기본값이 박힌다. 그래서 아래 임포트에 noqa: E402가 붙어 있다.
-
-첫 크롤링을 기다리는 것에 대해:
-    ENABLE_CRAWLER=true(기본값)면 서버가 요청을 받기 시작하기 전에 당근마켓+중고나라
-    크롤링을 한 바퀴 다 돌린다. 브랜드 4개 x 사이트 2개라 수 분 걸릴 수 있다.
-    ENABLE_CRAWLER=false여도 DB 테이블 준비는 항상 하기 때문에, 이전에 크롤링해둔
-    데이터가 있으면 게시판과 API 모두 정상적으로 조회된다.
 
 Windows 참고:
     Windows에서 --reload를 쓰면 uvicorn이 "reloader process"와 별도의 "server process"를
@@ -53,7 +56,7 @@ from fastapi.responses import RedirectResponse
 # app.* 임포트보다 반드시 먼저 실행돼야 한다 (위 docstring의 "환경변수에 대해" 참고).
 load_dotenv()
 
-from app.crawler.scheduler import crawler_loop, run_crawl_round  # noqa: E402
+from app.crawler.scheduler import crawler_loop  # noqa: E402
 from app.db.engine import init_db  # noqa: E402
 from app.routers.crawled import router as crawled_router  # noqa: E402
 from app.routers.meta import router as meta_router  # noqa: E402
@@ -79,6 +82,23 @@ ALLOWED_ORIGINS = [
 API_PREFIX = "/api"
 
 
+def _log_crawler_exit(task: asyncio.Task) -> None:
+    """
+    수집 루프가 끝났을 때 이유를 남긴다.
+
+    create_task로 띄운 태스크는 예외가 나도 아무도 await하지 않으면 조용히 사라진다.
+    루프 안에서 대부분의 예외를 잡고 있지만, 그물을 빠져나간 무언가로 태스크가 죽으면
+    "서버는 멀쩡한데 수집만 영영 안 되는" 상태가 된다. 최소한 로그에는 남겨야 한다.
+    """
+    if task.cancelled():
+        return
+
+    exc = task.exception()
+
+    if exc is not None:
+        print(f"[crawler] 수집 루프가 예기치 않게 종료됨: {type(exc).__name__}: {exc}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("[db] 테이블 준비 중...")
@@ -87,10 +107,9 @@ async def lifespan(app: FastAPI):
     crawler_task: asyncio.Task | None = None
 
     if ENABLE_CRAWLER:
-        print("[crawler] 첫 크롤링을 먼저 완료한 뒤 서버를 엽니다 (당근마켓 -> 중고나라)...")
-        await run_crawl_round()
-        print("[crawler] 첫 크롤링 완료. 서버를 엽니다.")
+        # await하지 않는다 — 서버는 바로 열리고 수집은 뒤에서 돈다.
         crawler_task = asyncio.create_task(crawler_loop())
+        crawler_task.add_done_callback(_log_crawler_exit)
     else:
         print("[crawler] ENABLE_CRAWLER=false 라서 백그라운드 크롤러를 시작하지 않음")
 
@@ -107,7 +126,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="중고 명품 가방 조회 API",
-    version="0.4.0",
+    version="0.5.0",
     description=(
         "당근마켓·중고나라에서 수집한 중고 명품 가방 매물을 조회한다. "
         "모든 목록 응답은 total/count/limit/offset/has_next를 포함한다."
@@ -143,5 +162,11 @@ def root():
     tags=["health"],
 )
 def health():
-    """프로세스가 살아있는지만 알려주는 엔드포인트 (DB 상태는 확인하지 않는다)."""
+    """
+    프로세스가 살아있는지만 알려주는 엔드포인트.
+
+    일부러 DB도 크롤러도 확인하지 않는다. 오케스트레이터는 이 응답을 보고 컨테이너를
+    죽일지 결정하는데, DB가 잠깐 끊겼다고 앱을 재시작하는 건 상황을 악화시킨다.
+    수집 현황은 /api/meta에서 본다.
+    """
     return {"status": "ok"}
