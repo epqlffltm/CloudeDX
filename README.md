@@ -1,4 +1,4 @@
-﻿# CloudeDX — 중고 명품 가방(여성) 수집 게시판
+# CloudeDX — 중고 명품 가방(여성) 수집 게시판
 
 당근마켓 · 중고나라에서 중고 명품 가방(여성용) 매물을 주기적으로 수집해 PostgreSQL에
 쌓고, 그 결과를 게시판 화면과 REST API로 보여주는 FastAPI 프로젝트. 브랜드는 구찌 ·
@@ -178,7 +178,7 @@ lifespan이 `create_task`로 띄우고 바로 요청을 받기 시작하므로 �
 | | 백엔드 | 크롤러 |
 |---|---|---|
 | 진입점 | `uvicorn app.main:app` | `python -m app.crawler` |
-| 이미지 | `dockerfile.backend` (300MB 안팎) | `dockerfile.crawler` (1.5GB 안팎) |
+| 이미지 | `dockerfile.backend` (564MB) | `dockerfile.crawler` (3.59GB) |
 | Playwright | **없음** | Chromium 포함 |
 | 포트 | 8000 | 없음 |
 
@@ -214,6 +214,8 @@ docker build -f dockerfile.backend -t cloudedx-backend .
 docker build -f dockerfile.crawler -t cloudedx-crawler .
 ```
 
+실측 크기는 백엔드 **564MB**, 크롤러 **3.59GB**다. 6배 넘게 차이 나는 게 분리한 이유다.
+
 Playwright는 optional dependency(`crawler` extra)라, 백엔드 이미지는 `uv sync`만,
 크롤러 이미지는 `uv sync --extra crawler`를 쓴다. 로컬에서도 마찬가지다:
 
@@ -223,6 +225,52 @@ uv sync --extra crawler
 
 `--extra crawler` 없이 `uv sync`를 치면 백엔드 이미지와 같은 구성이 된다 — 백엔드가
 Playwright 없이 뜨는지 로컬에서 바로 확인할 수 있다.
+
+### compose로 전체 띄우기
+
+```
+docker compose up -d --build
+docker compose ps
+```
+
+네 개의 서비스가 순서대로 뜬다.
+
+| 서비스 | 역할 | 기다리는 대상 |
+|---|---|---|
+| `db` | Postgres | — |
+| `migrate` | `alembic upgrade head` 후 종료 | `db` healthy |
+| `backend` | API + 게시판 | `migrate` 성공 종료 |
+| `crawler` | 주기 수집 | `migrate` 성공 종료 |
+
+**`migrate`를 별도 서비스로 둔 이유**는 백엔드를 2대로 늘렸을 때 두 대가 동시에 같은
+마이그레이션을 돌리는 걸 막기 위해서다. `condition: service_completed_successfully`가
+붙어 있어 마이그레이션이 실패하면 백엔드와 크롤러가 아예 뜨지 않는다 — 스키마가
+준비되기 전에 트래픽을 받아 500을 뱉는 것보다 낫다.
+
+백엔드 헬스체크는 `/health`가 아니라 **`/ready`**를 본다. compose에서는 이 상태가
+다른 서비스의 대기 조건이 되므로, DB와 스키마까지 확인하는 쪽이 맞다.
+
+크롤러에는 `shm_size: 1gb`가 붙어 있다. 컨테이너 기본 `/dev/shm`이 64MB뿐인데
+Chromium은 탭마다 공유 메모리를 써서 페이지를 열다 죽는다.
+`--disable-dev-shm-usage` 플래그로 우회할 수도 있지만 디스크를 대신 쓰게 되어 느려진다.
+
+백엔드 컨테이너는 `ENABLE_CRAWLER=false`로 뜬다. 크롤러가 별도 컨테이너를 담당하므로
+여기서 켜면 두 곳에서 동시에 긁게 되고, 애초에 그 이미지에는 Playwright가 없다.
+
+로그와 상태 확인:
+
+```
+docker compose logs -f crawler
+docker compose ps
+curl http://localhost:8000/api/meta
+```
+
+`docker-compose.override.yml`은 로컬 개발용이다. compose가 자동으로 합쳐서 소스를
+마운트하고 백엔드를 `--reload`로 띄운다. 배포 환경에서는 기본 파일만 쓴다:
+
+```
+docker compose -f docker-compose.yml up -d
+```
 
 ## 환경 변수
 
@@ -237,7 +285,13 @@ Playwright 없이 뜨는지 로컬에서 바로 확인할 수 있다.
 | `CRAWL_RETRY_MINUTES` | `5` | 라운드가 통째로 실패했을 때 재시도까지 대기(분) |
 | `JOONGNA_PAGES_PER_BRAND` | `3` | 중고나라 브랜드당 수집 페이지 수 |
 | `CRAWL_RUN_TIMEOUT_MINUTES` | `60` | 이 시간을 넘겨 `running`으로 남은 기록은 죽은 것으로 본다 |
+| `BACKEND_PORT` | `8000` | 백엔드 컨테이너를 호스트에 노출할 포트 |
 | `ALLOWED_ORIGINS` | (비어 있음) | CORS 허용 출처. 쉼표로 구분. 비우면 미들웨어를 붙이지 않는다 |
+
+compose로 띄울 때 `DATABASE_URL`은 `.env` 값이 아니라 compose가 주입하는
+`postgresql+asyncpg://cloudedx:cloudedx@db:5432/cloudedx`가 쓰인다. 컨테이너끼리는
+서비스 이름으로 통신하고, 호스트의 `DB_PORT` 매핑은 psql이나 DBeaver로 밖에서
+들여다보기 위한 것이다.
 
 `.env` 로딩은 `main.py` 최상단의 `load_dotenv()`가 담당하며, **`app.*` 임포트보다 먼저**
 실행돼야 한다. `app.db.engine`이 모듈을 읽어들이는 시점에 `os.getenv`로 `DATABASE_URL`을
@@ -627,6 +681,8 @@ netstat -ano | findstr :5432
   띄우고 마이그레이션을 적용한 뒤 돌리는 형태여야 의미가 있다.
 - CI가 없다. 위 테스트가 갖춰지면 GitHub Actions에서 서비스 컨테이너로 Postgres를 띄우고
   `alembic upgrade head` 후 실행하는 구성을 붙인다.
+- `Dockerfile`이 없어서 아직 배포할 수 없다. Playwright + Chromium을 포함해야 해서
+  이미지가 1GB를 넘어간다.
 - 브랜드 4개 x 사이트 2개 = 검색 8회라 한 라운드가 오래 걸린다. 병렬화나 브랜드별
   스케줄 분산을 고려할 수 있음.
 - `_should_crawl_now()`의 중복 수집 억제는 진짜 잠금이 아니다. 두 프로세스가 동시에

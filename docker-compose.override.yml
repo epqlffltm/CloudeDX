@@ -1,0 +1,35 @@
+# docker-compose.override.yml
+#
+# 로컬 개발용 덮어쓰기. docker compose 명령은 이 파일을 자동으로 읽어서
+# docker-compose.yml 위에 합친다 — 따로 -f 로 지정할 필요가 없다.
+#
+# 배포 환경에서는 이 파일을 두지 않거나, 명시적으로 기본 파일만 쓴다:
+#     docker compose -f docker-compose.yml up -d
+
+services:
+  backend:
+    # 소스를 마운트해서 --reload로 돌린다. 코드를 고칠 때마다 이미지를 다시
+    # 빌드하지 않아도 된다.
+    #
+    # 주의: 컨테이너 안의 .venv를 덮어쓰면 안 되므로 app/ 과 alembic/ 만 마운트한다.
+    # 프로젝트 루트를 통째로 마운트하면 호스트(Windows)용 .venv가 올라와서 깨진다.
+    volumes:
+      - ./app:/srv/app:ro
+      - ./alembic:/srv/alembic:ro
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --reload
+
+  crawler:
+    volumes:
+      - ./app:/srv/app:ro
+      - cloudedx_crawler_data:/srv/data
+    environment:
+      # 개발 중에는 짧은 주기로 돌려보고 싶을 때가 있다. 다만 너무 짧게 잡으면
+      # 사이트에 부담이 가고 봇 감지 위험이 올라간다.
+      CRAWL_INTERVAL_MINUTES: ${CRAWL_INTERVAL_MINUTES:-30}

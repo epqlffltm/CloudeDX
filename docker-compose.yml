@@ -8,6 +8,8 @@ services:
     ports:
       # 호스트 포트만 .env의 DB_PORT로 바꿀 수 있게 뺀다. 다른 프로젝트가 5432를
       # 쓰고 있으면 .env에 DB_PORT=5433을 넣으면 된다. 컨테이너 내부는 항상 5432.
+      # 앱 컨테이너들은 이 포트를 거치지 않고 도커 네트워크로 직접 붙는다 —
+      # 이 매핑은 psql이나 DBeaver로 호스트에서 들여다보기 위한 것이다.
       - "${DB_PORT:-5432}:5432"
     volumes:
       - cloudedx_pgdata:/var/lib/postgresql/data
@@ -17,5 +19,84 @@ services:
       timeout: 5s
       retries: 5
 
+  # ---------------------------------------------------------------------------
+  # 일회성 마이그레이션 서비스.
+  #
+  # 앱 시작 시 자동으로 돌리지 않는 이유: 백엔드를 2대로 늘리면 두 대가 동시에 같은
+  # 마이그레이션을 돌리려 든다. 한 번만 실행되는 자리를 따로 두는 편이 안전하다.
+  # 백엔드와 크롤러는 이 서비스가 성공적으로 끝날 때까지 기다린다.
+  # ---------------------------------------------------------------------------
+  migrate:
+    build:
+      context: .
+      dockerfile: dockerfile.backend
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      # 컨테이너끼리는 서비스 이름으로 통신한다. 호스트의 DB_PORT와 무관하게
+      # 컨테이너 내부 포트인 5432를 그대로 쓴다.
+      DATABASE_URL: postgresql+asyncpg://cloudedx:cloudedx@db:5432/cloudedx
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  backend:
+    build:
+      context: .
+      dockerfile: dockerfile.backend
+    environment:
+      DATABASE_URL: postgresql+asyncpg://cloudedx:cloudedx@db:5432/cloudedx
+      # 크롤러는 별도 컨테이너가 담당한다. 여기서 켜면 두 곳에서 동시에 긁게 되고,
+      # 애초에 이 이미지에는 Playwright가 없어서 시작하지도 못한다.
+      ENABLE_CRAWLER: "false"
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        # 마이그레이션이 성공으로 끝난 뒤에 뜬다. 스키마가 준비되기 전에
+        # 트래픽을 받으면 없는 컬럼을 조회하다 500을 뱉는다.
+        condition: service_completed_successfully
+    healthcheck:
+      # /health(liveness)가 아니라 /ready를 본다. compose에서는 이 상태가
+      # depends_on의 기준이 되므로, DB와 스키마까지 확인하는 쪽이 맞다.
+      # 이미지에 curl이 없어서 파이썬으로 확인한다.
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/ready').status==200 else 1)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      # 컨테이너가 뜨는 동안의 실패는 재시도 횟수에서 빼준다.
+      start_period: 20s
+    restart: unless-stopped
+
+  crawler:
+    build:
+      context: .
+      dockerfile: dockerfile.crawler
+    environment:
+      DATABASE_URL: postgresql+asyncpg://cloudedx:cloudedx@db:5432/cloudedx
+      CRAWL_INTERVAL_MINUTES: ${CRAWL_INTERVAL_MINUTES:-30}
+      CRAWL_RETRY_MINUTES: ${CRAWL_RETRY_MINUTES:-5}
+      CRAWL_RUN_TIMEOUT_MINUTES: ${CRAWL_RUN_TIMEOUT_MINUTES:-60}
+      JOONGNA_PAGES_PER_BRAND: ${JOONGNA_PAGES_PER_BRAND:-3}
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    # Chromium은 탭마다 공유 메모리를 쓰는데 컨테이너 기본 /dev/shm이 64MB뿐이라
+    # 페이지를 열다 죽는다. --disable-dev-shm-usage 플래그로 우회하는 방법도 있지만
+    # 디스크를 대신 쓰게 되어 느려지므로, 메모리를 늘려주는 쪽을 택한다.
+    shm_size: 1gb
+    volumes:
+      # 크롤링 결과 JSON 덤프(디버깅용). DB가 정본이라 없어도 동작한다.
+      - cloudedx_crawler_data:/srv/data
+    # 크롤러는 HTTP를 열지 않으므로 헬스체크가 없다. 상태는 crawl_runs 테이블에
+    # 기록되고 백엔드의 /api/meta로 확인한다.
+    restart: unless-stopped
+
 volumes:
   cloudedx_pgdata:
+  cloudedx_crawler_data:
