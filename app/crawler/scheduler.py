@@ -23,11 +23,11 @@
 """
 
 import asyncio
-import os
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
+from app.config import CRAWL_INTERVAL_MINUTES, CRAWL_RETRY_MINUTES, JOONGNA_PAGES_PER_BRAND
 from app.crawler.base import save_json
 from app.crawler.brands import LUXURY_BRANDS
 from app.crawler.daangn.config import DaangnCrawlerConfig
@@ -38,16 +38,10 @@ from app.crawler.state import crawler_state
 from app.db.engine import async_session
 from app.db.repository import get_last_crawled_at, upsert_items
 
-# 수집 주기(분). 사이트 부하와 봇 감지를 감안하면 너무 짧게 잡지 않는 게 좋다.
-CRAWL_INTERVAL_MINUTES = int(os.getenv("CRAWL_INTERVAL_MINUTES", "30"))
+# 설정값은 app/config.py에서 가져온다. 백엔드(/api/meta)도 수집 주기를 알아야 하는데,
+# 그 상수를 여기 두면 백엔드가 이 모듈을 임포트하게 되고 Playwright까지 딸려 온다.
 CRAWL_INTERVAL_SECONDS = CRAWL_INTERVAL_MINUTES * 60
-
-# 스케줄 실행에서는 브랜드 수만큼 곱해지니 CLI 기본값(5)보다 페이지 수를 줄여 소요 시간을 관리한다.
-JOONGNA_PAGES_PER_BRAND = 3
-
-# 라운드 실패 후 다음 시도까지의 대기 시간. 정상 주기보다 짧게 잡아, 일시적인 문제로
-# 실패했을 때 30분을 통째로 기다리지 않게 한다.
-RETRY_DELAY_SECONDS = 5 * 60
+RETRY_DELAY_SECONDS = CRAWL_RETRY_MINUTES * 60
 
 
 async def crawl_daangn_once() -> int:

@@ -58,13 +58,15 @@ repository까지 내려가기 전에 422로 걸러진다. **게시판과 JSON AP
 
 ```
 app/
-├── main.py                      # FastAPI 진입점, .env 로딩, lifespan에서 DB 준비 + 첫 크롤링
+├── config.py                    # 환경 변수 설정 (load_dotenv를 호출하는 유일한 곳)
+├── main.py                       # FastAPI 진입점, lifespan에서 DB 확인 + 크롤러 기동
 ├── crawler/
 │   ├── base.py                   # 공용 엔진: 브라우저 실행, 스크롤, 카드 수집, JSON 저장
 │   ├── brands.py                  # LUXURY_BRANDS = 구찌/에르메스/샤넬/루이비통
 │   ├── sources.py                  # SOURCES = 당근마켓/중고나라 (source 문자열 상수)
 │   ├── models.py                    # CrawledItem
-│   ├── scheduler.py                  # 백그라운드 수집 루프 (주기, 재시도, 실패 처리)
+│   ├── __main__.py                   # 크롤러 단독 실행 진입점 (python -m app.crawler)
+│   ├── scheduler.py                   # 백그라운드 수집 루프 (주기, 재시도, 실패 처리)
 │   ├── state.py                       # 수집기 현재 상태 (/api/meta로 노출)
 │   ├── daangn/                        # 당근마켓 (Playwright)
 │   │   ├── config.py · parser.py · crawler.py · run.py · debug_cards.py
@@ -161,6 +163,59 @@ lifespan이 `create_task`로 띄우고 바로 요청을 받기 시작하므로 �
 
 수집 결과는 `app/crawler/state.py`에 기록되고 `/api/meta`로 노출된다.
 
+## 프로세스 구성
+
+같은 소스에서 두 개의 실행 단위가 나온다.
+
+| | 백엔드 | 크롤러 |
+|---|---|---|
+| 진입점 | `uvicorn app.main:app` | `python -m app.crawler` |
+| 이미지 | `Dockerfile.backend` (300MB 안팎) | `Dockerfile.crawler` (1.5GB 안팎) |
+| Playwright | **없음** | Chromium 포함 |
+| 포트 | 8000 | 없음 |
+
+나누는 이유는 셋이다. **이미지 크기** — 백엔드가 Chromium을 지고 다닐 이유가 없다.
+**스케일** — 백엔드를 2대로 늘리면 두 대가 각자 크롤링을 돌려 사이트에 요청이 두 배로
+간다. **비용** — 크롤러는 30분에 한 번 몇 분만 일하므로 스케줄 태스크로 띄우면
+유휴 시간에 브라우저를 안 올린다.
+
+로컬 개발에서는 나눌 필요가 없다. `ENABLE_CRAWLER=true`(기본값)면 백엔드 프로세스가
+크롤러를 함께 돌린다.
+
+### 임포트 사슬을 끊어 둔 것
+
+백엔드가 Playwright 없이 뜨려면 임포트 경로에 Playwright가 없어야 한다. 코드가
+크롤러를 쓰지 않더라도 `import`는 먼저 실행되기 때문이다. 두 장치로 막았다.
+
+- **설정 상수를 `app/config.py`로 분리.** `CRAWL_INTERVAL_MINUTES`가 `scheduler.py`에
+  있으면 `/api/meta`가 그걸 가져오면서 Playwright까지 딸려 온다.
+- **`main.py`의 지연 임포트.** `scheduler`를 모듈 최상단이 아니라 `lifespan` 안에서
+  임포트한다. 없으면 안내를 남기고 서버는 정상적으로 뜬다.
+
+이 구조를 깨지 않으려면, **`app/crawler/scheduler.py`나 사이트별 크롤러 모듈을
+백엔드 코드(라우터, 스키마, repository)에서 최상단 임포트하지 말 것.** `brands.py`,
+`sources.py`, `models.py`, `timeparse.py`는 Playwright를 안 쓰므로 임포트해도 된다.
+
+`app/config.py`가 `load_dotenv()`를 호출하는 유일한 곳이다. `app.*` 중 가장 먼저
+임포트되므로 다른 모듈은 임포트 순서를 신경 쓸 필요가 없다.
+
+### 이미지 빌드
+
+```
+docker build -f Dockerfile.backend -t cloudedx-backend .
+docker build -f Dockerfile.crawler -t cloudedx-crawler .
+```
+
+Playwright는 optional dependency(`crawler` extra)라, 백엔드 이미지는 `uv sync`만,
+크롤러 이미지는 `uv sync --extra crawler`를 쓴다. 로컬에서도 마찬가지다:
+
+```
+uv sync --extra crawler
+```
+
+`--extra crawler` 없이 `uv sync`를 치면 백엔드 이미지와 같은 구성이 된다 — 백엔드가
+Playwright 없이 뜨는지 로컬에서 바로 확인할 수 있다.
+
 ## 환경 변수
 
 프로젝트 루트의 `.env`를 읽는다. `.env.example`을 복사해서 시작하면 된다.
@@ -171,6 +226,8 @@ lifespan이 `create_task`로 띄우고 바로 요청을 받기 시작하므로 �
 | `DB_PORT` | `5432` | docker-compose가 호스트에 열 포트. 5432가 이미 점유돼 있으면 여기만 바꾼다 |
 | `ENABLE_CRAWLER` | `true` | `false`면 백그라운드 크롤러를 돌리지 않는다 |
 | `CRAWL_INTERVAL_MINUTES` | `30` | 수집 주기(분) |
+| `CRAWL_RETRY_MINUTES` | `5` | 라운드가 통째로 실패했을 때 재시도까지 대기(분) |
+| `JOONGNA_PAGES_PER_BRAND` | `3` | 중고나라 브랜드당 수집 페이지 수 |
 | `ALLOWED_ORIGINS` | (비어 있음) | CORS 허용 출처. 쉼표로 구분. 비우면 미들웨어를 붙이지 않는다 |
 
 `.env` 로딩은 `main.py` 최상단의 `load_dotenv()`가 담당하며, **`app.*` 임포트보다 먼저**
@@ -272,7 +329,7 @@ row a second time` 에러를 낸다. 그래서 `_dedupe_by_url()`로 url 기준 
 ## 실행
 
 ```
-uv sync
+uv sync --extra crawler
 uv run playwright install chromium
 copy .env.example .env
 docker compose up -d
@@ -546,9 +603,10 @@ netstat -ano | findstr :5432
   이미지가 1GB를 넘어간다.
 - 브랜드 4개 x 사이트 2개 = 검색 8회라 한 라운드가 오래 걸린다. 병렬화나 브랜드별
   스케줄 분산을 고려할 수 있음.
-- 크롤러 상태(`app/crawler/state.py`)가 프로세스 안의 단일 인스턴스다. uvicorn을 워커
-  여러 개로 띄우면 워커마다 각자 크롤링을 돌린다. 그때는 크롤러를 앱에서 떼어내 별도
-  프로세스나 스케줄러(ECS 스케줄 태스크 등)로 옮겨야 한다.
+- **크롤러를 별도 컨테이너로 띄우면 `/api/meta`의 `crawler` 상태가 비어 있다.**
+  `crawler_state`가 프로세스 메모리에 있어서 백엔드가 크롤러 프로세스의 상태를 볼 수
+  없다. 크롤러가 DB에 라운드 기록을 남기고 백엔드가 그걸 조회하는 구조로 바꿔야 한다
+  (`crawl_runs` 테이블).
 - 로그가 전부 `print`다. 배포하면 타임스탬프와 레벨이 있는 구조화 로그가 필요하다.
 - 게시판 스타일이 `base.html` 안에 인라인으로 들어가 있다. 시연용으로 정적 파일 마운트
   없이 돌리려는 선택이고, 프론트를 분리하면 통째로 버릴 코드다.

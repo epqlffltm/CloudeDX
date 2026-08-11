@@ -3,7 +3,7 @@
 """
 비동기 SQLAlchemy 엔진 + 세션 팩토리.
 
-DATABASE_URL 환경변수로 접속 정보를 받는다. 기본값은 docker-compose.yml로 띄운
+접속 정보는 app/config.py의 DATABASE_URL에서 받는다. 기본값이 docker-compose.yml로 띄운
 로컬 Postgres 기준이라, docker compose up -d만 해두면 별도 설정 없이 그대로 동작한다.
 
 테이블 생성은 여기서 하지 않는다 — Alembic이 관리한다. 예전에는 init_db()가
@@ -16,20 +16,15 @@ create_all()로 테이블을 만들었는데, create_all은 없는 테이블만 
 """
 
 import asyncio
-import os
 import re
 from collections.abc import AsyncGenerator
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    # localhost 대신 127.0.0.1을 명시. Windows + Docker Desktop 조합에서 localhost가
-    # IPv6(::1)로 먼저 풀리는데 포트 포워딩이 IPv4만 제대로 열려있어 연결 거부가 나는
-    # 경우가 있어서, 이를 피하려고 IPv4를 강제한다.
-    "postgresql+asyncpg://cloudedx:cloudedx@127.0.0.1:5432/cloudedx",
-)
+# app.config가 load_dotenv()를 호출하므로, 이 모듈을 임포트하는 것만으로 .env가 반영된다.
+# 예전에는 호출부가 임포트 순서를 지켜야 했다.
+from app.config import DATABASE_URL
 
 # scheme://user:password@host  에서 password 부분만 잡는다.
 _PASSWORD_PATTERN = re.compile(r"(://[^:/@]+:)[^@]*(@)")

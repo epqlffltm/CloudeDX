@@ -1,16 +1,29 @@
 [project]
 name = "cloudedx"
 version = "0.1.0"
-description = "Add your description here"
+description = "중고 명품 가방 매물 수집 및 조회 서비스"
 readme = "README.md"
 requires-python = ">=3.13"
+
+# 백엔드(게시판 + JSON API)가 돌아가는 데 필요한 것만 둔다.
+# 여기에 Playwright가 없는 것이 핵심이다 — 백엔드 이미지에서 1GB 넘게 덜어낸다.
 dependencies = [
     "alembic>=1.19.1",
     "asyncpg>=0.31.0",
     "fastapi>=0.141.1",
     "jinja2>=3.1.6",
-    "playwright>=1.62.0",
     "python-dotenv>=1.2.2",
     "sqlalchemy>=2.0.51",
     "uvicorn[standard]>=0.52.1",
 ]
+
+[project.optional-dependencies]
+# 크롤러 전용. Dockerfile.crawler와 로컬 개발에서만 설치한다.
+#   uv sync --extra crawler
+crawler = [
+    "playwright>=1.62.0",
+]
+
+# 로컬 개발에서는 크롤러까지 함께 돌리므로 `uv sync --extra crawler` 를 쓴다.
+# extra는 기본으로 설치되지 않기 때문에, 그냥 `uv sync` 를 치면 백엔드 이미지와
+# 같은 구성이 된다 — 백엔드가 Playwright 없이도 뜨는지 로컬에서 바로 확인할 수 있다.

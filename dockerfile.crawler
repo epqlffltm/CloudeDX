@@ -1,0 +1,50 @@
+# Dockerfile.crawler
+#
+# 크롤러 이미지. Playwright + Chromium이 들어가서 1GB를 넘는다.
+# HTTP를 열지 않고, app/crawler/__main__.py 의 주기 루프만 돈다.
+#
+# mcr.microsoft.com/playwright/python 이미지를 쓰지 않은 이유:
+#   그쪽은 태그마다 Python 버전이 고정돼 있고 현재는 3.12다. 이 프로젝트는
+#   requires-python = ">=3.13" 이라 uv sync가 거부한다. Python 버전을 우리가
+#   고르려면 slim에서 시작해 브라우저를 직접 설치하는 편이 낫다.
+
+FROM python:3.13-slim AS base
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1 \
+    # 브라우저를 홈 디렉터리 대신 고정 경로에 깐다. 실행 사용자가 바뀌어도
+    # Playwright가 같은 위치를 찾는다.
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
+WORKDIR /srv
+
+RUN pip install --no-cache-dir uv
+
+# --extra crawler 로 Playwright까지 설치한다. 백엔드 이미지와 갈리는 지점이다.
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project --extra crawler
+
+# Chromium 본체와 시스템 라이브러리(폰트, libnss3 등)를 깐다.
+# --with-deps 가 apt 패키지까지 처리해 주므로 목록을 직접 관리하지 않아도 된다.
+# 이 단계가 이미지 크기의 대부분을 차지한다.
+RUN /srv/.venv/bin/playwright install --with-deps chromium \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY alembic.ini ./
+COPY alembic ./alembic
+COPY app ./app
+
+ENV PATH="/srv/.venv/bin:$PATH"
+
+# 크롤링 결과 JSON을 쓰는 위치. 컨테이너 파일시스템은 재시작하면 사라지므로
+# 보존하려면 compose에서 볼륨을 붙인다(디버그용이라 필수는 아니다).
+RUN mkdir -p /srv/data
+
+RUN useradd --create-home --uid 10001 appuser \
+    && chown -R appuser:appuser /srv /ms-playwright
+USER appuser
+
+# HTTP를 열지 않으므로 EXPOSE가 없다. 크롤러의 상태는 DB를 통해 백엔드가 노출한다.
+CMD ["python", "-m", "app.crawler"]

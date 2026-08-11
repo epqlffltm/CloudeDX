@@ -12,6 +12,9 @@ crawler 항목이 있는 이유: 서버가 크롤링을 기다리지 않고 바�
 서버는 목록이 비어 있다. 그게 "매물이 없다"인지 "아직 수집 중"인지 클라이언트가
 구분할 수 있어야 한다.
 
+수집 주기는 app.crawler.scheduler가 아니라 app.config에서 가져온다. scheduler를
+임포트하면 Playwright까지 딸려 오는데, 백엔드 이미지에는 Playwright가 없다.
+
 main.py에서 prefix="/api"를 붙여 등록하므로 실제 경로는 /api/meta다.
 """
 
@@ -20,8 +23,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import CRAWL_INTERVAL_MINUTES
 from app.crawler.brands import LUXURY_BRANDS
-from app.crawler.scheduler import CRAWL_INTERVAL_MINUTES
 from app.crawler.sources import SOURCES
 from app.crawler.state import crawler_state
 from app.db import repository

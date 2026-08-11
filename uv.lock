@@ -107,10 +107,14 @@ dependencies = [
     { name = "asyncpg" },
     { name = "fastapi" },
     { name = "jinja2" },
-    { name = "playwright" },
     { name = "python-dotenv" },
     { name = "sqlalchemy" },
     { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.optional-dependencies]
+crawler = [
+    { name = "playwright" },
 ]
 
 [package.metadata]
@@ -119,11 +123,12 @@ requires-dist = [
     { name = "asyncpg", specifier = ">=0.31.0" },
     { name = "fastapi", specifier = ">=0.141.1" },
     { name = "jinja2", specifier = ">=3.1.6" },
-    { name = "playwright", specifier = ">=1.62.0" },
+    { name = "playwright", marker = "extra == 'crawler'", specifier = ">=1.62.0" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "sqlalchemy", specifier = ">=2.0.51" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.52.1" },
 ]
+provides-extras = ["crawler"]
 
 [[package]]
 name = "colorama"

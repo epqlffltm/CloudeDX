@@ -1,0 +1,45 @@
+# Dockerfile.backend
+#
+# FastAPI 백엔드(게시판 + JSON API) 이미지.
+# 크롤러(Dockerfile.crawler)와 같은 소스를 쓰지만 Playwright와 Chromium을 넣지 않는다.
+# 그래서 이미지가 1GB 넘게 작아진다. 이게 가능한 이유는 app/main.py가 크롤러를
+# 모듈 최상단이 아니라 lifespan 안에서 지연 임포트하기 때문이다.
+
+FROM python:3.13-slim AS base
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1
+
+WORKDIR /srv
+
+RUN pip install --no-cache-dir uv
+
+# ---------------------------------------------------------------------------
+# 의존성 설치를 소스 복사보다 먼저 한다.
+# 코드만 고쳤을 때 이 레이어가 캐시에 남아 재빌드가 몇 초로 끝난다.
+# --no-install-project: 아직 소스가 없으므로 프로젝트 자체는 건너뛴다.
+# --frozen: uv.lock을 그대로 쓴다. 빌드 중에 잠금 파일이 바뀌면 실패시킨다.
+# --extra crawler 를 주지 않으므로 Playwright는 설치되지 않는다.
+# ---------------------------------------------------------------------------
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project
+
+# 마이그레이션 파일도 넣는다. /ready 가 코드가 기대하는 리비전을 여기서 읽는다.
+COPY alembic.ini ./
+COPY alembic ./alembic
+COPY app ./app
+
+ENV PATH="/srv/.venv/bin:$PATH"
+
+# root로 돌리지 않는다. 컨테이너가 뚫렸을 때 피해 범위를 줄인다.
+RUN useradd --create-home --uid 10001 appuser && chown -R appuser:appuser /srv
+USER appuser
+
+EXPOSE 8000
+
+# --proxy-headers: ALB나 nginx 뒤에 있을 때 원래 클라이언트 IP와 프로토콜을 살린다.
+CMD ["uvicorn", "app.main:app", \
+     "--host", "0.0.0.0", "--port", "8000", \
+     "--proxy-headers", "--forwarded-allow-ips", "*"]

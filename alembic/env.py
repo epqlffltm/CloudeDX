@@ -7,24 +7,21 @@ Alembic 실행 환경.
 없다. Alembic의 마이그레이션 실행부는 동기 코드라, 비동기 커넥션 위에서
 run_sync()로 감싸 돌려야 한다.
 
-접속 정보는 alembic.ini가 아니라 .env의 DATABASE_URL에서 읽는다. 설정 파일에
-비밀번호를 박으면 그대로 커밋되기 때문이다.
+접속 정보는 alembic.ini가 아니라 app/config.py(= .env의 DATABASE_URL)에서 읽는다.
+설정 파일에 비밀번호를 박으면 그대로 커밋되기 때문이다.
 """
 
 import asyncio
-import os
 from logging.config import fileConfig
 
 from alembic import context
-from dotenv import load_dotenv
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-# app.* 를 임포트하기 전에 .env를 읽어야 한다 (app/main.py와 같은 이유).
-load_dotenv()
-
-from app.db.models import Base  # noqa: E402
+# app.config가 load_dotenv()를 호출하므로 임포트 순서를 신경 쓸 필요가 없다.
+from app.config import DATABASE_URL
+from app.db.models import Base
 
 config = context.config
 
@@ -35,11 +32,6 @@ if config.config_file_name is not None:
 # 마이그레이션 초안을 만든다. 모델에 테이블을 추가하려면 app/db/models.py에서
 # Base를 상속하기만 하면 여기에 자동으로 잡힌다.
 target_metadata = Base.metadata
-
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql+asyncpg://cloudedx:cloudedx@127.0.0.1:5432/cloudedx",
-)
 
 # %는 configparser에서 특수문자라, 비밀번호에 들어있으면 이스케이프해야 한다.
 config.set_main_option("sqlalchemy.url", DATABASE_URL.replace("%", "%%"))
