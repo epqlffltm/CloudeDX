@@ -1,0 +1,75 @@
+{# app/templates/detail.html #}
+{#
+  매물 상세 화면.
+
+  상품 설명 본문은 아직 없다. 현재 크롤러는 검색 결과의 카드 목록만 훑기 때문에,
+  본문을 채우려면 개별 매물 페이지를 한 번 더 방문하는 2단계 수집이 필요하다.
+  그때까지 이 화면은 수집한 항목을 장부처럼 보여주고 원본으로 안내하는 역할만 한다.
+#}
+{% extends "base.html" %}
+
+{% set item = view.item %}
+
+{% block title %}{{ item.title }} · 중고 명품 가방 수집{% endblock %}
+
+{% block standfirst %}{{ item.source }} · {{ item.brand }}{% endblock %}
+
+{% block content %}
+  <a class="back" href="/board">← 목록으로</a>
+
+  <article>
+    <h2 class="detail-title">{{ item.title }}</h2>
+    <p class="detail-price">{{ view.price_text }}</p>
+    {% if item.is_sold %}<p class="detail-sold">판매완료</p>{% endif %}
+
+    <div class="detail-body">
+      <div>
+        {% if item.image_url %}
+          <img class="detail-image" src="{{ item.image_url }}" alt="{{ item.title }}" referrerpolicy="no-referrer">
+        {% else %}
+          <div class="detail-image" style="aspect-ratio: 1;"></div>
+        {% endif %}
+      </div>
+
+      <dl class="ledger">
+        <dt>수집처</dt>
+        <dd>{{ item.source }}</dd>
+
+        <dt>브랜드</dt>
+        <dd>{{ item.brand }}</dd>
+
+        <dt>지역</dt>
+        <dd>{{ item.region or "정보 없음" }}</dd>
+
+        <dt>등록 표기</dt>
+        <dd>{{ item.time_text or "정보 없음" }}</dd>
+
+        <dt>처음 확인</dt>
+        <dd class="num">{{ item.first_seen_at.strftime("%Y-%m-%d %H:%M") }}</dd>
+
+        <dt>마지막 확인</dt>
+        <dd class="num">{{ item.last_seen_at.strftime("%Y-%m-%d %H:%M") }} ({{ view.last_seen_text }})</dd>
+
+        <dt>관측 기간</dt>
+        <dd class="num">
+          {{ view.observed_days }}일째
+          {% if view.observed_days >= stale_days %} — 오래 걸려 있는 매물{% endif %}
+        </dd>
+
+        <dt>상태</dt>
+        <dd>{{ "판매완료" if item.is_sold else "판매중" }}</dd>
+      </dl>
+    </div>
+
+    <div class="notice">
+      <h2>상품 설명은 아직 수집하지 않습니다</h2>
+      <p>
+        지금은 검색 결과 목록에서 얻을 수 있는 항목만 저장합니다.
+        판매자가 쓴 설명과 추가 사진은 원본 게시글에서 확인하세요.
+      </p>
+      <a class="cta" href="{{ item.url }}" target="_blank" rel="noopener noreferrer">
+        {{ item.source }}에서 원본 보기
+      </a>
+    </div>
+  </article>
+{% endblock %}

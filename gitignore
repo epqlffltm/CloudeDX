@@ -10,6 +10,7 @@ venv/
 # Environment variables
 .env
 .env.*
+# .env.example은 팀 공유용 템플릿이라 위 규칙에서 예외로 둔다.
 !.env.example
 
 # IDE
@@ -24,4 +25,3 @@ venv/
 # Temporary crawler output
 data/*.json
 data/*.csv
-

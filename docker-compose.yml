@@ -6,7 +6,9 @@ services:
       POSTGRES_PASSWORD: cloudedx
       POSTGRES_DB: cloudedx
     ports:
-      - "5432:5432"
+      # 호스트 포트만 .env의 DB_PORT로 바꿀 수 있게 뺀다. 다른 프로젝트가 5432를
+      # 쓰고 있으면 .env에 DB_PORT=5433을 넣으면 된다. 컨테이너 내부는 항상 5432.
+      - "${DB_PORT:-5432}:5432"
     volumes:
       - cloudedx_pgdata:/var/lib/postgresql/data
     healthcheck:

@@ -1,0 +1,123 @@
+{# app/templates/list.html #}
+{#
+  매물 목록 화면.
+
+  필터는 평범한 GET form이다. 자바스크립트 없이도 동작하고, 필터를 건 상태의 주소가
+  그대로 공유 가능한 링크가 된다. 페이지 이동 링크도 현재 쿼리스트링을 유지한 채
+  offset만 바꾸므로, 3페이지에서 검색어가 풀리는 일이 없다.
+#}
+{% extends "base.html" %}
+
+{% block title %}매물 목록 · 중고 명품 가방 수집{% endblock %}
+
+{% block standfirst %}
+  당근마켓 · 중고나라 {% if last_crawled_text %}— 마지막 수집 {{ last_crawled_text }}{% endif %}
+{% endblock %}
+
+{% block content %}
+  <form class="filters" method="get" action="/board">
+    <div class="field">
+      <label for="f-source">수집처</label>
+      <select id="f-source" name="source">
+        <option value="">전체</option>
+        {% for s in sources %}
+          <option value="{{ s }}" {% if filters.source == s %}selected{% endif %}>{{ s }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="field">
+      <label for="f-brand">브랜드</label>
+      <select id="f-brand" name="brand">
+        <option value="">전체</option>
+        {% for b in brands %}
+          <option value="{{ b }}" {% if filters.brand == b %}selected{% endif %}>{{ b }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="field">
+      <label for="f-search">제목 검색</label>
+      <input id="f-search" type="search" name="search" value="{{ filters.search or '' }}" placeholder="예: 클래식 플랩">
+    </div>
+
+    <div class="field">
+      <label for="f-min">최저가</label>
+      <input id="f-min" type="number" name="min_price" min="0" step="10000"
+             value="{{ filters.min_price if filters.min_price is not none else '' }}">
+    </div>
+
+    <div class="field">
+      <label for="f-max">최고가</label>
+      <input id="f-max" type="number" name="max_price" min="0" step="10000"
+             value="{{ filters.max_price if filters.max_price is not none else '' }}">
+    </div>
+
+    <label class="check">
+      <input type="checkbox" name="is_sold" value="false" {% if filters.is_sold is false %}checked{% endif %}>
+      판매완료 숨기기
+    </label>
+
+    <button class="btn" type="submit">필터 적용</button>
+    <a class="btn btn-quiet" href="/board">초기화</a>
+  </form>
+
+  <p class="count">{{ total }}건{% if filters.search %} · "{{ filters.search }}" 검색 결과{% endif %}</p>
+
+  {% if views %}
+    <ul class="rows">
+      {% for v in views %}
+        <li class="row {% if v.item.is_sold %}sold{% endif %}">
+          <div class="thumb-cell">
+            {% if v.item.image_url %}
+              <img class="thumb" src="{{ v.item.image_url }}" alt="" loading="lazy" referrerpolicy="no-referrer">
+            {% else %}
+              <span class="thumb"></span>
+            {% endif %}
+          </div>
+
+          <div class="title-cell">
+            <a class="row-title" href="/board/{{ v.item.id }}">{{ v.item.title }}</a>
+            <p class="row-meta">
+              <span class="tag">{{ v.item.source }}</span>
+              <span class="tag">{{ v.item.brand }}</span>
+              {% if v.item.region %}{{ v.item.region }} · {% endif %}
+              {{ v.last_seen_text }} 확인{% if v.item.is_sold %} · 판매완료{% endif %}
+            </p>
+          </div>
+
+          {# 관측 기간 막대 — first_seen_at을 upsert에서 보존하기 때문에 계산할 수 있는 값 #}
+          <div class="stale">
+            <span class="stale-track">
+              <span class="stale-fill" style="width: {{ '%.0f' | format(v.stale_ratio) }}%"></span>
+            </span>
+            <span class="stale-label">{{ v.observed_days }}일째</span>
+          </div>
+
+          <p class="price">{{ v.price_text }}</p>
+        </li>
+      {% endfor %}
+    </ul>
+
+    <nav class="pager">
+      {% if has_prev %}
+        <a href="{{ prev_url }}">← 이전</a>
+      {% else %}
+        <span class="disabled">← 이전</span>
+      {% endif %}
+
+      <span class="pager-state">{{ current_page }} / {{ total_pages }}</span>
+
+      {% if has_next %}
+        <a href="{{ next_url }}">다음 →</a>
+      {% else %}
+        <span class="disabled">다음 →</span>
+      {% endif %}
+    </nav>
+  {% else %}
+    <div class="empty">
+      <p>조건에 맞는 매물이 없습니다.</p>
+      <a class="btn btn-quiet" href="/board">필터 지우고 전체 보기</a>
+    </div>
+  {% endif %}
+{% endblock %}

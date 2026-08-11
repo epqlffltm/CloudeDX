@@ -1,0 +1,424 @@
+{# app/templates/base.html #}
+{#
+  게시판 공통 레이아웃.
+
+  화면 성격이 "쇼핑몰"이 아니라 "수집 장부"에 가깝다. 같은 매물을 여러 사이트에서
+  모아 놓고 값과 체류 기간을 비교하는 게 목적이라, 카드 그리드 대신 한 줄에 한 건씩
+  놓는 원장(ledger) 형태로 잡았다. 숫자는 전부 고정폭 글꼴이라 세로로 자리가 맞는다.
+
+  CSS는 이 파일 한 곳에 모아 둔다. 정적 파일 마운트 없이 템플릿만으로 돌아가게 해서
+  시연 환경 준비를 줄이려는 것이고, 나중에 프론트를 분리하면 통째로 버릴 코드다.
+#}
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}중고 명품 가방 수집{% endblock %}</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+
+  <style>
+    :root {
+      --ink: #171a1c;
+      --paper: #edede7;
+      --surface: #ffffff;
+      --rule: #d2d3cb;
+      --muted: #6b6f70;
+      --accent: #1f5f55;
+
+      --serif: "Gowun Batang", serif;
+      --sans: Pretendard, -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+      --mono: "IBM Plex Mono", ui-monospace, monospace;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: var(--sans);
+      font-size: 15px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a { color: inherit; }
+
+    :focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    .shell {
+      max-width: 940px;
+      margin: 0 auto;
+      padding: 0 20px 80px;
+    }
+
+    /* ---- 상단 ---- */
+
+    .masthead {
+      padding: 40px 0 20px;
+      border-bottom: 1px solid var(--ink);
+    }
+
+    .masthead h1 {
+      font-family: var(--serif);
+      font-size: 30px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      margin: 0;
+    }
+
+    .masthead h1 a { text-decoration: none; }
+
+    .standfirst {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 8px;
+      letter-spacing: 0.02em;
+    }
+
+    /* ---- 필터 ---- */
+
+    .filters {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: flex-end;
+      padding: 18px 0;
+      border-bottom: 1px solid var(--rule);
+    }
+
+    .field { display: flex; flex-direction: column; gap: 4px; }
+
+    .field label {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .field input,
+    .field select {
+      font-family: var(--sans);
+      font-size: 14px;
+      color: var(--ink);
+      background: var(--surface);
+      border: 1px solid var(--rule);
+      border-radius: 2px;
+      padding: 7px 9px;
+      height: 34px;
+    }
+
+    .field input[type="number"] { font-family: var(--mono); width: 110px; }
+    .field input[type="search"] { width: 180px; }
+
+    .check {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      height: 34px;
+      font-size: 14px;
+    }
+
+    .btn {
+      font-family: var(--sans);
+      font-size: 14px;
+      height: 34px;
+      padding: 0 16px;
+      border: 1px solid var(--ink);
+      border-radius: 2px;
+      background: var(--ink);
+      color: var(--paper);
+      cursor: pointer;
+    }
+
+    .btn-quiet {
+      background: transparent;
+      color: var(--muted);
+      border-color: var(--rule);
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+    }
+
+    /* ---- 목록 ---- */
+
+    .count {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--muted);
+      padding: 14px 0 6px;
+    }
+
+    .rows { list-style: none; margin: 0; padding: 0; }
+
+    .row {
+      display: grid;
+      grid-template-columns: 60px 1fr 120px auto;
+      gap: 16px;
+      align-items: center;
+      padding: 14px 0;
+      border-bottom: 1px solid var(--rule);
+    }
+
+    .thumb {
+      width: 60px;
+      height: 60px;
+      object-fit: cover;
+      background: var(--rule);
+      border-radius: 2px;
+      display: block;
+    }
+
+    .row-title {
+      font-size: 15px;
+      font-weight: 500;
+      text-decoration: none;
+      display: block;
+    }
+
+    .row-title:hover { color: var(--accent); text-decoration: underline; }
+
+    .row-meta {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 4px;
+      letter-spacing: 0.02em;
+    }
+
+    .tag {
+      display: inline-block;
+      border: 1px solid var(--rule);
+      border-radius: 2px;
+      padding: 0 5px;
+      margin-right: 6px;
+      font-size: 10px;
+      letter-spacing: 0.04em;
+    }
+
+    .price {
+      font-family: var(--mono);
+      font-size: 15px;
+      font-weight: 500;
+      text-align: right;
+      white-space: nowrap;
+    }
+
+    .sold .row-title,
+    .sold .price { color: var(--muted); }
+
+    .sold .price { text-decoration: line-through; }
+
+    /*
+      이 화면의 signature. 우리가 이 매물을 며칠째 보고 있는지를 막대로 보여준다.
+      first_seen_at을 upsert에서 갱신하지 않는 설계 덕분에 만들 수 있는 값이고,
+      "안 팔리고 오래 걸려 있는 매물"을 훑어보며 찾을 수 있게 하는 것이 목적이다.
+    */
+    .stale { display: flex; flex-direction: column; gap: 4px; }
+
+    .stale-track {
+      height: 3px;
+      background: var(--rule);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+
+    .stale-fill {
+      height: 100%;
+      background: var(--accent);
+      display: block;
+    }
+
+    .stale-label {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--muted);
+      letter-spacing: 0.04em;
+    }
+
+    /* ---- 페이지 이동 ---- */
+
+    .pager {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding-top: 22px;
+    }
+
+    .pager-state { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+
+    .pager a, .pager span.disabled {
+      font-family: var(--mono);
+      font-size: 12px;
+      padding: 6px 12px;
+      border: 1px solid var(--rule);
+      border-radius: 2px;
+      text-decoration: none;
+      background: var(--surface);
+    }
+
+    .pager span.disabled { color: var(--rule); background: transparent; }
+
+    /* ---- 상세 ---- */
+
+    .detail-title {
+      font-family: var(--serif);
+      font-size: 26px;
+      font-weight: 700;
+      line-height: 1.35;
+      margin: 6px 0 10px;
+    }
+
+    .detail-price {
+      font-family: var(--mono);
+      font-size: 22px;
+      margin: 0 0 4px;
+    }
+
+    .detail-sold {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+    }
+
+    .detail-body {
+      display: grid;
+      grid-template-columns: 260px 1fr;
+      gap: 28px;
+      padding: 24px 0;
+      border-top: 1px solid var(--rule);
+      margin-top: 20px;
+    }
+
+    .detail-image {
+      width: 100%;
+      border-radius: 2px;
+      background: var(--rule);
+      display: block;
+    }
+
+    .ledger {
+      margin: 0;
+      display: grid;
+      grid-template-columns: 90px 1fr;
+      row-gap: 9px;
+      column-gap: 14px;
+      font-size: 14px;
+    }
+
+    .ledger dt {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      padding-top: 3px;
+    }
+
+    .ledger dd { margin: 0; }
+
+    .ledger dd.num { font-family: var(--mono); }
+
+    .notice {
+      border: 1px solid var(--rule);
+      border-radius: 2px;
+      background: var(--surface);
+      padding: 16px 18px;
+      margin-top: 24px;
+    }
+
+    .notice h2 {
+      font-size: 14px;
+      margin: 0 0 6px;
+    }
+
+    .notice p {
+      margin: 0 0 14px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .cta {
+      display: inline-block;
+      font-size: 14px;
+      padding: 9px 18px;
+      border-radius: 2px;
+      background: var(--accent);
+      color: var(--paper);
+      text-decoration: none;
+    }
+
+    .cta:hover { background: var(--ink); }
+
+    @media (max-width: 680px) {
+      .detail-body { grid-template-columns: 1fr; gap: 20px; }
+      .detail-title { font-size: 22px; }
+    }
+
+    /* ---- 빈 화면 ---- */
+
+    .empty {
+      padding: 60px 0;
+      text-align: center;
+      color: var(--muted);
+    }
+
+    .empty p { margin: 0 0 16px; }
+
+    .back {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--muted);
+      text-decoration: none;
+      display: inline-block;
+      padding: 24px 0 12px;
+    }
+
+    .back:hover { color: var(--accent); }
+
+    @media (max-width: 680px) {
+      .row {
+        grid-template-columns: 52px 1fr;
+        grid-template-areas:
+          "thumb title"
+          "stale stale"
+          "price price";
+        row-gap: 10px;
+      }
+      .row > .thumb-cell { grid-area: thumb; }
+      .row > .title-cell { grid-area: title; }
+      .row > .stale { grid-area: stale; }
+      .row > .price { grid-area: price; text-align: left; }
+      .thumb { width: 52px; height: 52px; }
+      .field input[type="search"] { width: 100%; }
+      .filters .field { flex: 1 1 140px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { transition: none !important; animation: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="masthead">
+      <h1><a href="/board">중고 명품 가방 수집</a></h1>
+      <p class="standfirst">{% block standfirst %}당근마켓 · 중고나라{% endblock %}</p>
+    </header>
+
+    {% block content %}{% endblock %}
+  </div>
+</body>
+</html>
