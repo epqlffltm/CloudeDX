@@ -1,4 +1,4 @@
-# app/crawler/daangn/run.py
+﻿# app/crawler/daangn/run.py
 
 """
 당근마켓 크롤러 터미널 진입점.
@@ -11,9 +11,9 @@ import asyncio
 from pathlib import Path
 
 from app.crawler.base import save_json
-from app.crawler.brands import LUXURY_BRANDS
 from app.crawler.daangn.config import DaangnCrawlerConfig
 from app.crawler.daangn.crawler import DaangnCrawler
+from app.domain.brands import LUXURY_BRANDS
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -102,3 +102,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

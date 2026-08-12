@@ -9,8 +9,8 @@ JSON API 응답 계약 테스트.
 
 import pytest
 
-from app.crawler.models import CrawledItem
 from app.db import repository
+from app.domain.models import CrawledItem
 
 
 def make_item(url: str, **kwargs) -> CrawledItem:

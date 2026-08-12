@@ -21,7 +21,8 @@
 import asyncio
 import sys
 
-from app.crawler.scheduler import crawler_loop
+from app.crawler.runner import crawler_loop
+from app.crawler.scheduler import CRAWL_JOBS
 from app.db.engine import DATABASE_URL, mask_url, wait_for_db
 
 if sys.platform == "win32":
@@ -36,7 +37,7 @@ async def main() -> None:
     print("[crawler] DB 연결 확인 완료")
 
     try:
-        await crawler_loop()
+        await crawler_loop(CRAWL_JOBS)
     except asyncio.CancelledError:
         # 컨테이너 종료 신호. 조용히 빠져나간다.
         pass

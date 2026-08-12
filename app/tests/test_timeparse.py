@@ -1,7 +1,7 @@
 # app/tests/test_timeparse.py
 
 """
-app.crawler.timeparse 테스트.
+app.domain.timeparse 테스트.
 
 DB도 브라우저도 필요 없는 순수 함수라 빠르게 돈다. 이 변환이 틀리면 게시판의
 등록 시각과 정렬이 통째로 어긋나므로 경계값을 촘촘히 확인한다.
@@ -11,8 +11,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from app.crawler.models import CrawledItem
-from app.crawler.timeparse import find_relative_time_text, parse_relative_time
+from app.domain.models import CrawledItem
+from app.domain.timeparse import find_relative_time_text, parse_relative_time
 
 NOW = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
 

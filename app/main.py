@@ -87,14 +87,15 @@ def _start_crawler() -> asyncio.Task | None:
     있지 않아서, 모듈 최상단에서 임포트하면 앱이 아예 뜨지 않는다.
     """
     try:
-        from app.crawler.scheduler import crawler_loop
+        from app.crawler.runner import crawler_loop
+        from app.crawler.scheduler import CRAWL_JOBS
     except ImportError as exc:
         print(f"[crawler] 크롤러를 시작할 수 없습니다: {exc}")
         print("[crawler] 크롤러가 필요하면 'uv sync --extra crawler' 로 설치하세요.")
         print("[crawler] 크롤러를 별도 컨테이너로 돌리는 구성이라면 정상입니다.")
         return None
 
-    task = asyncio.create_task(crawler_loop())
+    task = asyncio.create_task(crawler_loop(CRAWL_JOBS))
     task.add_done_callback(_log_crawler_exit)
 
     return task

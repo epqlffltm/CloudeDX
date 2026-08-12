@@ -1,4 +1,4 @@
-# app/crawler/joongna/run.py
+﻿# app/crawler/joongna/run.py
 
 """
 중고나라 크롤러 터미널 진입점.
@@ -11,9 +11,9 @@ import asyncio
 from pathlib import Path
 
 from app.crawler.base import save_json
-from app.crawler.brands import LUXURY_BRANDS
 from app.crawler.joongna.config import JoongnaCrawlerConfig
 from app.crawler.joongna.crawler import JoongnaCrawler
+from app.domain.brands import LUXURY_BRANDS
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -93,3 +93,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

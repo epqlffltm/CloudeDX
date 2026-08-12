@@ -21,7 +21,7 @@
 |---|---|
 | 실행 단위 | 백엔드(564MB) · 크롤러(3.59GB) 두 이미지, compose 4개 서비스 |
 | 스키마 | Alembic 마이그레이션 |
-| 테스트 | 77개, 실제 Postgres 위에서 실행 |
+| 테스트 | 97개, 실제 Postgres 위에서 실행 |
 | CI | GitHub Actions — lint · test · 이미지 빌드 |
 
 한 번에 띄우려면:
@@ -80,13 +80,16 @@ repository까지 내려가기 전에 422로 걸러진다. **게시판과 JSON AP
 app/
 ├── config.py                    # 환경 변수 설정 (load_dotenv를 호출하는 유일한 곳)
 ├── main.py                       # FastAPI 진입점, lifespan에서 DB 확인 + 크롤러 기동
-├── crawler/
-│   ├── base.py                   # 공용 엔진: 브라우저 실행, 스크롤, 카드 수집, JSON 저장
-│   ├── brands.py                  # LUXURY_BRANDS = 구찌/에르메스/샤넬/루이비통
-│   ├── sources.py                  # SOURCES = 당근마켓/중고나라 (source 문자열 상수)
-│   ├── models.py                    # CrawledItem
-│   ├── __main__.py                   # 크롤러 단독 실행 진입점 (python -m app.crawler)
-│   ├── scheduler.py                   # 백그라운드 수집 루프 (주기, 재시도, 실패 처리)
+├── domain/                      # 백엔드·크롤러가 함께 쓰는 어휘 (무거운 의존성 없음)
+│   ├── brands.py                 # LUXURY_BRANDS = 구찌/에르메스/샤넬/루이비통
+│   ├── sources.py                 # SOURCES = 당근마켓/중고나라
+│   ├── models.py                   # CrawledItem
+│   └── timeparse.py                 # '3시간 전' -> datetime
+├── crawler/                     # Playwright가 필요한 것만
+│   ├── runner.py                 # 실행 규칙: 주기 판단, 실패 처리, 기록 (Playwright 무관)
+│   ├── scheduler.py               # 사이트별 수집 작업 정의 (CRAWL_JOBS)
+│   ├── base.py                     # 공용 엔진: 브라우저 실행, 스크롤, 카드 수집
+│   ├── __main__.py                  # 크롤러 단독 실행 진입점 (python -m app.crawler)
 │   ├── daangn/                        # 당근마켓 (Playwright)
 │   │   ├── config.py · parser.py · crawler.py · run.py · debug_cards.py
 │   └── joongna/                       # 중고나라 (Playwright)
@@ -141,7 +144,7 @@ app/
 두 사이트 모두 목록 카드에 절대 날짜를 안 쓰고 "3시간 전" 형태로만 보여준다. 개별
 매물 페이지에 들어가면 정확한 날짜가 있을 수 있지만, 그러려면 매물 수만큼 페이지를 더
 방문해야 한다. 그래서 목록에서 이미 얻은 문자열을 수집 시점 기준으로 환산해
-`posted_at`에 저장한다 (`app/crawler/timeparse.py`). 추가 요청이 0이다.
+`posted_at`에 저장한다 (`app/domain/timeparse.py`). 추가 요청이 0이다.
 
 원문 표기는 `time_text` 컬럼에 그대로 남겨둔다 — 환산이 틀렸을 때 대조할 근거가 있어야
 한다.
@@ -165,7 +168,7 @@ app/
 
 ## 수집 동작
 
-`app/crawler/scheduler.py`의 `crawler_loop()`가 백그라운드에서 돈다. `main.py`의
+`app/crawler/runner.py`의 `crawler_loop()`가 백그라운드에서 돈다. `main.py`의
 lifespan이 `create_task`로 띄우고 바로 요청을 받기 시작하므로 서버 시작을 막지 않는다.
 
 **첫 라운드는 조건부로 즉시 실행한다.** `crawl_runs`의 마지막 기록을 보고, 주기보다
@@ -213,19 +216,40 @@ lifespan이 `create_task`로 띄우고 바로 요청을 받기 시작하므로 �
 로컬 개발에서는 나눌 필요가 없다. `ENABLE_CRAWLER=true`(기본값)면 백엔드 프로세스가
 크롤러를 함께 돌린다.
 
-### 임포트 사슬을 끊어 둔 것
+### 패키지 경계
 
 백엔드가 Playwright 없이 뜨려면 임포트 경로에 Playwright가 없어야 한다. 코드가
-크롤러를 쓰지 않더라도 `import`는 먼저 실행되기 때문이다. 두 장치로 막았다.
+크롤러를 쓰지 않더라도 `import`는 먼저 실행되기 때문이다. 패키지를 이렇게 나눴다.
 
-- **설정 상수를 `app/config.py`로 분리.** `CRAWL_INTERVAL_MINUTES`가 `scheduler.py`에
-  있으면 `/api/meta`가 그걸 가져오면서 Playwright까지 딸려 온다.
-- **`main.py`의 지연 임포트.** `scheduler`를 모듈 최상단이 아니라 `lifespan` 안에서
-  임포트한다. 없으면 안내를 남기고 서버는 정상적으로 뜬다.
+| 패키지 | 담는 것 | 임포트 규칙 |
+|---|---|---|
+| `app/domain/` | 양쪽이 쓰는 어휘 (브랜드, 수집처, `CrawledItem`, 시각 환산) | 순수 파이썬만. 무거운 의존성 금지 |
+| `app/crawler/` | Playwright가 필요한 것 | 백엔드에서 최상단 임포트 금지 |
+| `app/db/`, `app/routers/`, `app/schemas/` | 저장·서빙 | `domain`은 되고 `crawler`는 안 됨 |
 
-이 구조를 깨지 않으려면, **`app/crawler/scheduler.py`나 사이트별 크롤러 모듈을
-백엔드 코드(라우터, 스키마, repository)에서 최상단 임포트하지 말 것.** `brands.py`,
-`sources.py`, `models.py`, `timeparse.py`는 Playwright를 안 쓰므로 임포트해도 된다.
+`app/crawler/` 안에서도 한 겹 더 나뉜다. **`runner.py`는 Playwright를 임포트하지
+않는다** — 언제 돌릴지, 실패하면 어떻게 할지 같은 실행 규칙만 담고, 실제로 무엇을
+긁는지는 `scheduler.py`가 `CRAWL_JOBS`로 넘긴다.
+
+```python
+# app/crawler/runner.py — 규칙
+async def run_crawl_round(jobs: tuple[CrawlJob, ...]) -> int: ...
+
+# app/crawler/scheduler.py — 수단
+CRAWL_JOBS = (crawl_daangn_once, crawl_joongna_once)
+```
+
+나눈 이유는 둘이다. **테스트** — 실행 규칙이 이 프로젝트에서 분기가 가장 많은데,
+Playwright에 묶여 있으면 CI에서 돌릴 수 없다(CI의 test 잡은 백엔드와 같은 구성으로
+설치한다). **경계** — 규칙과 수단이 한 파일에 있으면 규칙만 쓰려 해도 Chromium이
+딸려 온다.
+
+여기에 더해 `main.py`는 크롤러를 `lifespan` 안에서 **지연 임포트**한다. 없으면 안내를
+남기고 서버는 정상적으로 뜬다.
+
+**규칙은 문서가 아니라 테스트가 지킨다.** `app/tests/test_layering.py`가 소스를 AST로
+훑어서 `app/db`·`app/routers`·`app/schemas`·`app/domain`의 최상단 임포트에
+`app.crawler`가 있으면 파일과 줄 번호를 짚어 실패시킨다. 사람은 잊지만 CI는 안 잊는다.
 
 `app/config.py`가 `load_dotenv()`를 호출하는 유일한 곳이다. `app.*` 중 가장 먼저
 임포트되므로 다른 모듈은 임포트 순서를 신경 쓸 필요가 없다.
@@ -553,7 +577,7 @@ ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 위해서다. 조회 전용이라 `GET`만 허용한다.
 
 **필터 선택지**: 브랜드·수집처 목록을 프론트에 하드코딩하지 말고 `/api/meta`에서 받아라.
-`app/crawler/brands.py`에 브랜드를 추가해도 프론트 코드는 그대로 둘 수 있다.
+`app/domain/brands.py`에 브랜드를 추가해도 프론트 코드는 그대로 둘 수 있다.
 
 **타입 생성**: 각 엔드포인트에 `operation_id`를 명시해 뒀다(`listCrawledItems`,
 `getCrawledItem`, `getMeta`). `http://127.0.0.1:8000/openapi.json`에서 스키마를 받아
@@ -600,7 +624,7 @@ ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 
 ## 브랜드
 
-`app/crawler/brands.py`의 `LUXURY_BRANDS`에 고정돼 있다:
+`app/domain/brands.py`의 `LUXURY_BRANDS`에 고정돼 있다:
 
 ```python
 LUXURY_BRANDS = ("구찌", "에르메스", "샤넬", "루이비통")
@@ -610,7 +634,7 @@ LUXURY_BRANDS = ("구찌", "에르메스", "샤넬", "루이비통")
 선택 상자가 전부 그대로 반영한다. 브랜드가 늘어나는 만큼 한 라운드 소요 시간도 비례해서
 늘어난다는 점은 감안해야 한다.
 
-수집처 문자열도 같은 이유로 `app/crawler/sources.py`에 모아 뒀다. 문자열을 여러 곳에
+수집처 문자열도 같은 이유로 `app/domain/sources.py`에 모아 뒀다. 문자열을 여러 곳에
 흩어 두면 오타 하나로 필터가 조용히 0건이 된다.
 
 검색어는 `"{브랜드} 가방"`으로 자동 생성한다 (예: "샤넬 가방"). 브랜드명만 검색하면
@@ -638,7 +662,7 @@ docker compose exec db createdb -U cloudedx cloudedx_test
 uv run pytest
 ```
 
-77개가 5~10초에 돈다. 접속 정보는 `.env`의 `TEST_DATABASE_URL`에서 읽고, 없으면
+97개가 5~10초에 돈다. 접속 정보는 `.env`의 `TEST_DATABASE_URL`에서 읽고, 없으면
 `cloudedx_test`를 기본값으로 쓴다 — **개발용 DB와 분리해야** 테스트가 데이터를 지워도
 안전하다.
 
@@ -654,12 +678,17 @@ uv run pytest
 |---|---|
 | `test_repository.py` | 필터, 정렬, 페이지네이션, upsert |
 | `test_api.py` | 응답 계약, 422/404, 게시판 렌더링 |
+| `test_runner.py` | 수집 실행 규칙 — 실패 처리, 주기 판단, 루프 생존 |
 | `test_crawl_runs.py` | 라운드 상태 전이, stale 판정 |
+| `test_layering.py` | 패키지 경계 (백엔드가 크롤러를 임포트하지 않는지) |
 | `test_timeparse.py` | 상대 시각 환산 |
 | `test_health.py` | `/health`, `/ready` 분기 |
 | `test_crawler_parser.py`, `test_joongna_parser.py` | 카드 텍스트 파싱 |
 
-특히 지키려는 것 넷:
+전부 브라우저 없이 돈다. `test_runner.py`가 사이트별 크롤러 대신 가짜 작업을 주입받기
+때문에, 수집 로직을 CI에서도 검증할 수 있다.
+
+특히 지키려는 것 다섯:
 
 - `test_health_survives_database_outage` — DB가 죽어도 `/health`가 200을 유지하는지.
   깨지면 DB 장애가 전체 컨테이너 재시작 폭풍으로 번진다.
@@ -667,6 +696,8 @@ uv run pytest
   `first_seen_at`을 넣으면 걸린다.
 - `test_pagination_does_not_repeat_or_skip` — `id` 2차 정렬을 빼면 실패한다.
 - `test_backend_sees_crawler_state` — `crawl_runs` 테이블의 존재 이유 그 자체다.
+- `test_backend_does_not_import_crawler` — 패키지 경계가 무너지면 백엔드 이미지가
+  뜨지 않는다. 배포해서야 아는 것보다 여기서 걸리는 게 낫다.
 
 ### 픽스처가 앱의 전역 엔진을 쓰는 이유
 

@@ -27,11 +27,11 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import CRAWL_INTERVAL_MINUTES, CRAWL_RUN_TIMEOUT_MINUTES
-from app.crawler.brands import LUXURY_BRANDS
-from app.crawler.sources import SOURCES
 from app.db import crawl_runs, repository
 from app.db.engine import get_session
 from app.db.models import CrawlRunStatus
+from app.domain.brands import LUXURY_BRANDS
+from app.domain.sources import SOURCES
 from app.schemas.requests import CrawledItemFilterParams
 from app.schemas.responses import CrawlerStatus, MetaResponse
 

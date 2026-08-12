@@ -1,4 +1,4 @@
-# app/crawler/daangn/crawler.py
+﻿# app/crawler/daangn/crawler.py
 
 """
 당근마켓 검색 결과 크롤러. Playwright 기반, 비동기.
@@ -19,7 +19,7 @@ from app.crawler.daangn.parser import (
     parse_card_text,
     parse_price_value,
 )
-from app.crawler.models import CrawledItem
+from app.domain.models import CrawledItem
 
 ITEM_LINK_SELECTOR = "a[href*='/kr/buy-sell/']"
 
@@ -101,3 +101,4 @@ class DaangnCrawler:
                 await browser.close()
 
         return [self._to_item(parsed) for parsed in cards.values()]
+

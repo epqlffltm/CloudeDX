@@ -1,4 +1,4 @@
-# app/crawler/models.py
+# app/domain/models.py
 
 """
 크롤링 결과의 형태를 한 곳에서 정의
@@ -7,7 +7,7 @@
 from dataclasses import asdict, dataclass
 from datetime import datetime
 
-from app.crawler.timeparse import parse_relative_time
+from app.domain.timeparse import parse_relative_time
 
 
 @dataclass(slots=True, frozen=True)

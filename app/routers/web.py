@@ -21,11 +21,11 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.crawler.brands import LUXURY_BRANDS
-from app.crawler.sources import SOURCES
 from app.db import repository
 from app.db.engine import get_session
 from app.db.models import ItemRecord
+from app.domain.brands import LUXURY_BRANDS
+from app.domain.sources import SOURCES
 from app.schemas.requests import CrawledItemFilterParams
 
 router = APIRouter(prefix="/board", tags=["board"], include_in_schema=False)

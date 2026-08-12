@@ -18,9 +18,9 @@ from sqlalchemy import Select, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.crawler.models import CrawledItem
 from app.db.engine import async_session
 from app.db.models import ItemRecord
+from app.domain.models import CrawledItem
 from app.schemas.requests import CrawledItemFilterParams
 
 # 한 INSERT 문에 넣을 최대 행 수. 너무 크면 바인드 파라미터가 폭증해서

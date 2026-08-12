@@ -1,4 +1,4 @@
-# app/crawler/joongna/crawler.py
+﻿# app/crawler/joongna/crawler.py
 
 """
 중고나라(joongna) 검색 결과 크롤러. Playwright 기반, 비동기.
@@ -15,7 +15,7 @@ from playwright.async_api import async_playwright
 from app.crawler.base import EngineConfig, collect_cards, create_browser_context, scroll_page
 from app.crawler.joongna.config import JoongnaCrawlerConfig
 from app.crawler.joongna.parser import parse_card_text, parse_price_value
-from app.crawler.models import CrawledItem
+from app.domain.models import CrawledItem
 
 ITEM_LINK_SELECTOR = "a[href*='/product/']"
 
@@ -120,3 +120,4 @@ class JoongnaCrawler:
                 await browser.close()
 
         return [self._to_item(parsed) for parsed in all_parsed.values()]
+

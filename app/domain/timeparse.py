@@ -1,4 +1,4 @@
-# app/crawler/timeparse.py
+# app/domain/timeparse.py
 
 """
 '3시간 전' 같은 상대 시각 표기를 실제 시각(datetime)으로 바꾼다.

@@ -13,9 +13,9 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import select
 
-from app.crawler.models import CrawledItem
 from app.db import repository
 from app.db.models import ItemRecord
+from app.domain.models import CrawledItem
 from app.schemas.requests import CrawledItemFilterParams
 
 

@@ -1,4 +1,4 @@
-# app/crawler/joongna/parser.py
+﻿# app/crawler/joongna/parser.py
 
 """
 중고나라 상품 카드 텍스트 파싱.
@@ -8,7 +8,7 @@ daangn/parser.py와 동일한 방침 — Playwright 요소 없이도 순수 함�
 
 import re
 
-from app.crawler.timeparse import find_relative_time_text
+from app.domain.timeparse import find_relative_time_text
 
 
 def parse_price_value(price: str | None) -> int | None:
@@ -74,3 +74,4 @@ def parse_card_text(
         "url": url,
         "image_url": image_url,
     }
+
