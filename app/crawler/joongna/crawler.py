@@ -1,10 +1,14 @@
-﻿# app/crawler/joongna/crawler.py
+# app/crawler/joongna/crawler.py
 
 """
 중고나라(joongna) 검색 결과 크롤러. Playwright 기반, 비동기.
 공통 엔진(app.crawler.base)을 사용 — 당근마켓 크롤러와 동일한 방식으로 통일했다.
 
 DB 저장은 여기서 하지 않는다.
+
+페이지 하나가 실패하면 다음 페이지를 계속 시도한다. 단, 시도한 모든 페이지가 예외로
+실패했다면 빈 리스트를 정상 결과처럼 반환하지 않고 예외를 올린다. 그래야 상위의
+브랜드/사이트 실패 정책이 실제 장애와 정상적인 "검색 결과 0건"을 구분할 수 있다.
 """
 
 import asyncio
@@ -15,6 +19,7 @@ from playwright.async_api import async_playwright
 from app.crawler.base import EngineConfig, collect_cards, create_browser_context, scroll_page
 from app.crawler.joongna.config import JoongnaCrawlerConfig
 from app.crawler.joongna.parser import parse_card_text, parse_price_value
+from app.crawler.source_runner import collect_pages
 from app.domain.models import CrawledItem
 
 ITEM_LINK_SELECTOR = "a[href*='/product/']"
@@ -63,6 +68,9 @@ class JoongnaCrawler:
             wait_until="domcontentloaded",
             timeout=self.config.timeout_ms,
         )
+
+        # 페이지 로딩 직후 동적 카드가 붙을 시간을 준다.
+        # 실제 페이지 간 간격은 source_runner.collect_pages()가 별도로 적용한다.
         await asyncio.sleep(2)
 
         await scroll_page(
@@ -84,7 +92,6 @@ class JoongnaCrawler:
             headless=self.config.headless,
             timeout_ms=self.config.timeout_ms,
         )
-        all_parsed: dict[str, dict] = {}
 
         async with async_playwright() as p:
             browser, context = await create_browser_context(p, engine_config)
@@ -92,32 +99,19 @@ class JoongnaCrawler:
             page.set_default_timeout(self.config.timeout_ms)
 
             try:
-                for page_num in range(1, self.config.max_pages + 1):
-                    try:
-                        page_items = await self._collect_page(page, page_num)
-                    except Exception as exc:
-                        print(
-                            f"[joongna] {page_num} 페이지 진행 중 오류, "
-                            f"다음 페이지로 건너뜀: {exc}"
-                        )
-                        continue
+                async def collect_page(page_num: int) -> list[dict]:
+                    return await self._collect_page(page, page_num)
 
-                    if not page_items:
-                        print(
-                            f"[joongna] {page_num} 페이지에서 상품을 찾지 못해 수집을 마칩니다."
-                        )
-                        break
-
-                    for parsed in page_items:
-                        all_parsed[parsed["url"]] = parsed
-
-                    print(
-                        f"[joongna]    └ {len(page_items)}개 수집 "
-                        f"(누적: {len(all_parsed)}개)"
-                    )
-                    await asyncio.sleep(self.config.between_page_pause_seconds)
+                parsed_items = await collect_pages(
+                    source_name=f"중고나라 '{self.config.brand}'",
+                    max_pages=self.config.max_pages,
+                    collect_page=collect_page,
+                    between_page_pause_seconds=self.config.between_page_pause_seconds,
+                )
             finally:
                 await browser.close()
 
-        return [self._to_item(parsed) for parsed in all_parsed.values()]
+        # 같은 URL이 여러 페이지에 다시 노출될 수 있으므로 마지막 값으로 중복 제거한다.
+        all_parsed = {parsed["url"]: parsed for parsed in parsed_items}
 
+        return [self._to_item(parsed) for parsed in all_parsed.values()]

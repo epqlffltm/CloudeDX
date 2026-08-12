@@ -21,7 +21,7 @@
 |---|---|
 | 실행 단위 | 백엔드(564MB) · 크롤러(3.59GB) 두 이미지, compose 4개 서비스 |
 | 스키마 | Alembic 마이그레이션 |
-| 테스트 | 97개, 실제 Postgres 위에서 실행 |
+| 테스트 | 107개, 실제 Postgres 위에서 실행 |
 | CI | GitHub Actions — lint · test · 이미지 빌드 |
 
 한 번에 띄우려면:
@@ -86,9 +86,10 @@ app/
 │   ├── models.py                   # CrawledItem
 │   └── timeparse.py                 # '3시간 전' -> datetime
 ├── crawler/                     # Playwright가 필요한 것만
-│   ├── runner.py                 # 실행 규칙: 주기 판단, 실패 처리, 기록 (Playwright 무관)
-│   ├── scheduler.py               # 사이트별 수집 작업 정의 (CRAWL_JOBS)
-│   ├── base.py                     # 공용 엔진: 브라우저 실행, 스크롤, 카드 수집
+│   ├── runner.py                 # 라운드 실행 규칙: 주기 판단, 사이트 단위 실패 처리, 기록
+│   ├── source_runner.py          # 사이트 내부 규칙: 브랜드/페이지 부분 실패 처리 (Playwright 무관)
+│   ├── scheduler.py              # 실제 사이트 크롤러를 연결하고 DB에 upsert (CRAWL_JOBS)
+│   ├── base.py                   # 공용 엔진: 브라우저 실행, 스크롤, 카드 수집
 │   ├── __main__.py                  # 크롤러 단독 실행 진입점 (python -m app.crawler)
 │   ├── daangn/                        # 당근마켓 (Playwright)
 │   │   ├── config.py · parser.py · crawler.py · run.py · debug_cards.py
@@ -184,16 +185,23 @@ lifespan이 `create_task`로 띄우고 바로 요청을 받기 시작하므로 �
 다른 프로세스가 수집 중(`running`)이면 양보한다. 배포 중에 크롤러 컨테이너가 잠깐
 두 개가 되는 상황에서 중복 수집을 줄여준다.
 
-**실패해도 루프는 죽지 않는다.** 층위가 셋이다:
+**실패해도 루프는 죽지 않는다.** 실패 정책은 단계별로 나뉜다:
 
 | 범위 | 처리 |
 |---|---|
-| 브랜드 하나 실패 | 나머지 브랜드 계속 |
+| 카드 하나 파싱 실패 | 해당 카드만 건너뜀 |
+| 중고나라 페이지 하나 실패 | 다음 페이지 계속 |
+| 브랜드 하나 실패 | 같은 사이트의 나머지 브랜드 계속 |
 | 사이트 하나 실패 | 다른 사이트 계속, `last_error`에 기록하고 라운드는 성공으로 집계 |
-| 전부 실패 | 라운드 실패로 처리하고 5분 뒤 재시도 (정상 주기 30분보다 짧게) |
+| 모든 사이트 실패 | 라운드 실패로 처리하고 5분 뒤 재시도 (정상 주기 30분보다 짧게) |
 
-전부 실패했을 때 예외를 올리는 이유는, 그러지 않으면 "0건 수집 성공"으로 기록돼서
-사이트가 전부 막힌 상태와 정말 매물이 없는 상태를 구분할 수 없기 때문이다.
+성공/실패는 **수집 건수**가 아니라 **시도 자체가 정상 종료됐는지**로 판단한다.
+정상적으로 페이지를 읽었지만 매물이 0건인 경우는 `SUCCESS / 0건`이 맞다. 반대로 한 브랜드의
+모든 페이지가 예외로 실패하거나, 한 사이트의 모든 브랜드가 예외로 실패하면 상위 계층으로
+예외를 올린다. 그래야 사이트가 전부 막힌 상태와 정말 매물이 없는 상태를 구분할 수 있다.
+
+이 정책은 `app/crawler/source_runner.py`에서 Playwright와 분리해 구현한다. 따라서 실제
+브라우저 없이도 전체 실패/부분 실패/정상 0건 경계조건을 CI에서 검증할 수 있다.
 
 수집 결과는 `crawl_runs` 테이블에 기록되고 `/api/meta`로 노출된다.
 
@@ -227,22 +235,31 @@ lifespan이 `create_task`로 띄우고 바로 요청을 받기 시작하므로 �
 | `app/crawler/` | Playwright가 필요한 것 | 백엔드에서 최상단 임포트 금지 |
 | `app/db/`, `app/routers/`, `app/schemas/` | 저장·서빙 | `domain`은 되고 `crawler`는 안 됨 |
 
-`app/crawler/` 안에서도 한 겹 더 나뉜다. **`runner.py`는 Playwright를 임포트하지
-않는다** — 언제 돌릴지, 실패하면 어떻게 할지 같은 실행 규칙만 담고, 실제로 무엇을
-긁는지는 `scheduler.py`가 `CRAWL_JOBS`로 넘긴다.
+`app/crawler/` 안에서도 실행 정책과 Playwright 구현을 분리한다.
+
+- `runner.py` — **라운드 단위 규칙**. 사이트 작업들을 실행하고, 일부 사이트 실패는 기록만
+  남기며 모든 사이트가 실패했을 때만 라운드를 실패로 처리한다.
+- `source_runner.py` — **사이트 내부 규칙**. 브랜드/페이지 일부 실패를 허용하되 모든 시도가
+  예외로 실패하면 상위 계층에 실패를 전달한다. 정상적인 0건은 성공으로 유지한다.
+- `scheduler.py` — 실제 `DaangnCrawler`/`JoongnaCrawler`를 위 규칙에 연결하고 DB에 upsert한다.
+
+`runner.py`와 `source_runner.py`는 Playwright를 임포트하지 않는다.
 
 ```python
-# app/crawler/runner.py — 규칙
+# app/crawler/runner.py — 라운드 규칙
 async def run_crawl_round(jobs: tuple[CrawlJob, ...]) -> int: ...
 
-# app/crawler/scheduler.py — 수단
+# app/crawler/source_runner.py — 사이트 내부 규칙
+async def collect_brands(...): ...
+async def collect_pages(...): ...
+
+# app/crawler/scheduler.py — 실제 사이트 구현 연결
 CRAWL_JOBS = (crawl_daangn_once, crawl_joongna_once)
 ```
 
-나눈 이유는 둘이다. **테스트** — 실행 규칙이 이 프로젝트에서 분기가 가장 많은데,
-Playwright에 묶여 있으면 CI에서 돌릴 수 없다(CI의 test 잡은 백엔드와 같은 구성으로
-설치한다). **경계** — 규칙과 수단이 한 파일에 있으면 규칙만 쓰려 해도 Chromium이
-딸려 온다.
+나눈 이유는 둘이다. **테스트** — 실패 정책을 Playwright에 묶지 않아 CI에서 브라우저 없이
+경계조건을 검증할 수 있다. **경계** — 규칙과 수단이 한 파일에 있으면 규칙만 쓰려 해도
+Chromium이 딸려 온다.
 
 여기에 더해 `main.py`는 크롤러를 `lifespan` 안에서 **지연 임포트**한다. 없으면 안내를
 남기고 서버는 정상적으로 뜬다.
@@ -652,7 +669,9 @@ LUXURY_BRANDS = ("구찌", "에르메스", "샤넬", "루이비통")
   실패했으면 원문을 그대로 두고, 그것도 없으면 "가격 미상"으로 표시한다.
 - 가격 파싱에 실패한 매물(`price_value`가 `null`)은 가격 필터를 걸면 결과에서 제외된다.
   "가격 미상"을 조건에 맞다고 보면 최저가 비교가 오염되기 때문이다.
-- 크롤러는 `data/*.json`에도 계속 저장한다 (DB랑 이중 저장) — 디버깅/백업용이다.
+- **주기 실행 scheduler의 정본은 PostgreSQL 하나다.** 운영 수집 경로에서는 JSON 덤프를
+  쓰지 않는다. 디버그 파일 쓰기 실패가 DB upsert까지 막는 결합을 피하기 위해서다.
+  수동 실행용 CLI에서 필요한 경우에만 JSON을 저장할 수 있다.
 
 ## 테스트
 
@@ -662,7 +681,7 @@ docker compose exec db createdb -U cloudedx cloudedx_test
 uv run pytest
 ```
 
-97개가 5~10초에 돈다. 접속 정보는 `.env`의 `TEST_DATABASE_URL`에서 읽고, 없으면
+107개가 5~10초에 돈다. 접속 정보는 `.env`의 `TEST_DATABASE_URL`에서 읽고, 없으면
 `cloudedx_test`를 기본값으로 쓴다 — **개발용 DB와 분리해야** 테스트가 데이터를 지워도
 안전하다.
 
@@ -678,17 +697,19 @@ uv run pytest
 |---|---|
 | `test_repository.py` | 필터, 정렬, 페이지네이션, upsert |
 | `test_api.py` | 응답 계약, 422/404, 게시판 렌더링 |
-| `test_runner.py` | 수집 실행 규칙 — 실패 처리, 주기 판단, 루프 생존 |
+| `test_runner.py` | 라운드 실행 규칙 — 사이트 실패 처리, 주기 판단, 루프 생존 |
+| `test_source_runner.py` | 사이트 내부 실패 정책 — 전체/부분 실패, 정상 0건, 페이지 실패 |
 | `test_crawl_runs.py` | 라운드 상태 전이, stale 판정 |
 | `test_layering.py` | 패키지 경계 (백엔드가 크롤러를 임포트하지 않는지) |
 | `test_timeparse.py` | 상대 시각 환산 |
 | `test_health.py` | `/health`, `/ready` 분기 |
 | `test_crawler_parser.py`, `test_joongna_parser.py` | 카드 텍스트 파싱 |
 
-전부 브라우저 없이 돈다. `test_runner.py`가 사이트별 크롤러 대신 가짜 작업을 주입받기
-때문에, 수집 로직을 CI에서도 검증할 수 있다.
+전부 브라우저 없이 돈다. `test_runner.py`는 사이트별 크롤러 대신 가짜 작업을 주입받고,
+`test_source_runner.py`는 가짜 브랜드/페이지 수집 함수를 주입받는다. 따라서 Playwright를
+설치하지 않은 test 잡에서도 라운드 규칙과 사이트 내부 실패 정책을 함께 검증할 수 있다.
 
-특히 지키려는 것 다섯:
+특히 지키려는 것 여섯:
 
 - `test_health_survives_database_outage` — DB가 죽어도 `/health`가 200을 유지하는지.
   깨지면 DB 장애가 전체 컨테이너 재시작 폭풍으로 번진다.
@@ -698,6 +719,8 @@ uv run pytest
 - `test_backend_sees_crawler_state` — `crawl_runs` 테이블의 존재 이유 그 자체다.
 - `test_backend_does_not_import_crawler` — 패키지 경계가 무너지면 백엔드 이미지가
   뜨지 않는다. 배포해서야 아는 것보다 여기서 걸리는 게 낫다.
+- `test_collect_brands_zero_items_is_valid_success` / `test_collect_pages_all_fail_raises` —
+  정상적인 검색 결과 0건과 실제 수집 장애를 혼동하지 않는지 검증한다.
 
 ### 픽스처가 앱의 전역 엔진을 쓰는 이유
 
@@ -816,8 +839,9 @@ netstat -ano | findstr :5432
   지금은 150만원" 같은 추적이 불가능하다. 필요하면 `item_price_history` 테이블을 두고
   값이 바뀔 때만 insert하는 방식을 고려할 것.
 - `CrawledItem`/`items` 테이블에 중고나라의 "무료배송" 여부에 대응하는 필드가 아직 없음
-- 브랜드 4개 x 사이트 2개 = 검색 8회라 한 라운드가 오래 걸린다. 병렬화나 브랜드별
-  스케줄 분산을 고려할 수 있음.
+- 브랜드 4개 x 사이트 2개 = 검색 8회를 현재는 의도적으로 순차 실행한다. 외부 사이트에
+  불필요한 동시 요청을 보내지 않는 쪽을 우선한 선택이다. 대상이 늘어 한 라운드 시간이
+  운영 요구를 넘기면 bounded concurrency나 브랜드별 스케줄 분산을 고려할 수 있다.
 - `_should_crawl_now()`의 중복 수집 억제는 진짜 잠금이 아니다. 두 프로세스가 동시에
   확인하면 둘 다 통과할 수 있다. 완전한 상호 배제가 필요해지면 Postgres 어드바이저리
   락으로 올려야 한다.
@@ -826,8 +850,9 @@ netstat -ano | findstr :5432
 - 로그가 전부 `print`다. 배포하면 타임스탬프와 레벨이 있는 구조화 로그가 필요하다.
 - 게시판 스타일이 `base.html` 안에 인라인으로 들어가 있다. 시연용으로 정적 파일 마운트
   없이 돌리려는 선택이고, 프론트를 분리하면 통째로 버릴 코드다.
-- 크롤러 테스트가 파서(순수 함수)에만 있다. 브라우저를 띄우는 부분은 실제 사이트에
-  의존해서 CI에서 돌릴 수 없다. HTML 픽스처를 저장해 두고 셀렉터만 검증하는 방식을
+- 브라우저 자체를 띄우는 E2E 크롤러 테스트는 실제 사이트에 의존해서 CI에서 돌리지 않는다.
+  대신 파서, 라운드 정책(`test_runner.py`), 브랜드/페이지 실패 정책(`test_source_runner.py`)은
+  브라우저 없이 검증한다. 향후 HTML 픽스처를 저장해 셀렉터까지 고정적으로 검증하는 방식을
   고려할 수 있다.
 - CI가 이미지 빌드까지만 확인한다. compose 전체를 띄워 `/ready`가 200을 주는지까지
   보면 "문서대로 하면 돌아간다"가 보장되지만, 실행 시간이 늘어난다.
