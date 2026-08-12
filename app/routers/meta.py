@@ -33,7 +33,7 @@ from app.db.models import CrawlRunStatus
 from app.domain.brands import LUXURY_BRANDS
 from app.domain.sources import SOURCES
 from app.schemas.requests import CrawledItemFilterParams
-from app.schemas.responses import CrawlerStatus, MetaResponse
+from app.schemas.responses import CrawlerStatus, MetaResponse, ModelSummary
 
 router = APIRouter(prefix="/meta", tags=["meta"])
 
@@ -57,6 +57,7 @@ async def get_meta(session: Annotated[AsyncSession, Depends(get_session)]):
     # 나오면 사용자가 무엇을 믿어야 할지 모른다.
     total = await repository.count_items(session, CrawledItemFilterParams())
     last_crawled_at = await repository.get_last_crawled_at(session)
+    models = await repository.list_models(session)
 
     latest = await crawl_runs.get_latest_run(session)
     rounds_completed = await crawl_runs.count_successful_runs(session)
@@ -73,6 +74,7 @@ async def get_meta(session: Annotated[AsyncSession, Depends(get_session)]):
         brands=list(LUXURY_BRANDS),
         total_items=total,
         last_crawled_at=last_crawled_at,
+        models=[ModelSummary(**m) for m in models],
         crawler=CrawlerStatus(
             is_running=running,
             stale=stale,

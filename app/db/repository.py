@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import MISSING_THRESHOLD
 from app.db.engine import async_session
 from app.db.models import ItemRecord, UnavailableReason
+from app.domain.cleaning import clean_title
 from app.domain.collection import CrawlScope
 from app.domain.models import CrawledItem
 from app.schemas.requests import CrawledItemFilterParams
@@ -37,6 +38,11 @@ UPSERT_CHUNK_SIZE = 500
 _UPDATABLE_COLUMNS = (
     "source",
     "brand",
+    "search_brand",
+    "clean_title",
+    "model",
+    "is_usable",
+    "reject_reason",
     "title",
     "price",
     "price_value",
@@ -82,6 +88,14 @@ def _apply_filters(stmt: Select, filters: CrawledItemFilterParams) -> Select:
     # 판매완료 데이터가 필요한 쪽(실거래가 분석 등)은 include_inactive=true로 요청한다.
     if not filters.include_inactive:
         stmt = stmt.where(ItemRecord.is_active.is_(True))
+
+    # 정제에서 걸러진 매물은 기본 조회에서 뺀다. 향수·신발·쇼핑백이 섞이면
+    # "샤넬 최저가"가 카드지갑 가격이 되어 시세가 무너진다.
+    if not filters.include_unusable:
+        stmt = stmt.where(ItemRecord.is_usable.is_(True))
+
+    if filters.model:
+        stmt = stmt.where(ItemRecord.model == filters.model)
 
     return stmt
 
@@ -150,9 +164,20 @@ def _dedupe_by_url(items: list[CrawledItem]) -> list[dict]:
     now = datetime.now(UTC)
 
     for item in items:
+        # 저장 직전에 정제한다. 크롤러가 아니라 여기서 하는 이유는 두 사이트가
+        # 같은 규칙을 거치게 하려는 것이고, 규칙을 고쳤을 때 재처리 지점이
+        # 한 곳이어야 하기 때문이다.
+        cleaned = clean_title(item.title, search_brand=item.brand)
+
         merged[item.url] = {
             "source": item.source,
-            "brand": item.brand,
+            # 검색어가 아니라 제목에서 판정한 브랜드. 판정 실패 시 검색어를 남긴다.
+            "brand": cleaned.brand or item.brand,
+            "search_brand": item.brand,
+            "clean_title": cleaned.clean_title,
+            "model": cleaned.model,
+            "is_usable": cleaned.is_usable,
+            "reject_reason": cleaned.reject_reason,
             "title": item.title,
             "price": item.price,
             "price_value": item.price_value,
@@ -289,3 +314,45 @@ async def sweep_missing(scope: CrawlScope, seen_urls: set[str]) -> dict[str, int
         )
 
     return {"marked": marked, "deactivated": deactivated}
+
+
+async def list_models(session: AsyncSession, brand: str | None = None) -> list[dict]:
+    """
+    수집된 모델과 각 모델의 매물 수·최저가를 반환한다.
+
+    프론트의 모델 필터를 채우고, 시세 화면의 기초 자료가 된다. 정제를 통과한
+    활성 매물만 센다 — 향수나 판매완료 매물이 섞이면 최저가가 실제와 달라진다.
+
+    가격이 없는 매물(price_value가 NULL)은 최저가 계산에서 자연히 빠지지만
+    매물 수에는 포함한다. "3건 있는데 가격은 2건만 안다"가 정직한 표현이다.
+    """
+    stmt = (
+        select(
+            ItemRecord.brand,
+            ItemRecord.model,
+            func.count().label("count"),
+            func.min(ItemRecord.price_value).label("min_price"),
+        )
+        .where(
+            ItemRecord.model.is_not(None),
+            ItemRecord.is_usable.is_(True),
+            ItemRecord.is_active.is_(True),
+        )
+        .group_by(ItemRecord.brand, ItemRecord.model)
+        .order_by(func.count().desc())
+    )
+
+    if brand:
+        stmt = stmt.where(ItemRecord.brand == brand)
+
+    result = await session.execute(stmt)
+
+    return [
+        {
+            "brand": row.brand,
+            "model": row.model,
+            "count": row.count,
+            "min_price": row.min_price,
+        }
+        for row in result
+    ]

@@ -28,7 +28,22 @@ RESERVED_MARKERS: frozenset[str] = frozenset({"예약중", "예약 중"})
 NON_TITLE_LINES: frozenset[str] = (
     SOLD_MARKERS
     | RESERVED_MARKERS
-    | frozenset({"인증셀러", "안전결제", "끌올", "무료배송", "배송비 별도", "·"})
+    | frozenset(
+        {
+            "인증셀러",
+            # 중고나라 카드의 결제 버튼 라벨. 이게 빠져 있어서 실제로 제목이
+            # "안심결제"인 매물이 16건 저장됐다. 표기 변형을 함께 넣는다.
+            "안심결제",
+            "안전결제",
+            "안심결제가능",
+            "끌올",
+            "무료배송",
+            "배송비 별도",
+            "택배거래",
+            "직거래",
+            "·",
+        }
+    )
 )
 
 

@@ -60,6 +60,30 @@ class CrawledItemOut(BaseModel):
     image_url: str | None = None
     url: str = Field(description="원글 링크. 이 값이 upsert의 유니크 키이기도 하다")
     is_sold: bool
+    search_brand: str | None = Field(
+        default=None,
+        description=(
+            "크롤러가 이 매물을 찾은 검색어 브랜드. brand와 다르면 제목 기준으로 "
+            "교정된 것이다"
+        ),
+    )
+    clean_title: str | None = Field(
+        default=None,
+        description="검색용 브랜드 나열 꼬리를 뗀 제목. 화면에는 이쪽을 쓰는 게 읽기 좋다",
+    )
+    model: str | None = Field(
+        default=None,
+        description="추출한 모델명(정규형). 특정할 수 없으면 null",
+    )
+    is_usable: bool = Field(
+        description=(
+            "시세 계산에 쓸 수 있는 매물인지. 가방이 아니거나 대상 외 브랜드면 false. "
+            "is_active('지금 살 수 있는가')와는 다른 축이다"
+        )
+    )
+    reject_reason: str | None = Field(
+        default=None, description="is_usable=false인 이유. 정제 규칙 점검용"
+    )
     is_active: bool = Field(
         description=(
             "화면에 기본 노출할 대상인지. 판매완료이거나 연속으로 발견되지 않으면 false다. "
@@ -124,6 +148,21 @@ class CrawlerStatus(BaseModel):
     interval_minutes: int = Field(description="수집 주기(분)")
 
 
+class ModelSummary(BaseModel):
+    """모델별 집계. 필터 선택지이자 시세의 출발점이다."""
+
+    brand: str
+    model: str
+    count: int = Field(description="이 모델의 활성 매물 수")
+    min_price: int | None = Field(
+        default=None,
+        description=(
+            "최저가(원). 가격을 파싱하지 못한 매물은 계산에서 빠지므로 "
+            "count와 개수가 다를 수 있다"
+        ),
+    )
+
+
 class MetaResponse(BaseModel):
     """
     필터 UI를 그리는 데 필요한 값들.
@@ -143,6 +182,10 @@ class MetaResponse(BaseModel):
     last_crawled_at: datetime | None = Field(
         default=None,
         description="DB 기준 마지막 수집 시각. 데이터가 한 건도 없으면 null",
+    )
+    models: list[ModelSummary] = Field(
+        default_factory=list,
+        description="수집된 모델 목록. model 필터에 그대로 쓸 수 있다",
     )
     crawler: CrawlerStatus = Field(description="백그라운드 수집기의 현재 상태")
 

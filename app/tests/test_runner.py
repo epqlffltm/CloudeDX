@@ -184,32 +184,43 @@ async def test_failed_round_still_counts_toward_interval(session):
 async def test_loop_survives_repeated_failures(session, monkeypatch):
     """
     봇 감지나 일시적인 네트워크 문제로 한 번 실패했다고 수집을 영영 멈추면 안 된다.
+
+    고정 시간을 기다리면 DB 왕복 속도에 따라 결과가 달라진다(한 라운드마다
+    crawl_runs에 두 번 쓴다). 재시도가 실제로 일어날 때까지 기다리되,
+    영원히 매달리지 않도록 상한을 둔다.
     """
     monkeypatch.setattr(runner, "CRAWL_INTERVAL_SECONDS", 30)
     monkeypatch.setattr(runner, "RETRY_DELAY_SECONDS", 0.01)
 
     attempts = 0
+    second_attempt = asyncio.Event()
 
     async def flaky() -> int:
         nonlocal attempts
         attempts += 1
+
+        if attempts >= 2:
+            second_attempt.set()
+
         raise RuntimeError("네트워크 끊김")
 
     flaky.__name__ = "flaky"
 
     task = asyncio.create_task(runner.crawler_loop((flaky,)))
-    await asyncio.sleep(0.1)
-    still_running = not task.done()
-
-    task.cancel()
 
     try:
-        await task
-    except asyncio.CancelledError:
-        pass
+        await asyncio.wait_for(second_attempt.wait(), timeout=10)
+        still_running = not task.done()
+    finally:
+        task.cancel()
+
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
     assert still_running, "루프가 실패를 만나 죽었다"
-    assert attempts > 1, "재시도하지 않았다"
+    assert attempts >= 2, "재시도하지 않았다"
 
 
 async def test_loop_retries_sooner_than_normal_interval(monkeypatch, session):
@@ -246,3 +257,4 @@ async def test_loop_waits_when_recent_round_exists(session, monkeypatch):
         pass
 
     assert started is False
+    

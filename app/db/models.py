@@ -71,6 +71,32 @@ class ItemRecord(Base):
         DateTime(timezone=True), index=True
     )
 
+    # ---- 정제 결과 --------------------------------------------------------
+    #
+    # brand는 크롤러의 검색어가 아니라 제목에서 다시 판정한 값이다. 실측 599건에서
+    # "루이비통 가방"으로 검색한 218건 중 31건 이상이 실제로는 구찌였다 — 셀러가
+    # 검색 노출을 위해 제목 끝에 브랜드를 20개씩 나열하기 때문이다.
+    # 검색어는 search_brand에 그대로 남겨, 판정이 틀렸을 때 대조할 수 있게 한다.
+    search_brand: Mapped[str | None] = mapped_column(String(20), index=True)
+
+    # 스팸 꼬리를 뗀 제목. 화면 표시와 모델 추출에 쓴다. 원본은 title에 남는다.
+    clean_title: Mapped[str | None] = mapped_column(Text)
+
+    # 추출한 모델명(정규형). 시세 계산의 그룹 키가 된다. 못 찾으면 NULL이고,
+    # 실측 기준 유효 매물의 37%에서만 잡힌다 — 나머지는 제목이 모델을 특정하지
+    # 못하는 경우다("샤넬 미니 가방", "새상품 구찌가방").
+    model: Mapped[str | None] = mapped_column(String(40), index=True)
+
+    # 시세 계산에 쓸 수 있는 매물인지. 가방이 아니거나(향수·신발·쇼핑백) 대상 외
+    # 브랜드면 False다. is_active와는 다른 축이다 — is_active는 "지금 살 수 있는가",
+    # 이쪽은 "애초에 우리가 다루는 상품인가"를 뜻한다.
+    is_usable: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="true", index=True
+    )
+
+    # 제외 사유. 규칙을 조정할 때 무엇이 왜 걸렸는지 봐야 하므로 남긴다.
+    reject_reason: Mapped[str | None] = mapped_column(String(60))
+
     # ---- 생명주기 --------------------------------------------------------
     #
     # 매물은 팔리거나 삭제되면 사이트에서 사라지는데, 크롤링 결과에 없다는 것만으로는

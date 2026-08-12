@@ -46,6 +46,19 @@ class CrawledItemFilterParams(PaginationParams):
         default=None,
         description="판매완료 여부. 지정하지 않으면 활성 매물 기준으로 전부 포함",
     )
+    model: str | None = Field(
+        default=None,
+        description="모델명으로 필터링. /api/meta 의 models 에서 값을 받을 수 있다",
+        examples=["마몬트"],
+    )
+    include_unusable: bool = Field(
+        default=False,
+        description=(
+            "정제에서 걸러진 매물(가방 아님·대상 외 브랜드)까지 포함할지. 기본은 "
+            "제외한다 — 향수나 쇼핑백 가격이 가방 최저가로 잡히면 시세가 무너진다. "
+            "정제 규칙을 점검할 때만 true로 둔다"
+        ),
+    )
     include_inactive: bool = Field(
         default=False,
         description=(

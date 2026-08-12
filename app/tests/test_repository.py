@@ -60,15 +60,15 @@ async def test_upsert_dedupes_within_batch(session):
     """
     saved = await repository.upsert_items(
         [
-            make_item(url="https://ex.com/1", title="처음"),
-            make_item(url="https://ex.com/1", title="나중"),
+            make_item(url="https://ex.com/1", title="샤넬 클래식 처음"),
+            make_item(url="https://ex.com/1", title="샤넬 클래식 나중"),
         ]
     )
 
     assert saved == 1
 
     rows = await repository.list_items(session, CrawledItemFilterParams())
-    assert rows[0].title == "나중"
+    assert rows[0].title == "샤넬 클래식 나중"
 
 
 async def test_upsert_preserves_first_seen_at(session):
@@ -82,7 +82,7 @@ async def test_upsert_preserves_first_seen_at(session):
     first_seen = original.first_seen_at
 
     await repository.upsert_items(
-        [make_item(url="https://ex.com/1", title="가격 내림", price_value=3_000_000)]
+        [make_item(url="https://ex.com/1", title="샤넬 클래식 가격 내림", price_value=3_000_000)]
     )
 
     session.expire_all()
@@ -91,7 +91,7 @@ async def test_upsert_preserves_first_seen_at(session):
     assert updated.first_seen_at == first_seen
     assert updated.last_seen_at > first_seen
     assert updated.price_value == 3_000_000
-    assert updated.title == "가격 내림"
+    assert updated.title == "샤넬 클래식 가격 내림"
 
 
 async def test_upsert_keeps_earliest_posted_at(session):
