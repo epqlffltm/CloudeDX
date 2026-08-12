@@ -105,25 +105,31 @@ async def collect_pages[T](
         except Exception as exc:
             error = f"{page_num}페이지: {type(exc).__name__}: {exc}"
             errors.append(error)
-            print(
-                f"[crawler] {source_name} {page_num} 페이지 진행 중 오류, "
-                f"다음 페이지로 건너뜀: {exc}"
+            logger.warning(
+                "%s %d 페이지 진행 중 오류, 다음 페이지로 건너뜀: %s",
+                source_name,
+                page_num,
+                exc,
             )
             continue
 
         succeeded += 1
 
         if not page_items:
-            print(
-                f"[crawler] {source_name} {page_num} 페이지에서 상품을 찾지 못해 "
-                "수집을 마칩니다."
+            logger.info(
+                "%s %d 페이지에서 상품을 찾지 못해 수집을 마칩니다.",
+                source_name,
+                page_num,
             )
             break
 
         all_items.extend(page_items)
-        print(
-            f"[crawler] {source_name} {page_num} 페이지 {len(page_items)}건 "
-            f"(누적: {len(all_items)}건)"
+        logger.info(
+            "%s %d 페이지 %d건 (누적: %d건)",
+            source_name,
+            page_num,
+            len(page_items),
+            len(all_items),
         )
 
         if page_num < max_pages and between_page_pause_seconds > 0:

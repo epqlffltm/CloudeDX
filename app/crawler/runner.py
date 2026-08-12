@@ -108,9 +108,9 @@ async def should_crawl_now() -> bool:
             logger.info("다른 프로세스가 수집 중이라 이번 차례는 건너뜁니다.")
             return False
 
-        print(
-            f"[crawler] {CRAWL_RUN_TIMEOUT_MINUTES}분 넘게 running으로 남은 기록이 있습니다. "
-            "비정상 종료로 보고 새로 시작합니다."
+        logger.warning(
+            "%d분 넘게 running으로 남은 기록이 있습니다. 비정상 종료로 보고 새로 시작합니다.",
+            CRAWL_RUN_TIMEOUT_MINUTES,
         )
         return True
 
@@ -151,9 +151,10 @@ async def crawler_loop(jobs: tuple[CrawlJob, ...]) -> None:
     while True:
         try:
             total = await run_crawl_round(jobs)
-            print(
-                f"[crawler] 라운드 완료: {total}건. "
-                f"{CRAWL_INTERVAL_MINUTES}분 뒤 다시 수집합니다."
+            logger.info(
+                "라운드 완료: %d건. %d분 뒤 다시 수집합니다.",
+                total,
+                CRAWL_INTERVAL_MINUTES,
             )
             delay = CRAWL_INTERVAL_SECONDS
         except asyncio.CancelledError:
