@@ -60,7 +60,9 @@ class JoongnaCrawler:
             time_text=parsed.get("time_text"),
             image_url=parsed["image_url"],
             url=parsed["url"],
-            is_sold=False,  # 원본 스크립트에 판매완료 판별 로직이 없어 기본값으로 둔다
+            # 파서가 카드 원문에서 판매완료 배지를 찾아 넣어준다.
+            # 값이 없는 옛 데이터를 대비해 기본값을 False로 둔다.
+            is_sold=parsed.get("is_sold", False),
         )
 
     async def _collect_page(self, page, page_num: int) -> list[dict]:

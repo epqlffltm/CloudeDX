@@ -9,17 +9,15 @@ Playwright 요소 없이도 테스트할 수 있는 순수 함수로 분리 (joo
 import re
 from urllib.parse import urlparse
 
+from app.domain.listing_status import NON_TITLE_LINES
+from app.domain.listing_status import is_sold as detect_sold
+
 _PRICE_PATTERN = re.compile(r"(?:\d[\d,]*\s*원|나눔)")
 _TIME_PATTERN = re.compile(
     r"(?:방금\s*전|(?:끌올\s*)?\d+\s*(?:초|분|시간|일|주|개월|달|년)\s*전)"
 )
-_IGNORED_LINES = {
-    "판매완료",
-    "거래완료",
-    "예약중",
-    "끌올",
-    "·",
-}
+# 제목이 될 수 없는 줄. 공유 목록(app/domain/listing_status.py)에 당근 전용 표기를 더한다.
+_IGNORED_LINES = NON_TITLE_LINES | {"끌올"}
 
 
 def normalize_text(value: str) -> str:
@@ -162,7 +160,10 @@ def parse_card_text(
     if not lines:
         return None
 
-    is_sold = "판매완료" in text or "거래완료" in text
+    # 판정 규칙은 app/domain/listing_status.py에 모아 뒀다. 두 사이트가 같은 한국어
+    # 표기를 쓰는데 각자 구현하면 한쪽만 고치게 된다 — 실제로 중고나라에는 이 판정이
+    # 아예 없던 시기가 있었다.
+    is_sold = detect_sold(text)
     price = _find_price(lines)
     time_text = _find_time(text)
     title = _find_title(lines, price)
