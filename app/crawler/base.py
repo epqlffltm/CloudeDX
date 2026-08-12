@@ -17,16 +17,22 @@ from pathlib import Path
 
 from playwright.async_api import Browser, BrowserContext, Page, Playwright
 
+# 브라우저 식별 문자열.
+#
+# 자동화를 숨기려는 목적이 아니다. Playwright 기본값은 "HeadlessChrome"을 포함해서
+# 일부 사이트가 렌더링 자체를 다르게 하거나 빈 페이지를 주는데, 그러면 셀렉터가
+# 아무것도 못 잡아 원인 파악이 어려워진다. 일반 Chrome과 같은 값을 써서 우리가 보는
+# 화면과 실제 사용자가 보는 화면을 일치시키는 것이 목적이다.
+#
+# navigator.webdriver 를 지우는 스크립트가 예전에 여기 있었는데 제거했다. 그건
+# 봇 감지를 우회하려는 코드이고, 사이트가 자동화를 거절하겠다는 의사 표시를
+# 기술적으로 무력화하는 셈이라 수집 도구가 넘지 않아야 할 선이다. 차단되면 우회
+# 대신 수집 주기를 늘리거나 공식 API를 쓰는 쪽으로 대응한다.
 _DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/120.0.0.0 Safari/537.36"
 )
-
-# Selenium 버전 browser.py가 하던 navigator.webdriver 숨기기를 그대로 이식.
-_HIDE_WEBDRIVER_SCRIPT = """
-Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-"""
 
 
 @dataclass(slots=True)
@@ -47,7 +53,6 @@ async def create_browser_context(
         viewport={"width": config.viewport_width, "height": config.viewport_height},
         user_agent=config.user_agent,
     )
-    await context.add_init_script(_HIDE_WEBDRIVER_SCRIPT)
     return browser, context
 
 

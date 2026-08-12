@@ -19,6 +19,8 @@ app/crawler/source_runner.py에 있다.
 DB upsert까지 막아서는 안 되기 때문이다. JSON이 필요하면 수동 실행용 CLI에서 저장한다.
 """
 
+import logging
+
 from app.config import JOONGNA_PAGES_PER_BRAND
 from app.crawler.daangn.config import DaangnCrawlerConfig
 from app.crawler.daangn.crawler import DaangnCrawler
@@ -29,10 +31,12 @@ from app.crawler.source_runner import collect_brands
 from app.db.repository import upsert_items
 from app.domain.brands import LUXURY_BRANDS
 
+logger = logging.getLogger(__name__)
+
 
 async def crawl_daangn_once() -> int:
     """당근마켓을 브랜드별로 한 바퀴 수집하고 저장한 건수를 반환한다."""
-    print("[crawler] 당근마켓 자동 크롤링 시작")
+    logger.info("당근마켓 자동 크롤링 시작")
 
     async def crawl_brand(brand: str):
         crawler = DaangnCrawler(
@@ -52,14 +56,14 @@ async def crawl_daangn_once() -> int:
 
     saved = await upsert_items(all_items)
 
-    print(f"[crawler] 당근마켓 자동 크롤링 완료: 총 {saved}건")
+    logger.info("당근마켓 자동 크롤링 완료: 총 %s건", saved)
 
     return saved
 
 
 async def crawl_joongna_once() -> int:
     """중고나라를 브랜드별로 한 바퀴 수집하고 저장한 건수를 반환한다."""
-    print("[crawler] 중고나라 자동 크롤링 시작")
+    logger.info("중고나라 자동 크롤링 시작")
 
     async def crawl_brand(brand: str):
         crawler = JoongnaCrawler(
@@ -79,7 +83,7 @@ async def crawl_joongna_once() -> int:
 
     saved = await upsert_items(all_items)
 
-    print(f"[crawler] 중고나라 자동 크롤링 완료: 총 {saved}건")
+    logger.info("중고나라 자동 크롤링 완료: 총 %s건", saved)
 
     return saved
 

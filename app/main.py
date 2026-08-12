@@ -44,6 +44,7 @@ Windows 참고:
 """
 
 import asyncio
+import logging
 import sys
 from contextlib import asynccontextmanager
 
@@ -53,10 +54,17 @@ from fastapi.responses import RedirectResponse
 
 from app.config import ALLOWED_ORIGINS, API_PREFIX, DATABASE_URL, ENABLE_CRAWLER
 from app.db.engine import mask_url, wait_for_db
+from app.logging_config import setup_logging
 from app.routers.crawled import router as crawled_router
 from app.routers.health import router as health_router
 from app.routers.meta import router as meta_router
 from app.routers.web import router as web_router
+
+logger = logging.getLogger(__name__)
+
+# uvicorn이 이 모듈을 임포트한 직후 실행된다. 라우터가 로거를 얻기 전에 끝나야
+# 첫 로그부터 형식이 맞는다.
+setup_logging()
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
@@ -76,7 +84,7 @@ def _log_crawler_exit(task: asyncio.Task) -> None:
     exc = task.exception()
 
     if exc is not None:
-        print(f"[crawler] 수집 루프가 예기치 않게 종료됨: {type(exc).__name__}: {exc}")
+        logger.warning("수집 루프가 예기치 않게 종료됨: %s: %s", type(exc).__name__, exc)
 
 
 def _start_crawler() -> asyncio.Task | None:
@@ -90,9 +98,9 @@ def _start_crawler() -> asyncio.Task | None:
         from app.crawler.runner import crawler_loop
         from app.crawler.scheduler import CRAWL_JOBS
     except ImportError as exc:
-        print(f"[crawler] 크롤러를 시작할 수 없습니다: {exc}")
-        print("[crawler] 크롤러가 필요하면 'uv sync --extra crawler' 로 설치하세요.")
-        print("[crawler] 크롤러를 별도 컨테이너로 돌리는 구성이라면 정상입니다.")
+        logger.warning("크롤러를 시작할 수 없습니다: %s", exc)
+        logger.info("크롤러가 필요하면 'uv sync --extra crawler' 로 설치하세요.")
+        logger.info("크롤러를 별도 컨테이너로 돌리는 구성이라면 정상입니다.")
         return None
 
     task = asyncio.create_task(crawler_loop(CRAWL_JOBS))
@@ -105,9 +113,9 @@ def _start_crawler() -> asyncio.Task | None:
 async def lifespan(app: FastAPI):
     # 테이블을 만들지는 않는다 — 스키마는 Alembic이 관리한다. 여기서는 DB가 응답하는지만
     # 확인하고, 컨테이너가 아직 기동 중이면 잠깐 기다린다.
-    print(f"[db] 연결 확인 중... ({mask_url(DATABASE_URL)})")
+    logger.info("연결 확인 중... (%s)", mask_url(DATABASE_URL))
     await wait_for_db()
-    print("[db] 연결 확인 완료")
+    logger.info("연결 확인 완료")
 
     crawler_task: asyncio.Task | None = None
 
@@ -115,7 +123,7 @@ async def lifespan(app: FastAPI):
         # await하지 않는다 — 서버는 바로 열리고 수집은 뒤에서 돈다.
         crawler_task = _start_crawler()
     else:
-        print("[crawler] ENABLE_CRAWLER=false 라서 백그라운드 크롤러를 시작하지 않음")
+        logger.info("ENABLE_CRAWLER=false 라서 백그라운드 크롤러를 시작하지 않음")
 
     yield
 
@@ -146,7 +154,7 @@ if ALLOWED_ORIGINS:
         allow_methods=["GET"],
         allow_headers=["*"],
     )
-    print(f"[cors] 허용 출처: {', '.join(ALLOWED_ORIGINS)}")
+    logger.info("허용 출처: %s", ', '.join(ALLOWED_ORIGINS))
 
 app.include_router(health_router)
 app.include_router(web_router)

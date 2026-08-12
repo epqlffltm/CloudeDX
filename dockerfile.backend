@@ -7,7 +7,9 @@
 
 FROM python:3.13-slim AS base
 
-ENV PYTHONUNBUFFERED=1 \
+# 컨테이너에서는 구조화 로그를 기본으로 한다. 수집기가 필드 단위로 질의할 수 있다.
+ENV LOG_FORMAT=json \
+    PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_COMPILE_BYTECODE=1

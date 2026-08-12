@@ -8,6 +8,7 @@
 DB 저장은 여기서 하지 않는다.
 """
 
+import logging
 from urllib.parse import urlencode
 
 from playwright.async_api import async_playwright
@@ -20,6 +21,8 @@ from app.crawler.daangn.parser import (
     parse_price_value,
 )
 from app.domain.models import CrawledItem
+
+logger = logging.getLogger(__name__)
 
 ITEM_LINK_SELECTOR = "a[href*='/kr/buy-sell/']"
 
@@ -77,7 +80,7 @@ class DaangnCrawler:
 
             try:
                 url = self._build_search_url()
-                print(f"[daangn] 접속 중: {url}")
+                logger.info("[daangn] 접속 중: %s", url)
 
                 await page.goto(
                     url,
@@ -101,4 +104,3 @@ class DaangnCrawler:
                 await browser.close()
 
         return [self._to_item(parsed) for parsed in cards.values()]
-

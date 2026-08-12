@@ -22,6 +22,7 @@
 """
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
@@ -32,6 +33,8 @@ from app.config import (
 )
 from app.db import crawl_runs
 from app.db.models import CrawlRunStatus
+
+logger = logging.getLogger(__name__)
 
 CRAWL_INTERVAL_SECONDS = CRAWL_INTERVAL_MINUTES * 60
 RETRY_DELAY_SECONDS = CRAWL_RETRY_MINUTES * 60
@@ -61,7 +64,7 @@ async def run_crawl_round(jobs: tuple[CrawlJob, ...]) -> int:
                 total += await job()
             except Exception as exc:
                 errors.append(f"{job.__name__}: {exc}")
-                print(f"[crawler] {job.__name__} 실패: {exc}")
+                logger.warning("%s 실패: %s", job.__name__, exc)
 
         if len(errors) == len(jobs):
             raise RuntimeError("모든 수집 작업이 실패했습니다 — " + " / ".join(errors))
@@ -97,12 +100,12 @@ async def should_crawl_now() -> bool:
     latest = await crawl_runs.get_latest_run()
 
     if latest is None:
-        print("[crawler] 수집 기록이 없어 즉시 시작합니다.")
+        logger.info("수집 기록이 없어 즉시 시작합니다.")
         return True
 
     if latest.status == CrawlRunStatus.RUNNING:
         if not crawl_runs.is_stale(latest, CRAWL_RUN_TIMEOUT_MINUTES):
-            print("[crawler] 다른 프로세스가 수집 중이라 이번 차례는 건너뜁니다.")
+            logger.info("다른 프로세스가 수집 중이라 이번 차례는 건너뜁니다.")
             return False
 
         print(
@@ -119,11 +122,11 @@ async def should_crawl_now() -> bool:
     elapsed = (datetime.now(UTC) - reference).total_seconds()
 
     if elapsed >= CRAWL_INTERVAL_SECONDS:
-        print(f"[crawler] 마지막 수집이 {int(elapsed // 60)}분 전이라 즉시 시작합니다.")
+        logger.info("마지막 수집이 %s분 전이라 즉시 시작합니다.", int(elapsed // 60))
         return True
 
     remaining = int((CRAWL_INTERVAL_SECONDS - elapsed) // 60)
-    print(f"[crawler] 마지막 수집이 최근이라 건너뜁니다. 약 {remaining}분 뒤 시작합니다.")
+    logger.info("마지막 수집이 최근이라 건너뜁니다. 약 %s분 뒤 시작합니다.", remaining)
 
     return False
 
@@ -140,7 +143,7 @@ async def crawler_loop(jobs: tuple[CrawlJob, ...]) -> None:
     (app/main.py 참고). 크롤러를 별도 컨테이너로 띄울 때는 app/crawler/__main__.py가
     이 루프만 돌린다.
     """
-    print(f"[crawler] 백그라운드 수집 시작 (주기 {CRAWL_INTERVAL_MINUTES}분)")
+    logger.info("백그라운드 수집 시작 (주기 %s분)", CRAWL_INTERVAL_MINUTES)
 
     if not await should_crawl_now():
         await asyncio.sleep(CRAWL_INTERVAL_SECONDS)
@@ -155,11 +158,11 @@ async def crawler_loop(jobs: tuple[CrawlJob, ...]) -> None:
             delay = CRAWL_INTERVAL_SECONDS
         except asyncio.CancelledError:
             # 프로세스 종료 신호. 조용히 빠져나간다.
-            print("[crawler] 수집 루프를 종료합니다.")
+            logger.info("수집 루프를 종료합니다.")
             raise
         except Exception as exc:
-            print(f"[crawler] 라운드 전체 실패: {exc}")
-            print(f"[crawler] {CRAWL_RETRY_MINUTES}분 뒤 다시 시도합니다.")
+            logger.warning("라운드 전체 실패: %s", exc)
+            logger.info("%s분 뒤 다시 시도합니다.", CRAWL_RETRY_MINUTES)
             delay = RETRY_DELAY_SECONDS
 
         await asyncio.sleep(delay)

@@ -22,15 +22,39 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-def _int_env(name: str, default: int) -> int:
-    """숫자 환경변수를 읽는다. 값이 비었거나 숫자가 아니면 기본값을 쓴다."""
+def _int_env(name: str, default: int, *, minimum: int | None = None) -> int:
+    """
+    숫자 환경변수를 읽는다. 값이 비었거나 숫자가 아니면 기본값을 쓴다.
+
+    minimum을 주면 그보다 작은 값도 기본값으로 되돌린다. 여기서 걸러내는 이유는
+    잘못된 값이 한참 뒤에 엉뚱한 증상으로 나타나기 때문이다 — CRAWL_INTERVAL_MINUTES=0
+    이면 크롤러가 쉬지 않고 사이트를 두드려 차단당하고, JOONGNA_PAGES_PER_BRAND=0이면
+    "수집은 도는데 아무것도 안 쌓이는" 상태가 된다. 둘 다 원인을 찾기 어렵다.
+
+    오타 하나로 컨테이너가 부팅에 실패하는 것도 곤란하므로, 예외를 올리지 않고
+    경고를 남긴 뒤 기본값으로 진행한다.
+    """
     raw = os.getenv(name, "").strip()
 
+    if not raw:
+        return default
+
     try:
-        return int(raw) if raw else default
+        value = int(raw)
     except ValueError:
+        # 로깅 설정 전에 실행되는 모듈이라 print를 쓴다. setup_logging()이
+        # app.config를 임포트하므로 여기서 로거를 쓰면 순환 참조가 된다.
         print(f"[config] {name}={raw!r} 를 숫자로 읽을 수 없어 기본값 {default} 을 씁니다.")
         return default
+
+    if minimum is not None and value < minimum:
+        print(
+            f"[config] {name}={value} 는 최소값 {minimum} 보다 작아 "
+            f"기본값 {default} 을 씁니다."
+        )
+        return default
+
+    return value
 
 
 def _bool_env(name: str, default: bool) -> bool:
@@ -63,20 +87,20 @@ DATABASE_URL = os.getenv(
 ENABLE_CRAWLER = _bool_env("ENABLE_CRAWLER", True)
 
 # 수집 주기(분). 사이트 부하와 봇 감지를 감안하면 너무 짧게 잡지 않는 게 좋다.
-CRAWL_INTERVAL_MINUTES = _int_env("CRAWL_INTERVAL_MINUTES", 30)
+CRAWL_INTERVAL_MINUTES = _int_env("CRAWL_INTERVAL_MINUTES", 30, minimum=1)
 
 # 라운드가 통째로 실패했을 때 다음 시도까지의 대기(분). 정상 주기보다 짧게 잡아,
 # 일시적인 문제로 실패했을 때 주기 전체를 버리지 않게 한다.
-CRAWL_RETRY_MINUTES = _int_env("CRAWL_RETRY_MINUTES", 5)
+CRAWL_RETRY_MINUTES = _int_env("CRAWL_RETRY_MINUTES", 5, minimum=1)
 
 # 스케줄 실행에서는 브랜드 수만큼 곱해지니 CLI 기본값(5)보다 페이지 수를 줄인다.
-JOONGNA_PAGES_PER_BRAND = _int_env("JOONGNA_PAGES_PER_BRAND", 3)
+JOONGNA_PAGES_PER_BRAND = _int_env("JOONGNA_PAGES_PER_BRAND", 3, minimum=1)
 
 # 'running'으로 남은 수집 기록을 죽은 것으로 볼 때까지의 시간(분).
 # 크롤러가 SIGKILL이나 전원 차단으로 죽으면 종료 시각을 못 남긴다. 그 기록을 그대로
 # 믿으면 /api/meta가 영원히 "수집 중"이라고 답한다. 한 라운드가 정상적으로 걸리는
 # 시간(수 분)보다 넉넉히 크게 잡되, 무한정 기다리지는 않는 값이어야 한다.
-CRAWL_RUN_TIMEOUT_MINUTES = _int_env("CRAWL_RUN_TIMEOUT_MINUTES", 60)
+CRAWL_RUN_TIMEOUT_MINUTES = _int_env("CRAWL_RUN_TIMEOUT_MINUTES", 60, minimum=1)
 
 # ---------------------------------------------------------------------------
 # API
@@ -93,3 +117,15 @@ ALLOWED_ORIGINS = [
 # API 경로 접두어. 화면(/board)과 분리해 두면 리버스 프록시에서 /api만 백엔드로
 # 넘기는 구성이 쉬워지고, 나중에 /api/v2를 병행하는 것도 가능해진다.
 API_PREFIX = "/api"
+
+
+# ---------------------------------------------------------------------------
+# 로깅
+# ---------------------------------------------------------------------------
+
+# DEBUG / INFO / WARNING / ERROR
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").strip().upper() or "INFO"
+
+# text = 사람이 읽는 형식(로컬), json = 한 줄 JSON(배포).
+# 로그 수집기가 필드 단위로 질의하려면 json이 필요하다.
+LOG_FORMAT = os.getenv("LOG_FORMAT", "text").strip().lower() or "text"

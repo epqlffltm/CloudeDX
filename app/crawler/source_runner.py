@@ -18,10 +18,10 @@ Playwright를 임포트하지 않는다. 그래서 실제 브라우저 없이도
 """
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable, Sequence
-from typing import TypeVar
 
-T = TypeVar("T")
+logger = logging.getLogger(__name__)
 
 
 
@@ -33,7 +33,7 @@ class AllPagesFailedError(RuntimeError):
     """한 브랜드에서 시도한 모든 페이지 수집이 예외로 실패했을 때 발생한다."""
 
 
-async def collect_brands(
+async def collect_brands[T](
     *,
     source_name: str,
     brands: Sequence[str],
@@ -61,12 +61,12 @@ async def collect_brands(
         except Exception as exc:
             error = f"{brand}: {type(exc).__name__}: {exc}"
             errors.append(error)
-            print(f"[crawler] {source_name} '{brand}' 크롤링 실패: {exc}")
+            logger.warning("%s '%s' 크롤링 실패: %s", source_name, brand, exc)
             continue
 
         succeeded += 1
         all_items.extend(items)
-        print(f"[crawler] {source_name} '{brand}' {len(items)}건")
+        logger.info("%s '%s' %s건", source_name, brand, len(items))
 
     if succeeded == 0:
         raise AllBrandsFailedError(
@@ -76,7 +76,7 @@ async def collect_brands(
     return all_items
 
 
-async def collect_pages(
+async def collect_pages[T](
     *,
     source_name: str,
     max_pages: int,

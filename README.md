@@ -336,6 +336,28 @@ curl http://localhost:8000/api/meta
 docker compose -f docker-compose.yml up -d
 ```
 
+## 수집 예절
+
+수집 대상 사이트에 대한 태도를 코드에 반영해 뒀다.
+
+**봇 감지를 우회하지 않는다.** 예전에 `navigator.webdriver`를 지우는 스크립트가
+`base.py`에 있었는데 제거했다. 사이트가 자동화를 거절하겠다는 의사 표시를 기술적으로
+무력화하는 셈이라, 수집 도구가 넘지 않아야 할 선이라고 봤다. 차단되면 우회 대신 수집
+주기를 늘리거나 공식 API를 쓰는 쪽으로 대응한다.
+
+User-Agent는 일반 Chrome 값으로 두는데, 이건 숨기려는 목적이 아니다. Playwright 기본값은
+`HeadlessChrome`을 포함해서 일부 사이트가 렌더링을 다르게 하거나 빈 페이지를 주는데,
+그러면 셀렉터가 아무것도 못 잡아 원인 파악이 어려워진다. 우리가 보는 화면과 실제
+사용자가 보는 화면을 일치시키는 것이 목적이다.
+
+**요청을 몰아치지 않는다.** 브랜드와 페이지를 순서대로 돈다. 병렬로 돌리면 한 라운드는
+빨라지지만 사이트에는 순간 부하가 몰린다. 655건 수집에 몇 분 걸리는 건 30분 주기에서
+전혀 문제가 되지 않으므로 직렬을 유지한다.
+
+**같은 것을 두 번 긁지 않는다.** 마지막 라운드가 주기 안이면 건너뛴다
+(`should_crawl_now`). 개발 중 재시작이나 스케줄러 중복 실행으로 사이트를 연달아
+두드리는 걸 막는다.
+
 ## 환경 변수
 
 프로젝트 루트의 `.env`를 읽는다. `.env.example`을 복사해서 시작하면 된다.
@@ -352,6 +374,13 @@ docker compose -f docker-compose.yml up -d
 | `BACKEND_PORT` | `8000` | 백엔드 컨테이너를 호스트에 노출할 포트 |
 | `TEST_DATABASE_URL` | `...@127.0.0.1:5432/cloudedx_test` | 테스트 전용 DB. 개발용과 분리해야 안전하다 |
 | `ALLOWED_ORIGINS` | (비어 있음) | CORS 허용 출처. 쉼표로 구분. 비우면 미들웨어를 붙이지 않는다 |
+| `LOG_LEVEL` | `INFO` | DEBUG / INFO / WARNING / ERROR |
+| `LOG_FORMAT` | `text` | `json`이면 한 줄 JSON. 컨테이너 이미지는 `json`이 기본 |
+
+숫자 설정은 1 미만이면 경고를 남기고 기본값으로 되돌린다. `CRAWL_INTERVAL_MINUTES=0`이면
+크롤러가 쉬지 않고 사이트를 두드리고, `JOONGNA_PAGES_PER_BRAND=0`이면 "수집은 도는데
+아무것도 안 쌓이는" 상태가 되는데 둘 다 며칠 뒤에야 알아챈다. 다만 오타 하나로 컨테이너가
+부팅에 실패하는 것도 곤란해서 예외를 올리지는 않는다.
 
 compose로 띄울 때 `DATABASE_URL`은 `.env` 값이 아니라 compose가 주입하는
 `postgresql+asyncpg://cloudedx:cloudedx@db:5432/cloudedx`가 쓰인다. 컨테이너끼리는
@@ -506,7 +535,23 @@ API는 정상 응답한다.
 꺼두더라도 DB 테이블 준비는 항상 하기 때문에, 이전에 수집해둔 데이터가 있으면 게시판과
 API 모두 정상적으로 조회된다.
 
-크롤러만 단독으로 돌리고 싶으면 (브랜드 하나 또는 전체, DB에도 upsert됨):
+크롤러를 단독 프로세스로 돌리려면:
+
+```
+uv run python -m app.crawler              # 주기 루프 (상시 컨테이너)
+uv run python -m app.crawler --once       # 한 라운드만 돌고 종료
+uv run python -m app.crawler --once --force   # 주기를 무시하고 즉시 수집
+```
+
+`--once`는 ECS 스케줄 태스크나 CronJob을 위한 것이다. 그런 환경은 "실행하고 끝나는"
+프로세스를 전제하는데, 상시 루프를 넣으면 태스크가 영원히 끝나지 않아 스케줄러가 다음
+실행을 겹쳐 띄우거나 타임아웃으로 죽인다. 종료 코드도 의미를 갖는다 — 실패를 0으로
+끝내면 스케줄러는 성공으로 알고 알람을 울리지 않으므로, 라운드가 실패하면 1로 끝낸다.
+
+`--force` 없이 `--once`를 쓰면 주기를 먼저 확인한다. 스케줄러가 실수로 촘촘히 띄우거나
+재시도를 걸었을 때 사이트를 연달아 두드리지 않게 하려는 것이다.
+
+특정 브랜드만 긁어보려면 (DB에도 upsert됨):
 
 ```
 uv run python -m app.crawler.daangn.run --brand "샤넬" --show-browser
@@ -578,6 +623,8 @@ uv run python -m app.crawler.daangn.debug_cards --query "냉장고"
 `has_next`를 서버가 직접 내려주는 이유는 `offset + count < total` 규칙이 프론트 코드에
 복사되는 걸 막기 위해서다 — 나중에 커서 기반으로 바꿔도 클라이언트는 그대로 둘 수 있다.
 
+`items` 원소의 전체 필드와 주의할 점은 아래 "프론트엔드 연결"의 응답 예시를 참고.
+
 ### 프론트엔드 연결
 
 API는 `/api` 아래에 모여 있다. 화면 경로(`/board`)와 분리해 뒀기 때문에, 리버스
@@ -596,8 +643,81 @@ ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 **필터 선택지**: 브랜드·수집처 목록을 프론트에 하드코딩하지 말고 `/api/meta`에서 받아라.
 `app/domain/brands.py`에 브랜드를 추가해도 프론트 코드는 그대로 둘 수 있다.
 
+#### 응답 예시
+
+`GET /api/crawled-items?brand=샤넬&limit=20`
+
+```json
+{
+  "total": 655,
+  "count": 20,
+  "limit": 20,
+  "offset": 0,
+  "has_next": true,
+  "items": [
+    {
+      "id": 1,
+      "source": "당근마켓",
+      "brand": "샤넬",
+      "title": "샤넬 클래식 플랩 미디움 캐비어",
+      "price": "4,000,000원",
+      "price_value": 4000000,
+      "region": "서초구 반포동",
+      "time_text": "3시간 전",
+      "posted_at": "2026-08-12T05:10:00Z",
+      "image_url": "https://img.kr.gcp-karroter.net/origin/article/...",
+      "url": "https://www.daangn.com/kr/buy-sell/...",
+      "is_sold": false,
+      "first_seen_at": "2026-08-10T02:00:00Z",
+      "last_seen_at": "2026-08-12T08:30:00Z"
+    }
+  ]
+}
+```
+
+프론트에서 주의할 필드가 셋 있다.
+
+- **`price` vs `price_value`** — 앞은 사이트 원문(`"400만원"`처럼 제각각), 뒤는 파싱한
+  숫자다. 정렬이나 비교에는 `price_value`를 쓰고, 파싱에 실패하면 `null`이라
+  "가격 미상"으로 표시해야 한다. 가격 필터를 걸면 이런 매물은 결과에서 빠진다.
+- **`posted_at`이 `null`일 수 있다** — 사이트가 등록 시각을 표기하지 않은 경우다.
+  이때는 `first_seen_at`으로 대체하되 "등록"이 아니라 "수집"이라고 적어야 한다.
+  수집 시각을 등록일처럼 보여주면 실제보다 최근 글로 오해한다.
+- **`is_sold`** — 판매완료 매물도 기본 응답에 포함된다. 숨기려면 `is_sold=false`를
+  쿼리에 넣어라.
+
+`GET /api/meta`
+
+```json
+{
+  "sources": ["당근마켓", "중고나라"],
+  "brands": ["구찌", "에르메스", "샤넬", "루이비통"],
+  "total_items": 655,
+  "last_crawled_at": "2026-08-12T08:30:00Z",
+  "crawler": {
+    "is_running": false,
+    "stale": false,
+    "started_at": "2026-08-12T08:25:00Z",
+    "last_finished_at": "2026-08-12T08:30:00Z",
+    "last_item_count": 655,
+    "last_error": null,
+    "rounds_completed": 12,
+    "interval_minutes": 30
+  }
+}
+```
+
+`crawler`를 내려주는 이유는 **방금 뜬 서버는 목록이 비어 있기 때문이다.** 그게
+"매물이 없다"인지 "아직 수집 중"인지 프론트가 구분할 수 있어야 한다.
+
+- `is_running: true` → "수집 중" 배너를 띄우고 잠시 후 목록을 다시 부른다
+- `rounds_completed: 0` → 아직 한 번도 성공하지 못한 상태
+- `last_error`에 값이 있어도 수집이 멈춘 건 아니다. 일부 사이트만 실패한 경우에도
+  기록되므로, 경고로 표시하되 오류 화면으로 덮지는 말 것
+- `stale: true` → 크롤러가 비정상 종료된 흔적. 운영자가 봐야 할 신호다
+
 **타입 생성**: 각 엔드포인트에 `operation_id`를 명시해 뒀다(`listCrawledItems`,
-`getCrawledItem`, `getMeta`). `http://127.0.0.1:8000/openapi.json`에서 스키마를 받아
+`getCrawledItem`, `getMeta`). `/openapi.json`에서 스키마를 받아
 클라이언트를 생성하면 이 이름이 함수명이 된다. 지정하지 않으면 경로를 바꿀 때마다
 프론트의 함수 이름까지 따라 바뀐다.
 
@@ -673,6 +793,30 @@ LUXURY_BRANDS = ("구찌", "에르메스", "샤넬", "루이비통")
   쓰지 않는다. 디버그 파일 쓰기 실패가 DB upsert까지 막는 결합을 피하기 위해서다.
   수동 실행용 CLI에서 필요한 경우에만 JSON을 저장할 수 있다.
 
+## 로깅
+
+`logging` 표준 모듈을 쓴다. 설정은 프로세스 진입점(`app/main.py`,
+`app/crawler/__main__.py`)에서 `setup_logging()`을 한 번 부르고, 나머지 모듈은
+`logging.getLogger(__name__)`으로 로거만 얻는다 — 임포트하는 쪽이 출력 형태를 결정할
+수 있어야 하기 때문이다.
+
+`print()`에서 옮긴 이유는 컨테이너 로그 때문이다. 시각도 심각도도 없으면 "언제 무슨
+일이 있었나"를 되짚을 수 없고, ERROR만 골라 알람을 걸 방법도 없다.
+
+`LOG_FORMAT=json`이면 한 줄 JSON으로 찍는다. 컨테이너 이미지는 이쪽이 기본이다.
+
+```json
+{"time": "2026-08-12T03:09:05+00:00", "level": "WARNING",
+ "logger": "app.crawler.source_runner", "message": "수집 실패",
+ "source": "당근마켓", "brand": "루이비통"}
+```
+
+`logger.warning("수집 실패", extra={"brand": "루이비통"})` 처럼 넘긴 값이 필드로 실려서,
+"어느 브랜드에서 자주 실패하나" 같은 질의를 로그 수집기에서 바로 할 수 있다.
+
+포매팅은 `logger.info("완료: %d건", total)` 형태로 쓴다. f-string은 로그 레벨이 꺼져
+있어도 문자열을 만들기 때문이다.
+
 ## 테스트
 
 ```
@@ -701,6 +845,7 @@ uv run pytest
 | `test_source_runner.py` | 사이트 내부 실패 정책 — 전체/부분 실패, 정상 0건, 페이지 실패 |
 | `test_crawl_runs.py` | 라운드 상태 전이, stale 판정 |
 | `test_layering.py` | 패키지 경계 (백엔드가 크롤러를 임포트하지 않는지) |
+| `test_config.py` | 설정 검증, 로그 형식 |
 | `test_timeparse.py` | 상대 시각 환산 |
 | `test_health.py` | `/health`, `/ready` 분기 |
 | `test_crawler_parser.py`, `test_joongna_parser.py` | 카드 텍스트 파싱 |
@@ -807,6 +952,27 @@ docker rm -f pgtest
   `wsl --shutdown` 후 Docker Desktop을 트레이에서 Quit → 재시작. 그래도 안 되면 PC 재부팅.
 - 둘 다 정상인데 접속이 안 되면 `DATABASE_URL`의 포트가 `DB_PORT`와 맞는지 확인한다.
 
+### `[WinError 10013]` — 로컬 실행 시 포트 바인딩 거부
+
+`netstat`에는 아무것도 안 잡히는데 바인딩만 거부된다면, Hyper-V/WSL2가 동적 포트
+구간을 통째로 예약해서 그 안에 들어간 것이다.
+
+```powershell
+netsh interface ipv4 show excludedportrange protocol=tcp
+```
+
+목록에 해당 포트가 포함돼 있으면 예약 구간을 피해서 실행한다.
+
+```powershell
+uv run uvicorn app.main:app --port 5000
+```
+
+**`.env`의 `BACKEND_PORT`는 compose가 컨테이너 포트를 매핑할 때만 쓰인다.**
+`uv run uvicorn`은 그 값을 읽지 않으므로 `--port`로 직접 줘야 한다.
+
+이 예약 구간은 재부팅할 때마다 달라진다. DB(5432)도 같은 이유로 막힐 수 있고,
+그때는 `.env`의 `DB_PORT`와 `DATABASE_URL`·`TEST_DATABASE_URL`의 포트를 함께 옮긴다.
+
 ### `port is already allocated`
 
 5432를 이미 다른 것이 잡고 있다. 범인을 찾는다:
@@ -847,7 +1013,6 @@ netstat -ano | findstr :5432
   락으로 올려야 한다.
 - `crawl_runs`가 계속 쌓인다. 30분 주기면 하루 48건, 1년에 1만7천 건이라 당장은 문제가
   없지만, 오래된 기록을 정리하는 작업이 언젠가 필요하다.
-- 로그가 전부 `print`다. 배포하면 타임스탬프와 레벨이 있는 구조화 로그가 필요하다.
 - 게시판 스타일이 `base.html` 안에 인라인으로 들어가 있다. 시연용으로 정적 파일 마운트
   없이 돌리려는 선택이고, 프론트를 분리하면 통째로 버릴 코드다.
 - 브라우저 자체를 띄우는 E2E 크롤러 테스트는 실제 사이트에 의존해서 CI에서 돌리지 않는다.
@@ -865,8 +1030,8 @@ netstat -ano | findstr :5432
 - **비밀 관리**: `DATABASE_URL`을 compose 파일에 평문으로 두고 있다. 배포에서는
   Secrets Manager나 SSM 파라미터로 주입해야 한다.
 - **크롤러 실행 방식**: 상시 컨테이너 대신 EventBridge 스케줄 태스크로 띄우면 유휴
-  시간에 브라우저를 안 올려 비용이 크게 준다. 그 경우 `crawler_loop()` 대신
-  `run_crawl_round()`를 한 번만 실행하는 진입점이 필요하다.
+  시간에 브라우저를 안 올려 비용이 크게 준다. 진입점은 준비돼 있다 —
+  태스크 명령을 `python -m app.crawler --once` 로 두면 된다.
 
 ## 스택
 

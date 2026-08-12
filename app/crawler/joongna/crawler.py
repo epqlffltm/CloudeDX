@@ -12,6 +12,7 @@ DB 저장은 여기서 하지 않는다.
 """
 
 import asyncio
+import logging
 from urllib.parse import quote
 
 from playwright.async_api import async_playwright
@@ -21,6 +22,8 @@ from app.crawler.joongna.config import JoongnaCrawlerConfig
 from app.crawler.joongna.parser import parse_card_text, parse_price_value
 from app.crawler.source_runner import collect_pages
 from app.domain.models import CrawledItem
+
+logger = logging.getLogger(__name__)
 
 ITEM_LINK_SELECTOR = "a[href*='/product/']"
 
@@ -61,7 +64,7 @@ class JoongnaCrawler:
 
     async def _collect_page(self, page, page_num: int) -> list[dict]:
         target_url = self._build_url(page_num)
-        print(f"[joongna] [{page_num} 페이지] 접속 중: {target_url}")
+        logger.info("[joongna] [%s 페이지] 접속 중: %s", page_num, target_url)
 
         await page.goto(
             target_url,

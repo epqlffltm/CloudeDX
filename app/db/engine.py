@@ -16,6 +16,7 @@ create_all()로 테이블을 만들었는데, create_all은 없는 테이블만 
 """
 
 import asyncio
+import logging
 import re
 from collections.abc import AsyncGenerator
 
@@ -25,6 +26,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 # app.config가 load_dotenv()를 호출하므로, 이 모듈을 임포트하는 것만으로 .env가 반영된다.
 # 예전에는 호출부가 임포트 순서를 지켜야 했다.
 from app.config import DATABASE_URL
+
+logger = logging.getLogger(__name__)
 
 # scheme://user:password@host  에서 password 부분만 잡는다.
 _PASSWORD_PATTERN = re.compile(r"(://[^:/@]+:)[^@]*(@)")
@@ -74,10 +77,10 @@ async def wait_for_db(retries: int = 5, delay: float = 2.0) -> None:
             return
         except OSError as exc:
             last_exc = exc
-            print(f"[db] 연결 실패 ({attempt}/{retries}): {exc}")
+            logger.warning("연결 실패 (%s/%s): %s", attempt, retries, exc)
 
             if attempt < retries:
-                print(f"[db] {delay}초 후 재시도...")
+                logger.info("%s초 후 재시도...", delay)
                 await asyncio.sleep(delay)
 
     raise RuntimeError(

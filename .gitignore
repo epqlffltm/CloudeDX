@@ -21,7 +21,11 @@ venv/
 .mypy_cache/
 .coverage
 
-# Temporary crawler output
-data/*.json
-data/*.csv
+# 크롤러 부산물. DB가 정본이라 없어도 동작한다 — 디버깅용으로만 남긴다.
+# 폴더 자체는 유지해야 크롤러가 저장할 때 실패하지 않는다.
+data/*
+!data/.gitkeep
 
+# 디버그 스크립트가 남기는 스크린샷
+*.png
+!app/templates/**/*.png
