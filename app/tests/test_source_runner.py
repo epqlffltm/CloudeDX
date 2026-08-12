@@ -3,8 +3,13 @@
 """
 app.crawler.source_runner 테스트.
 
-Playwright를 설치하지 않은 CI에서도 사이트 내부 실패 정책을 검증한다.
-특히 "정상적인 0건"과 "모든 시도가 예외로 실패"를 구분하는 것이 핵심이다.
+Playwright를 설치하지 않은 CI에서도 사이트 내부 수집 정책을 검증한다.
+두 가지가 핵심이다.
+
+1. **"정상적인 0건"과 "모든 시도가 예외로 실패"를 구분**한다. 결과 개수로 성공을
+   판단하면 실제로 매물이 없는 상황을 장애로 오판한다.
+2. **"이 범위를 빠짐없이 봤는가"를 정확히 보고**한다. 이 값이 틀리면 멀쩡한 매물이
+   비활성 처리되거나(과신), 사라진 매물이 영원히 남는다(과소).
 """
 
 import pytest
@@ -15,59 +20,90 @@ from app.crawler.source_runner import (
     collect_brands,
     collect_pages,
 )
+from app.domain.collection import Collection
+
+# ---------------------------------------------------------------------------
+# collect_brands
+# ---------------------------------------------------------------------------
 
 
-async def test_collect_brands_sums_successful_results():
-    async def crawl_brand(brand: str) -> list[str]:
-        return [f"{brand}-1", f"{brand}-2"]
+async def test_sums_successful_results():
+    async def crawl_brand(brand: str) -> Collection[str]:
+        return Collection(items=[f"{brand}-1", f"{brand}-2"])
 
-    items = await collect_brands(
+    collected, complete = await collect_brands(
         source_name="테스트",
         brands=("구찌", "샤넬"),
         crawl_brand=crawl_brand,
     )
 
-    assert items == ["구찌-1", "구찌-2", "샤넬-1", "샤넬-2"]
+    assert collected.items == ["구찌-1", "구찌-2", "샤넬-1", "샤넬-2"]
+    assert complete == {"구찌", "샤넬"}
+    assert collected.complete is True
 
 
-async def test_collect_brands_partial_failure_still_succeeds():
-    async def crawl_brand(brand: str) -> list[str]:
+async def test_partial_failure_still_succeeds():
+    async def crawl_brand(brand: str) -> Collection[str]:
         if brand == "구찌":
             raise RuntimeError("timeout")
-        return [brand]
+        return Collection(items=[brand])
 
-    items = await collect_brands(
+    collected, complete = await collect_brands(
         source_name="테스트",
         brands=("구찌", "샤넬"),
         crawl_brand=crawl_brand,
     )
 
-    assert items == ["샤넬"]
+    assert collected.items == ["샤넬"]
+    # 실패한 브랜드는 "다 봤다"고 말할 수 없다. 그 매물을 사라졌다고 판단하면 안 된다.
+    assert complete == {"샤넬"}
+    assert collected.complete is False
 
 
-async def test_collect_brands_zero_items_is_valid_success():
+async def test_zero_items_is_success_but_not_verified():
     """
-    요청/파싱이 정상 종료되어 []를 반환한 것은 실패가 아니다.
-    이 경계조건이 없으면 실제 매물이 없는 상황을 장애로 오판하게 된다.
+    이게 가장 미묘한 경계다.
+
+    요청/파싱이 정상 종료되어 0건이 나온 것은 실패가 아니다. 하지만 **다 봤다고
+    단정해서도 안 된다.** 봇 감지로 빈 페이지를 받으면 예외 없이 0건으로 끝난다.
+    실제 로그에서 "당근마켓 '루이비통' 0건"이 나온 적이 있는데 나머지 브랜드는
+    60건씩이었다. 이걸 믿고 미발견 처리하면 해당 브랜드 매물이 전량 사라진다.
     """
 
-    async def crawl_brand(brand: str) -> list[str]:
-        return []
+    async def crawl_brand(brand: str) -> Collection[str]:
+        return Collection(items=[], complete=True)
 
-    items = await collect_brands(
+    collected, complete = await collect_brands(
         source_name="테스트",
         brands=("구찌", "샤넬"),
         crawl_brand=crawl_brand,
     )
 
-    assert items == []
+    assert collected.items == []
+    assert complete == set(), "0건 브랜드는 미발견 판정에서 빠져야 한다"
 
 
-async def test_collect_brands_all_fail_raises():
-    async def crawl_brand(brand: str) -> list[str]:
-        raise RuntimeError(f"{brand} 차단")
+async def test_incomplete_brand_is_excluded():
+    """수집 범위 한계에 걸린 브랜드는 결과에 포함하되 판정 대상에서는 뺀다."""
 
-    with pytest.raises(AllBrandsFailedError, match="모든 브랜드 크롤링 실패"):
+    async def crawl_brand(brand: str) -> Collection[str]:
+        return Collection(items=[brand], complete=(brand == "샤넬"))
+
+    collected, complete = await collect_brands(
+        source_name="테스트",
+        brands=("구찌", "샤넬"),
+        crawl_brand=crawl_brand,
+    )
+
+    assert set(collected.items) == {"구찌", "샤넬"}
+    assert complete == {"샤넬"}
+
+
+async def test_all_brands_failing_raises():
+    async def crawl_brand(brand: str) -> Collection[str]:
+        raise RuntimeError("차단")
+
+    with pytest.raises(AllBrandsFailedError):
         await collect_brands(
             source_name="테스트",
             brands=("구찌", "샤넬"),
@@ -75,82 +111,105 @@ async def test_collect_brands_all_fail_raises():
         )
 
 
-async def test_collect_brands_rejects_empty_brand_list():
-    async def crawl_brand(brand: str) -> list[str]:
-        return [brand]
+async def test_empty_brand_list_rejected():
+    async def crawl_brand(brand: str) -> Collection[str]:
+        return Collection()
 
-    with pytest.raises(ValueError, match="브랜드"):
-        await collect_brands(
-            source_name="테스트",
-            brands=(),
-            crawl_brand=crawl_brand,
-        )
+    with pytest.raises(ValueError):
+        await collect_brands(source_name="테스트", brands=(), crawl_brand=crawl_brand)
 
 
-async def test_collect_pages_collects_multiple_pages():
+# ---------------------------------------------------------------------------
+# collect_pages
+# ---------------------------------------------------------------------------
+
+
+async def test_collects_multiple_pages():
     async def collect_page(page_num: int) -> list[str]:
-        return [f"item-{page_num}"]
+        return [f"p{page_num}-a", f"p{page_num}-b"] if page_num <= 2 else []
 
-    items = await collect_pages(
-        source_name="테스트",
-        max_pages=3,
-        collect_page=collect_page,
+    result = await collect_pages(
+        source_name="테스트", max_pages=5, collect_page=collect_page
     )
 
-    assert items == ["item-1", "item-2", "item-3"]
+    assert result.items == ["p1-a", "p1-b", "p2-a", "p2-b"]
+    # 빈 페이지를 만나 멈췄으니 그 뒤로는 없다 = 끝까지 봤다.
+    assert result.complete is True
 
 
-async def test_collect_pages_partial_failure_continues():
+async def test_hitting_page_limit_is_incomplete():
+    """
+    max_pages를 다 쓰고도 매물이 계속 나왔다면 아직 남아 있다는 뜻이다.
+    이걸 완전하다고 보면, 페이지 밖으로 밀린 매물이 비활성 처리된다.
+    중고나라를 브랜드당 3페이지만 긁기 때문에 실제로 자주 생기는 상황이다.
+    """
+
     async def collect_page(page_num: int) -> list[str]:
-        if page_num == 1:
+        return [f"p{page_num}"]
+
+    result = await collect_pages(
+        source_name="테스트", max_pages=3, collect_page=collect_page
+    )
+
+    assert result.items == ["p1", "p2", "p3"]
+    assert result.complete is False
+
+
+async def test_page_error_makes_it_incomplete():
+    """페이지 하나가 실패했으면 그 페이지의 매물을 못 본 것이다."""
+
+    async def collect_page(page_num: int) -> list[str]:
+        if page_num == 2:
             raise RuntimeError("timeout")
-        return [f"item-{page_num}"]
+        return [f"p{page_num}"] if page_num == 1 else []
 
-    items = await collect_pages(
-        source_name="테스트",
-        max_pages=3,
-        collect_page=collect_page,
+    result = await collect_pages(
+        source_name="테스트", max_pages=3, collect_page=collect_page
     )
 
-    assert items == ["item-2", "item-3"]
+    assert result.items == ["p1"]
+    assert result.complete is False
 
 
-async def test_collect_pages_empty_page_is_valid_success_and_stops():
-    called: list[int] = []
+async def test_first_page_empty_is_complete():
+    """정말로 검색 결과가 없는 경우. 0건이지만 끝까지 본 것은 맞다."""
 
-    async def collect_page(page_num: int) -> list[str]:
-        called.append(page_num)
-        return []
-
-    items = await collect_pages(
-        source_name="테스트",
-        max_pages=3,
-        collect_page=collect_page,
-    )
-
-    assert items == []
-    assert called == [1]
-
-
-async def test_collect_pages_all_fail_raises():
-    async def collect_page(page_num: int) -> list[str]:
-        raise RuntimeError(f"{page_num}페이지 timeout")
-
-    with pytest.raises(AllPagesFailedError, match="모든 페이지 수집 실패"):
-        await collect_pages(
-            source_name="테스트",
-            max_pages=3,
-            collect_page=collect_page,
-        )
-
-
-async def test_collect_pages_rejects_non_positive_max_pages():
     async def collect_page(page_num: int) -> list[str]:
         return []
 
-    with pytest.raises(ValueError, match="max_pages"):
-        await collect_pages(
-            source_name="테스트",
-            max_pages=0,
-            collect_page=collect_page,
-        )
+    result = await collect_pages(
+        source_name="테스트", max_pages=3, collect_page=collect_page
+    )
+
+    assert result.items == []
+    assert result.complete is True
+
+
+async def test_all_pages_failing_raises():
+    async def collect_page(page_num: int) -> list[str]:
+        raise RuntimeError("차단")
+
+    with pytest.raises(AllPagesFailedError):
+        await collect_pages(source_name="테스트", max_pages=3, collect_page=collect_page)
+
+
+async def test_max_pages_must_be_positive():
+    async def collect_page(page_num: int) -> list[str]:
+        return []
+
+    with pytest.raises(ValueError):
+        await collect_pages(source_name="테스트", max_pages=0, collect_page=collect_page)
+
+
+# ---------------------------------------------------------------------------
+# Collection
+# ---------------------------------------------------------------------------
+
+
+def test_extend_loses_completeness_if_either_side_is_incomplete():
+    """일부라도 놓쳤으면 합친 결과도 신뢰할 수 없다."""
+    a = Collection(items=[1], complete=True)
+    a.extend(Collection(items=[2], complete=False))
+
+    assert a.items == [1, 2]
+    assert a.complete is False

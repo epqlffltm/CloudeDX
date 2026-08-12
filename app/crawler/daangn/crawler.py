@@ -20,6 +20,7 @@ from app.crawler.daangn.parser import (
     parse_card_text,
     parse_price_value,
 )
+from app.domain.collection import Collection
 from app.domain.models import CrawledItem
 
 logger = logging.getLogger(__name__)
@@ -67,7 +68,7 @@ class DaangnCrawler:
             is_sold=parsed["is_sold"],
         )
 
-    async def crawl(self) -> list[CrawledItem]:
+    async def crawl(self) -> Collection[CrawledItem]:
         engine_config = EngineConfig(
             headless=self.config.headless,
             timeout_ms=self.config.timeout_ms,
@@ -88,11 +89,21 @@ class DaangnCrawler:
                     timeout=self.config.timeout_ms,
                 )
 
-                await scroll_page(
+                # 끝까지 내려갔는지가 중요하다. 스크롤 횟수 제한에 걸려 못 본 매물을
+                # "사라졌다"고 판단하면 멀쩡한 매물이 비활성 처리된다.
+                reached_bottom = await scroll_page(
                     page,
                     count=self.config.scroll_count,
                     pause_seconds=self.config.scroll_pause_seconds,
                 )
+
+                if not reached_bottom:
+                    logger.info(
+                        "[daangn] '%s' 스크롤 한계(%d회)에 도달했습니다. "
+                        "더 남은 매물이 있을 수 있습니다.",
+                        self.config.brand,
+                        self.config.scroll_count,
+                    )
 
                 cards = await collect_cards(
                     page,
@@ -103,4 +114,7 @@ class DaangnCrawler:
             finally:
                 await browser.close()
 
-        return [self._to_item(parsed) for parsed in cards.values()]
+        return Collection(
+            items=[self._to_item(parsed) for parsed in cards.values()],
+            complete=reached_bottom,
+        )

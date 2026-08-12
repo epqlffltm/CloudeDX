@@ -405,6 +405,7 @@ CloudeDX/0.1 (+https://github.com/epqlffltm/CloudeDX)
 | `CRAWL_RETRY_MINUTES` | `5` | 라운드가 통째로 실패했을 때 재시도까지 대기(분) |
 | `JOONGNA_PAGES_PER_BRAND` | `3` | 중고나라 브랜드당 수집 페이지 수 |
 | `CRAWL_RUN_TIMEOUT_MINUTES` | `60` | 이 시간을 넘겨 `running`으로 남은 기록은 죽은 것으로 본다 |
+| `MISSING_THRESHOLD` | `3` | 몇 번 연속 미발견이면 비활성 처리할지 |
 | `BACKEND_PORT` | `8000` | 백엔드 컨테이너를 호스트에 노출할 포트 |
 | `TEST_DATABASE_URL` | `...@127.0.0.1:5432/cloudedx_test` | 테스트 전용 DB. 개발용과 분리해야 안전하다 |
 | `ALLOWED_ORIGINS` | (비어 있음) | CORS 허용 출처. 쉼표로 구분. 비우면 미들웨어를 붙이지 않는다 |
@@ -489,6 +490,55 @@ uv run alembic downgrade -1 # 한 단계 되돌리기
 asyncpg를 쓰기 때문에, 비동기 엔진으로 접속한 뒤 `run_sync()`로 감싸 돌린다.
 접속 정보도 `alembic.ini`가 아니라 `.env`의 `DATABASE_URL`에서 읽는다 — 설정 파일에
 비밀번호를 박으면 그대로 커밋되기 때문이다.
+
+### 매물 생명주기
+
+매물은 팔리거나 삭제되면 사이트에서 사라진다. 그런데 **크롤링 결과에 없다는 것만으로는
+사라졌다고 단정할 수 없다.** 수집 범위 밖으로 밀렸거나, 페이지 하나가 실패했거나,
+차단당해 빈 결과를 받았을 수 있다.
+
+| 컬럼 | 의미 |
+|---|---|
+| `is_active` | 화면에 기본 노출할지. **데이터 유효성이 아니다** |
+| `missing_count` | 연속으로 발견되지 않은 라운드 수. 다시 보이면 0으로 되돌린다 |
+| `unavailable_at` | 비활성이 된 시각 |
+| `unavailable_reason` | `sold`(사이트가 표기한 사실) / `missing`(우리 추정) |
+
+`sold`와 `missing`을 나눈 이유는 **신뢰도가 다르기 때문이다.** 전자는 사이트가 알려준
+사실이라 즉시 확정하고, 후자는 추정이라 여러 라운드를 지켜본 뒤 판단하며 다시 보이면
+되살린다.
+
+`is_active=false`가 "지워도 되는 데이터"라는 뜻이 **아니다.** 판매완료 매물은 실거래가에
+가까워 시세 계산의 핵심 입력이다 — 판매중 매물의 호가는 희망가격일 뿐이다. 화면에서
+숨기는 것과 데이터에서 지우는 것은 다르다.
+
+#### 미발견 판정
+
+`MISSING_THRESHOLD`(기본 3회) 연속으로 안 보이면 비활성 처리한다. 30분 주기 기준
+1시간 30분이다. 한 라운드만으로 판단하지 않는 이유는 오탐이 잦아서다.
+
+**판정은 "빠짐없이 훑었다고 확신하는 범위"에만 적용한다.** 확신을 잃는 경우가 셋 있고,
+각각 해당 브랜드를 판정 대상에서 제외한다.
+
+| 상황 | 왜 위험한가 |
+|---|---|
+| 페이지 한계 도달 | 중고나라는 브랜드당 3페이지만 긁는다. 4페이지로 밀린 매물은 사라진 게 아니다. 정렬이 최신순이면 **오래 안 팔린 매물부터 밀려나는데, 그게 가격비교에서 가장 가치 있는 데이터다** |
+| 스크롤 한계 도달 | 당근도 같은 문제. `scroll_page()`가 문서 높이 변화로 바닥 도달 여부를 판단해 보고한다 |
+| 성공했는데 0건 | 봇 감지로 빈 페이지를 받으면 **예외 없이 0건으로 정상 종료된다.** 실제 로그에 "당근마켓 '루이비통' 0건"이 나온 적이 있는데 나머지 브랜드는 60건씩이었다. 이걸 믿으면 해당 브랜드 매물이 전량 사라진다 |
+
+이 신호는 `Collection.complete`(`app/domain/collection.py`)로 크롤러에서 repository까지
+전달되고, `sweep_missing()`은 `CrawlScope`에 든 (수집처, 브랜드) 조합만 건드린다.
+
+설계 원칙은 **오탐을 비탐보다 나쁘게 본다**는 것이다. 사라진 매물이 하루 더 남아 있는
+것보다, 멀쩡한 매물이 목록에서 사라지는 쪽이 가격비교 서비스에 더 해롭다.
+
+#### 조회 기본값
+
+`/api/crawled-items`는 기본적으로 **활성 매물만** 반환한다. 이미 사라진 매물을
+가격비교 목록에 보여주면 잘못된 시세를 준다.
+
+판매완료 데이터가 필요하면 `include_inactive=true`를 붙인다. 실거래가 분석이 그런
+경우다. `/api/meta`의 `total_items`도 활성 기준이라 목록 건수와 일치한다.
 
 ### crawl_runs — 수집 상태
 
@@ -702,6 +752,9 @@ ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
       "image_url": "https://img.kr.gcp-karroter.net/origin/article/...",
       "url": "https://www.daangn.com/kr/buy-sell/...",
       "is_sold": false,
+      "is_active": true,
+      "unavailable_at": null,
+      "unavailable_reason": null,
       "first_seen_at": "2026-08-10T02:00:00Z",
       "last_seen_at": "2026-08-12T08:30:00Z"
     }
@@ -717,8 +770,9 @@ ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 - **`posted_at`이 `null`일 수 있다** — 사이트가 등록 시각을 표기하지 않은 경우다.
   이때는 `first_seen_at`으로 대체하되 "등록"이 아니라 "수집"이라고 적어야 한다.
   수집 시각을 등록일처럼 보여주면 실제보다 최근 글로 오해한다.
-- **`is_sold`** — 판매완료 매물도 기본 응답에 포함된다. 숨기려면 `is_sold=false`를
-  쿼리에 넣어라.
+- **`is_active`** — 기본 응답에는 활성 매물만 담긴다. 판매완료·미발견 매물까지 보려면
+  `include_inactive=true`를 붙여라. `unavailable_reason`이 `sold`면 사이트가 표기한
+  사실, `missing`이면 연속 미발견에 따른 추정이라 신뢰도가 다르다.
 
 `GET /api/meta`
 
@@ -878,6 +932,7 @@ uv run pytest
 | `test_runner.py` | 라운드 실행 규칙 — 사이트 실패 처리, 주기 판단, 루프 생존 |
 | `test_source_runner.py` | 사이트 내부 실패 정책 — 전체/부분 실패, 정상 0건, 페이지 실패 |
 | `test_crawl_runs.py` | 라운드 상태 전이, stale 판정 |
+| `test_lifecycle.py` | 매물 활성/비활성 전이, 범위 보호 |
 | `test_layering.py` | 패키지 경계 (백엔드가 크롤러를 임포트하지 않는지) |
 | `test_config.py` | 설정 검증, 로그 형식 |
 | `test_timeparse.py` | 상대 시각 환산 |

@@ -56,10 +56,36 @@ async def create_browser_context(
     return browser, context
 
 
-async def scroll_page(page: Page, *, count: int, pause_seconds: float) -> None:
+async def scroll_page(page: Page, *, count: int, pause_seconds: float) -> bool:
+    """
+    무한 스크롤 페이지를 내리고, **끝까지 도달했는지**를 반환한다.
+
+    반환값이 중요한 이유는 매물 생명주기 관리 때문이다. 스크롤 횟수 제한에 걸려서 못 본
+    매물을 "사라졌다"고 판단하면 멀쩡한 매물이 비활성 처리된다. 끝까지 내려간 경우에만
+    "이 검색 결과에 없다 = 실제로 사라졌다"고 말할 수 있다.
+
+    문서 높이가 더 이상 늘지 않으면 바닥으로 본다. count를 다 쓰고도 높이가 계속
+    늘고 있으면 아직 더 남은 것이므로 False.
+    """
+    previous_height = await page.evaluate("document.body.scrollHeight")
+
     for _ in range(count):
         await page.mouse.wheel(0, 1000)
         await asyncio.sleep(pause_seconds)
+
+        current_height = await page.evaluate("document.body.scrollHeight")
+
+        if current_height == previous_height:
+            # 높이가 그대로면 더 불러올 것이 없다. 다만 로딩이 늦을 수 있어
+            # 한 번 더 기다렸다가 확인한다.
+            await asyncio.sleep(pause_seconds)
+
+            if await page.evaluate("document.body.scrollHeight") == current_height:
+                return True
+
+        previous_height = current_height
+
+    return False
 
 
 # (raw_text, detail_url, image_url) -> 파싱된 dict | None

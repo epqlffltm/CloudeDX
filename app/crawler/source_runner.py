@@ -21,6 +21,8 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Sequence
 
+from app.domain.collection import Collection
+
 logger = logging.getLogger(__name__)
 
 
@@ -37,27 +39,34 @@ async def collect_brands[T](
     *,
     source_name: str,
     brands: Sequence[str],
-    crawl_brand: Callable[[str], Awaitable[list[T]]],
-) -> list[T]:
+    crawl_brand: Callable[[str], Awaitable[Collection[T]]],
+) -> tuple[Collection[T], set[str]]:
     """
-    브랜드들을 순서대로 수집한다.
+    브랜드들을 순서대로 수집한다. 결과와 함께 **완전히 훑은 브랜드 집합**을 반환한다.
 
     한 브랜드가 실패해도 나머지는 계속한다. 단, 모든 브랜드가 예외로 실패했다면
     정상적인 "검색 결과 0건"과 구분할 수 있도록 예외를 올린다.
 
-    crawl_brand()가 빈 리스트를 정상 반환한 경우는 성공이다. 실제로 매물이 0건일 수
-    있기 때문에 결과 개수로 성공/실패를 판단하면 안 된다.
+    완전히 훑은 브랜드에만 미발견 판정을 적용할 수 있다. 두 경우를 제외한다.
+
+    - 예외로 실패한 브랜드 — 못 본 매물이 있다.
+    - **성공했지만 0건인 브랜드** — 이게 함정이다. 봇 감지로 빈 페이지를 받으면
+      예외 없이 0건으로 정상 종료된다. 실제 로그에서 "당근마켓 '루이비통' 0건"이
+      나온 적이 있는데, 나머지 브랜드는 60건씩이었다. 이걸 "루이비통 매물이 전부
+      사라졌다"로 해석하면 해당 브랜드 매물이 전량 비활성 처리된다.
+      진짜 0건이면 다음 라운드에도 0건일 테니, 며칠치 기록으로 판단하는 편이 안전하다.
     """
     if not brands:
         raise ValueError("수집할 브랜드가 없습니다.")
 
-    all_items: list[T] = []
+    collected: Collection[T] = Collection()
+    complete_brands: set[str] = set()
     succeeded = 0
     errors: list[str] = []
 
     for brand in brands:
         try:
-            items = await crawl_brand(brand)
+            result = await crawl_brand(brand)
         except Exception as exc:
             error = f"{brand}: {type(exc).__name__}: {exc}"
             errors.append(error)
@@ -65,15 +74,33 @@ async def collect_brands[T](
             continue
 
         succeeded += 1
-        all_items.extend(items)
-        logger.info("%s '%s' %s건", source_name, brand, len(items))
+        collected.items.extend(result.items)
+
+        if result.complete and result.items:
+            complete_brands.add(brand)
+        elif not result.items:
+            logger.warning(
+                "%s '%s' 0건. 차단 가능성이 있어 미발견 판정에서 제외합니다.",
+                source_name,
+                brand,
+            )
+        else:
+            logger.info(
+                "%s '%s' 수집 범위 한계에 걸려 미발견 판정에서 제외합니다.",
+                source_name,
+                brand,
+            )
+
+        logger.info("%s '%s' %s건", source_name, brand, len(result.items))
 
     if succeeded == 0:
         raise AllBrandsFailedError(
             f"{source_name} 모든 브랜드 크롤링 실패: " + " / ".join(errors)
         )
 
-    return all_items
+    collected.complete = len(complete_brands) == len(brands)
+
+    return collected, complete_brands
 
 
 async def collect_pages[T](
@@ -82,15 +109,20 @@ async def collect_pages[T](
     max_pages: int,
     collect_page: Callable[[int], Awaitable[list[T]]],
     between_page_pause_seconds: float = 0.0,
-) -> list[T]:
+) -> Collection[T]:
     """
-    페이지들을 순서대로 수집한다.
+    페이지들을 순서대로 수집하고, **마지막 페이지까지 도달했는지**를 함께 반환한다.
 
     페이지 하나가 예외로 실패하면 다음 페이지를 시도한다. 하지만 모든 페이지가
     예외로 실패하면 빈 결과를 정상 성공처럼 반환하지 않고 예외를 올린다.
 
-    반대로 페이지 요청/파싱이 정상 종료되어 빈 리스트가 나온 경우는 실제 검색 결과가
-    없는 것으로 보고 정상 성공으로 처리하며 페이지 순회를 끝낸다.
+    완전성(complete) 판정:
+        빈 페이지를 만나서 멈췄으면 끝까지 본 것이다 — 그 뒤로는 매물이 없다.
+        max_pages를 다 쓰고도 계속 매물이 나왔다면 아직 남아 있다는 뜻이므로 불완전.
+        페이지 오류가 하나라도 있었으면 그 페이지의 매물을 못 봤으므로 불완전.
+
+    이 구분이 필요한 이유는 미발견 판정 때문이다. 중고나라를 브랜드당 3페이지만 긁는데,
+    4페이지로 밀린 매물을 "사라졌다"고 판단하면 멀쩡한 매물이 비활성 처리된다.
     """
     if max_pages <= 0:
         raise ValueError("max_pages는 1 이상이어야 합니다.")
@@ -98,6 +130,7 @@ async def collect_pages[T](
     all_items: list[T] = []
     succeeded = 0
     errors: list[str] = []
+    reached_end = False
 
     for page_num in range(1, max_pages + 1):
         try:
@@ -121,6 +154,7 @@ async def collect_pages[T](
                 source_name,
                 page_num,
             )
+            reached_end = True
             break
 
         all_items.extend(page_items)
@@ -140,4 +174,13 @@ async def collect_pages[T](
             f"{source_name} 모든 페이지 수집 실패: " + " / ".join(errors)
         )
 
-    return all_items
+    complete = reached_end and not errors
+
+    if not complete and not errors:
+        logger.info(
+            "%s %d페이지 한계에 도달했습니다. 더 남은 매물이 있을 수 있습니다.",
+            source_name,
+            max_pages,
+        )
+
+    return Collection(items=all_items, complete=complete)

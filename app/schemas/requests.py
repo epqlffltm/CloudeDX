@@ -44,7 +44,15 @@ class CrawledItemFilterParams(PaginationParams):
     )
     is_sold: bool | None = Field(
         default=None,
-        description="판매완료 여부. 지정하지 않으면 전부 포함",
+        description="판매완료 여부. 지정하지 않으면 활성 매물 기준으로 전부 포함",
+    )
+    include_inactive: bool = Field(
+        default=False,
+        description=(
+            "비활성 매물(판매완료·연속 미발견)까지 포함할지. 기본은 제외한다 — "
+            "이미 사라진 매물을 가격비교 목록에 보여주면 잘못된 시세를 준다. "
+            "실거래가 분석처럼 판매완료가 필요한 경우에만 true로 둔다"
+        ),
     )
     min_price: int | None = Field(default=None, ge=0, description="최소 가격 (원)")
     max_price: int | None = Field(default=None, ge=0, description="최대 가격 (원)")

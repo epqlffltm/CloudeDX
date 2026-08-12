@@ -102,6 +102,11 @@ JOONGNA_PAGES_PER_BRAND = _int_env("JOONGNA_PAGES_PER_BRAND", 3, minimum=1)
 # 시간(수 분)보다 넉넉히 크게 잡되, 무한정 기다리지는 않는 값이어야 한다.
 CRAWL_RUN_TIMEOUT_MINUTES = _int_env("CRAWL_RUN_TIMEOUT_MINUTES", 60, minimum=1)
 
+# 몇 번 연속으로 발견되지 않으면 비활성으로 볼지.
+# 한 라운드 안 보였다고 판단하면 오탐이 잦다 — 사이트가 잠깐 느렸거나 검색 결과 순서가
+# 흔들렸을 수 있다. 30분 주기 기준 3회면 1시간 30분이고, 실제 판매완료는 그 안에 반영된다.
+MISSING_THRESHOLD = _int_env("MISSING_THRESHOLD", 3, minimum=1)
+
 # ---------------------------------------------------------------------------
 # API
 # ---------------------------------------------------------------------------

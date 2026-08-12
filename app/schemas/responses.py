@@ -60,6 +60,23 @@ class CrawledItemOut(BaseModel):
     image_url: str | None = None
     url: str = Field(description="원글 링크. 이 값이 upsert의 유니크 키이기도 하다")
     is_sold: bool
+    is_active: bool = Field(
+        description=(
+            "화면에 기본 노출할 대상인지. 판매완료이거나 연속으로 발견되지 않으면 false다. "
+            "false여도 데이터가 무효한 것은 아니다 — 판매완료 매물은 실거래가에 가까워 "
+            "시세 계산에서는 오히려 중요하다"
+        )
+    )
+    unavailable_at: datetime | None = Field(
+        default=None, description="비활성이 된 시각. 활성이면 null"
+    )
+    unavailable_reason: str | None = Field(
+        default=None,
+        description=(
+            "'sold'(사이트가 판매완료로 표기) 또는 'missing'(연속 미발견 추정). "
+            "전자는 확인된 사실이고 후자는 추정이라 신뢰도가 다르다"
+        ),
+    )
     first_seen_at: datetime = Field(description="이 매물을 처음 수집한 시각 (갱신되지 않음)")
     last_seen_at: datetime = Field(description="마지막으로 다시 확인한 시각")
 
@@ -117,7 +134,12 @@ class MetaResponse(BaseModel):
 
     sources: list[str] = Field(description="수집처 목록. source 필터에 그대로 넣을 수 있다")
     brands: list[str] = Field(description="브랜드 목록. brand 필터에 그대로 넣을 수 있다")
-    total_items: int = Field(description="현재 DB에 저장된 전체 매물 수")
+    total_items: int = Field(
+        description=(
+            "현재 노출 가능한 활성 매물 수. 판매완료·미발견으로 비활성이 된 매물은 "
+            "제외되므로 DB 전체 행 수와는 다르다"
+        )
+    )
     last_crawled_at: datetime | None = Field(
         default=None,
         description="DB 기준 마지막 수집 시각. 데이터가 한 건도 없으면 null",

@@ -28,14 +28,56 @@ from app.crawler.joongna.config import JoongnaCrawlerConfig
 from app.crawler.joongna.crawler import JoongnaCrawler
 from app.crawler.runner import CrawlJob
 from app.crawler.source_runner import collect_brands
-from app.db.repository import upsert_items
+from app.db.repository import sweep_missing, upsert_items
 from app.domain.brands import LUXURY_BRANDS
+from app.domain.collection import CrawlScope
+from app.domain.sources import DAANGN, JOONGNA
 
 logger = logging.getLogger(__name__)
 
 
+async def _collect_and_store(
+    *,
+    source_name: str,
+    crawl_brand,
+) -> int:
+    """
+    한 사이트를 브랜드별로 수집하고 저장한 뒤, 사라진 매물을 정리한다.
+
+    두 사이트가 이 흐름을 공유한다. 수집 방식(스크롤 vs 페이지네이션)만 다르고
+    저장·정리 규칙은 같아야 하기 때문이다 — 한쪽만 고치면 사이트마다 매물 생명주기가
+    달라진다.
+
+    미발견 정리는 **완전히 훑은 브랜드에만** 적용한다. 실패했거나 수집 범위 한계에
+    걸린 브랜드는 collect_brands가 complete_brands에서 빼주므로, 못 본 매물을
+    사라진 것으로 오해하지 않는다.
+    """
+    collected, complete_brands = await collect_brands(
+        source_name=source_name,
+        brands=LUXURY_BRANDS,
+        crawl_brand=crawl_brand,
+    )
+
+    saved = await upsert_items(collected.items)
+
+    if complete_brands:
+        scope = CrawlScope(source=source_name, brands=frozenset(complete_brands))
+        seen_urls = {
+            item.url for item in collected.items if item.brand in complete_brands
+        }
+        await sweep_missing(scope, seen_urls)
+    else:
+        logger.warning(
+            "%s 완전히 훑은 브랜드가 없어 미발견 정리를 건너뜁니다.", source_name
+        )
+
+    logger.info("%s 자동 크롤링 완료: 총 %s건", source_name, saved)
+
+    return saved
+
+
 async def crawl_daangn_once() -> int:
-    """당근마켓을 브랜드별로 한 바퀴 수집하고 저장한 건수를 반환한다."""
+    """당근마켓을 브랜드별로 한 바퀴 수집한다."""
     logger.info("당근마켓 자동 크롤링 시작")
 
     async def crawl_brand(brand: str):
@@ -48,21 +90,11 @@ async def crawl_daangn_once() -> int:
         )
         return await crawler.crawl()
 
-    all_items = await collect_brands(
-        source_name="당근마켓",
-        brands=LUXURY_BRANDS,
-        crawl_brand=crawl_brand,
-    )
-
-    saved = await upsert_items(all_items)
-
-    logger.info("당근마켓 자동 크롤링 완료: 총 %s건", saved)
-
-    return saved
+    return await _collect_and_store(source_name=DAANGN, crawl_brand=crawl_brand)
 
 
 async def crawl_joongna_once() -> int:
-    """중고나라를 브랜드별로 한 바퀴 수집하고 저장한 건수를 반환한다."""
+    """중고나라를 브랜드별로 한 바퀴 수집한다."""
     logger.info("중고나라 자동 크롤링 시작")
 
     async def crawl_brand(brand: str):
@@ -75,17 +107,7 @@ async def crawl_joongna_once() -> int:
         )
         return await crawler.crawl()
 
-    all_items = await collect_brands(
-        source_name="중고나라",
-        brands=LUXURY_BRANDS,
-        crawl_brand=crawl_brand,
-    )
-
-    saved = await upsert_items(all_items)
-
-    logger.info("중고나라 자동 크롤링 완료: 총 %s건", saved)
-
-    return saved
+    return await _collect_and_store(source_name=JOONGNA, crawl_brand=crawl_brand)
 
 
 # 한 라운드에서 순서대로 실행할 작업. 사이트를 추가하려면 함수 하나를 만들어

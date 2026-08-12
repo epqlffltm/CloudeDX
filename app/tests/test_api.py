@@ -84,6 +84,9 @@ async def test_item_fields(client, session):
         "image_url",
         "url",
         "is_sold",
+        "is_active",
+        "unavailable_at",
+        "unavailable_reason",
         "first_seen_at",
         "last_seen_at",
     }

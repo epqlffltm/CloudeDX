@@ -11,20 +11,25 @@ items 테이블에 대한 DB 접근을 한 곳에 모은 계층 (repository).
 - upsert_items는 요청과 무관한 백그라운드 크롤러가 호출하므로 세션을 직접 만든다.
 """
 
+import logging
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import MISSING_THRESHOLD
 from app.db.engine import async_session
-from app.db.models import ItemRecord
+from app.db.models import ItemRecord, UnavailableReason
+from app.domain.collection import CrawlScope
 from app.domain.models import CrawledItem
 from app.schemas.requests import CrawledItemFilterParams
 
 # 한 INSERT 문에 넣을 최대 행 수. 너무 크면 바인드 파라미터가 폭증해서
 # Postgres 한계(문당 65535개)에 걸린다. 컬럼 11개 기준 여유 있는 값으로 잡는다.
+logger = logging.getLogger(__name__)
+
 UPSERT_CHUNK_SIZE = 500
 
 # 크롤링 결과에서 매번 덮어쓰는 컬럼들.
@@ -39,6 +44,12 @@ _UPDATABLE_COLUMNS = (
     "time_text",
     "image_url",
     "is_sold",
+    # 다시 발견됐다는 뜻이므로 미발견 카운트를 되돌리고 활성 상태를 복구한다.
+    # 판매완료로 다시 올라온 경우는 _dedupe_by_url이 is_active=False로 계산해 둔다.
+    "missing_count",
+    "is_active",
+    "unavailable_at",
+    "unavailable_reason",
 )
 
 
@@ -66,6 +77,11 @@ def _apply_filters(stmt: Select, filters: CrawledItemFilterParams) -> Select:
 
     if filters.is_sold is not None:
         stmt = stmt.where(ItemRecord.is_sold == filters.is_sold)
+
+    # 기본은 활성 매물만. 이미 사라진 매물을 가격비교 목록에 보여주면 잘못된 시세를 준다.
+    # 판매완료 데이터가 필요한 쪽(실거래가 분석 등)은 include_inactive=true로 요청한다.
+    if not filters.include_inactive:
+        stmt = stmt.where(ItemRecord.is_active.is_(True))
 
     return stmt
 
@@ -131,6 +147,7 @@ def _dedupe_by_url(items: list[CrawledItem]) -> list[dict]:
     같은 url이 여러 번 나오면 나중 것이 이긴다.
     """
     merged: dict[str, dict] = {}
+    now = datetime.now(UTC)
 
     for item in items:
         merged[item.url] = {
@@ -145,6 +162,13 @@ def _dedupe_by_url(items: list[CrawledItem]) -> list[dict]:
             "url": item.url,
             "is_sold": item.is_sold,
             "posted_at": item.posted_at,
+            # 이번 라운드에서 봤으므로 미발견 카운트를 되돌린다. 판매완료 표기가
+            # 있으면 그 자리에서 비활성 처리한다 — 사이트가 알려준 사실이라
+            # 추정(missing)보다 신뢰도가 높다.
+            "missing_count": 0,
+            "is_active": not item.is_sold,
+            "unavailable_at": now if item.is_sold else None,
+            "unavailable_reason": UnavailableReason.SOLD if item.is_sold else None,
         }
 
     return list(merged.values())
@@ -191,3 +215,77 @@ async def upsert_items(items: list[CrawledItem]) -> int:
         await session.commit()
 
     return len(rows)
+
+
+async def sweep_missing(scope: CrawlScope, seen_urls: set[str]) -> dict[str, int]:
+    """
+    이번 라운드에 보이지 않은 매물의 미발견 횟수를 올리고, 임계값을 넘으면 비활성 처리한다.
+
+    처리한 건수를 {"marked": 카운트 올린 수, "deactivated": 비활성이 된 수}로 반환한다.
+
+    **scope에 든 (수집처, 브랜드) 조합만 건드린다.** 크롤링이 실패했거나 수집 범위
+    한계에 걸린 브랜드는 scope에 없으므로 그쪽 매물은 손대지 않는다. 못 본 것을
+    사라진 것으로 오해하지 않기 위한 안전장치다.
+
+    바로 지우지 않고 세는 이유:
+        한 라운드에서 안 보였다는 것만으로는 판단할 수 없다. 사이트가 잠깐 느렸거나,
+        검색 결과 순서가 흔들렸거나, 페이지 하나를 놓쳤을 수 있다. MISSING_THRESHOLD회
+        연속으로 안 보여야 비활성으로 본다. 30분 주기 기준 3회면 1시간 30분이다.
+
+    이미 비활성인 매물은 건드리지 않는다. 판매완료로 확정된 것을 미발견으로 덮어쓰면
+    이유(unavailable_reason)가 사실과 달라진다.
+    """
+    if scope.is_empty():
+        return {"marked": 0, "deactivated": 0}
+
+    async with async_session() as session:
+        base = (
+            ItemRecord.source == scope.source,
+            ItemRecord.brand.in_(scope.brands),
+            ItemRecord.is_active.is_(True),
+        )
+
+        # seen_urls가 비어 있으면 NOT IN () 이 되어 SQL이 어색해지므로 조건을 나눈다.
+        conditions = list(base)
+
+        if seen_urls:
+            conditions.append(ItemRecord.url.not_in(seen_urls))
+
+        result = await session.execute(
+            update(ItemRecord)
+            .where(*conditions)
+            .values(missing_count=ItemRecord.missing_count + 1)
+            .returning(ItemRecord.id)
+        )
+        marked = len(result.scalars().all())
+
+        # 임계값을 넘긴 것을 비활성으로 내린다. 위 UPDATE와 나눈 이유는 카운트를
+        # 올린 뒤의 값으로 판단해야 하기 때문이다.
+        result = await session.execute(
+            update(ItemRecord)
+            .where(
+                ItemRecord.source == scope.source,
+                ItemRecord.brand.in_(scope.brands),
+                ItemRecord.is_active.is_(True),
+                ItemRecord.missing_count >= MISSING_THRESHOLD,
+            )
+            .values(
+                is_active=False,
+                unavailable_at=func.now(),
+                unavailable_reason=UnavailableReason.MISSING,
+            )
+            .returning(ItemRecord.id)
+        )
+        deactivated = len(result.scalars().all())
+
+        await session.commit()
+
+    if marked or deactivated:
+        logger.info(
+            "%s 미발견 처리: %d건 카운트 증가, %d건 비활성",
+            scope.source,
+            marked,
+            deactivated,
+        )
+
+    return {"marked": marked, "deactivated": deactivated}

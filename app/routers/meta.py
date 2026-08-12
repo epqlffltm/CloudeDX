@@ -52,7 +52,9 @@ async def get_meta(session: Annotated[AsyncSession, Depends(get_session)]):
     프론트가 첫 화면을 그릴 때 한 번 호출해서 선택 상자를 채우고, 수집이 도는 동안에는
     주기적으로 다시 불러 진행 상태를 갱신하는 용도다.
     """
-    # 필터를 걸지 않은 기본값으로 전체 건수를 센다.
+    # 활성 매물만 센다. CrawledItemFilterParams 기본값이 include_inactive=False라
+    # 목록 조회와 같은 기준이 된다 — 화면에 "655건"이라고 적어놓고 목록에는 500건만
+    # 나오면 사용자가 무엇을 믿어야 할지 모른다.
     total = await repository.count_items(session, CrawledItemFilterParams())
     last_crawled_at = await repository.get_last_crawled_at(session)
 

@@ -21,6 +21,7 @@ from app.crawler.base import EngineConfig, collect_cards, create_browser_context
 from app.crawler.joongna.config import JoongnaCrawlerConfig
 from app.crawler.joongna.parser import parse_card_text, parse_price_value
 from app.crawler.source_runner import collect_pages
+from app.domain.collection import Collection
 from app.domain.models import CrawledItem
 
 logger = logging.getLogger(__name__)
@@ -90,7 +91,7 @@ class JoongnaCrawler:
         )
         return list(cards.values())
 
-    async def crawl(self) -> list[CrawledItem]:
+    async def crawl(self) -> Collection[CrawledItem]:
         engine_config = EngineConfig(
             headless=self.config.headless,
             timeout_ms=self.config.timeout_ms,
@@ -105,7 +106,7 @@ class JoongnaCrawler:
                 async def collect_page(page_num: int) -> list[dict]:
                     return await self._collect_page(page, page_num)
 
-                parsed_items = await collect_pages(
+                collected = await collect_pages(
                     source_name=f"중고나라 '{self.config.brand}'",
                     max_pages=self.config.max_pages,
                     collect_page=collect_page,
@@ -115,6 +116,9 @@ class JoongnaCrawler:
                 await browser.close()
 
         # 같은 URL이 여러 페이지에 다시 노출될 수 있으므로 마지막 값으로 중복 제거한다.
-        all_parsed = {parsed["url"]: parsed for parsed in parsed_items}
+        all_parsed = {parsed["url"]: parsed for parsed in collected.items}
 
-        return [self._to_item(parsed) for parsed in all_parsed.values()]
+        return Collection(
+            items=[self._to_item(parsed) for parsed in all_parsed.values()],
+            complete=collected.complete,
+        )

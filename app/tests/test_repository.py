@@ -149,11 +149,16 @@ async def test_upsert_empty_list_is_noop(session):
     [
         (CrawledItemFilterParams(source="중고나라"), {"https://ex.com/2"}),
         (CrawledItemFilterParams(brand="구찌"), {"https://ex.com/2"}),
-        (CrawledItemFilterParams(is_sold=True), {"https://ex.com/3"}),
         (CrawledItemFilterParams(min_price=5_000_000), {"https://ex.com/2"}),
-        (CrawledItemFilterParams(max_price=1_000_000), {"https://ex.com/3"}),
+        # ex.com/3은 판매완료라 기본 조회에서 빠진다. 아래 include_inactive 테스트 참고.
+        (CrawledItemFilterParams(max_price=1_000_000), set()),
+        (CrawledItemFilterParams(search="클래식"), {"https://ex.com/1"}),
         (
-            CrawledItemFilterParams(search="클래식"),
+            CrawledItemFilterParams(is_sold=True, include_inactive=True),
+            {"https://ex.com/3"},
+        ),
+        (
+            CrawledItemFilterParams(search="클래식", include_inactive=True),
             {"https://ex.com/1", "https://ex.com/3"},
         ),
     ],
