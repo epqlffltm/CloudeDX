@@ -105,7 +105,7 @@ class DaangnCrawler:
                         self.config.scroll_count,
                     )
 
-                cards = await collect_cards(
+                cards, health = await collect_cards(
                     page,
                     link_selector=ITEM_LINK_SELECTOR,
                     resolve_url=self._resolve_url,
@@ -114,7 +114,14 @@ class DaangnCrawler:
             finally:
                 await browser.close()
 
-        return Collection(
+        collection = Collection(
             items=[self._to_item(parsed) for parsed in cards.values()],
             complete=reached_bottom,
+            health=health,
         )
+
+        # 파싱이 대량으로 깨졌으면 "끝까지 봤다"고 말할 수 없다. 못 읽은 매물이
+        # 결과에 없을 뿐 사이트에는 그대로 있기 때문이다.
+        collection.apply_parse_health()
+
+        return collection

@@ -23,17 +23,22 @@ from app.db.models import CrawlRun, CrawlRunStatus
 
 
 async def succeed(count: int = 7):
-    """지정한 건수를 저장한 것처럼 행동하는 가짜 작업."""
+    """
+    지정한 건수를 저장한 것처럼 행동하는 가짜 작업.
 
-    async def job() -> int:
-        return count
+    (건수, 파싱 성적)을 반환한다. 성적은 crawl_runs에 기록되어 DOM 변경을
+    드러내는 데 쓰인다.
+    """
+
+    async def job() -> tuple[int, dict[str, dict]]:
+        return count, {}
 
     job.__name__ = f"succeed_{count}"
     return job
 
 
 async def make_failing(message: str = "봇 감지"):
-    async def job() -> int:
+    async def job() -> tuple[int, dict[str, dict]]:
         raise RuntimeError(message)
 
     job.__name__ = "failing_job"
@@ -90,7 +95,7 @@ async def test_cancellation_does_not_leave_running_record(session):
     should_crawl_now()는 다른 인스턴스가 돌고 있다고 착각해 수집이 멈춘다.
     """
 
-    async def cancelled_job() -> int:
+    async def cancelled_job() -> tuple[int, dict[str, dict]]:
         raise asyncio.CancelledError
 
     cancelled_job.__name__ = "cancelled_job"
@@ -195,7 +200,7 @@ async def test_loop_survives_repeated_failures(session, monkeypatch):
     attempts = 0
     second_attempt = asyncio.Event()
 
-    async def flaky() -> int:
+    async def flaky() -> tuple[int, dict[str, dict]]:
         nonlocal attempts
         attempts += 1
 
@@ -239,10 +244,10 @@ async def test_loop_waits_when_recent_round_exists(session, monkeypatch):
 
     started = False
 
-    async def job() -> int:
+    async def job() -> tuple[int, dict[str, dict]]:
         nonlocal started
         started = True
-        return 1
+        return 1, {}
 
     job.__name__ = "job"
 
@@ -257,4 +262,3 @@ async def test_loop_waits_when_recent_round_exists(session, monkeypatch):
         pass
 
     assert started is False
-    

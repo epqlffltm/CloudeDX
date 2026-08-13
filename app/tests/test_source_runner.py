@@ -31,7 +31,7 @@ async def test_sums_successful_results():
     async def crawl_brand(brand: str) -> Collection[str]:
         return Collection(items=[f"{brand}-1", f"{brand}-2"])
 
-    collected, complete = await collect_brands(
+    collected, complete, health = await collect_brands(
         source_name="테스트",
         brands=("구찌", "샤넬"),
         crawl_brand=crawl_brand,
@@ -48,7 +48,7 @@ async def test_partial_failure_still_succeeds():
             raise RuntimeError("timeout")
         return Collection(items=[brand])
 
-    collected, complete = await collect_brands(
+    collected, complete, health = await collect_brands(
         source_name="테스트",
         brands=("구찌", "샤넬"),
         crawl_brand=crawl_brand,
@@ -73,7 +73,7 @@ async def test_zero_items_is_success_but_not_verified():
     async def crawl_brand(brand: str) -> Collection[str]:
         return Collection(items=[], complete=True)
 
-    collected, complete = await collect_brands(
+    collected, complete, health = await collect_brands(
         source_name="테스트",
         brands=("구찌", "샤넬"),
         crawl_brand=crawl_brand,
@@ -89,7 +89,7 @@ async def test_incomplete_brand_is_excluded():
     async def crawl_brand(brand: str) -> Collection[str]:
         return Collection(items=[brand], complete=(brand == "샤넬"))
 
-    collected, complete = await collect_brands(
+    collected, complete, health = await collect_brands(
         source_name="테스트",
         brands=("구찌", "샤넬"),
         crawl_brand=crawl_brand,

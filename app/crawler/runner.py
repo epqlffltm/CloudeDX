@@ -39,8 +39,15 @@ logger = logging.getLogger(__name__)
 CRAWL_INTERVAL_SECONDS = CRAWL_INTERVAL_MINUTES * 60
 RETRY_DELAY_SECONDS = CRAWL_RETRY_MINUTES * 60
 
-# 한 라운드에서 실행할 작업. 저장한 건수를 반환하는 비동기 함수면 된다.
-CrawlJob = Callable[[], Awaitable[int]]
+# 한 라운드에서 실행할 작업.
+#
+# (저장 건수, 브랜드별 파싱 성적)을 반환한다. 성적을 함께 받는 이유는 DOM 변경으로
+# 파싱이 깨졌을 때 그 사실을 crawl_runs에 남기고 /api/meta로 드러내기 위해서다.
+# 반환하지 않으면 "오늘은 매물이 적었다"와 구분할 수 없다.
+CrawlJob = Callable[[], Awaitable[tuple[int, dict[str, dict]]]]
+
+# 작업이 돌려주는 성적의 형태:
+#   {"당근마켓": {"샤넬": {"attempted": 58, "parsed": 58, "failed": 0, ...}}}
 
 
 async def run_crawl_round(jobs: tuple[CrawlJob, ...]) -> int:
@@ -57,11 +64,19 @@ async def run_crawl_round(jobs: tuple[CrawlJob, ...]) -> int:
     run_id = await crawl_runs.start_run()
     total = 0
     errors: list[str] = []
+    parse_health: dict[str, dict] = {}
 
     try:
         for job in jobs:
             try:
-                total += await job()
+                saved, health = await job()
+                total += saved
+
+                # 작업이 {수집처: {브랜드: 성적}} 형태로 준다. 같은 수집처를 다루는
+                # 작업이 둘 이상일 수 있으므로 덮어쓰지 않고 브랜드 단위로 합친다 —
+                # update()로 덮으면 먼저 온 브랜드의 성적이 사라진다.
+                for source, brands in health.items():
+                    parse_health.setdefault(source, {}).update(brands)
             except Exception as exc:
                 errors.append(f"{job.__name__}: {exc}")
                 logger.warning("%s 실패: %s", job.__name__, exc)
@@ -74,7 +89,9 @@ async def run_crawl_round(jobs: tuple[CrawlJob, ...]) -> int:
         await crawl_runs.fail_run(run_id, f"{type(exc).__name__}: {exc}")
         raise
 
-    await crawl_runs.finish_run(run_id, total, errors=errors)
+    await crawl_runs.finish_run(
+        run_id, total, errors=errors, parse_health=parse_health or None
+    )
 
     return total
 

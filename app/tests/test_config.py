@@ -159,3 +159,32 @@ def test_setup_logging_does_not_duplicate_handlers():
     setup_logging()
 
     assert len(logging.getLogger().handlers) == 1
+
+# ---------------------------------------------------------------------------
+# 버전
+# ---------------------------------------------------------------------------
+
+
+def test_app_version_matches_pyproject():
+    """
+    예전에는 pyproject.toml이 0.1.0, FastAPI 앱이 0.6.0으로 갈라져 있었다.
+    사소해 보이지만 릴리스 관리에서는 어느 쪽이 진짜인지 알 수 없게 된다.
+
+    importlib.metadata를 쓰지 않는 이유는 이 프로젝트가 패키지로 설치되지 않기
+    때문이다 — dockerfile.backend가 --no-install-project로 설치해서 컨테이너에
+    distribution metadata가 없다.
+    """
+    import tomllib
+    from pathlib import Path
+
+    from app.main import app
+    from app.version import FALLBACK_VERSION, __version__
+
+    pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+
+    with pyproject.open("rb") as file:
+        declared = tomllib.load(file)["project"]["version"]
+
+    assert __version__ == declared
+    assert app.version == declared
+    assert __version__ != FALLBACK_VERSION, "pyproject.toml을 읽지 못했습니다"

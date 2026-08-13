@@ -40,7 +40,7 @@ async def _collect_and_store(
     *,
     source_name: str,
     crawl_brand,
-) -> int:
+) -> tuple[int, dict[str, dict]]:
     """
     한 사이트를 브랜드별로 수집하고 저장한 뒤, 사라진 매물을 정리한다.
 
@@ -52,7 +52,7 @@ async def _collect_and_store(
     걸린 브랜드는 collect_brands가 complete_brands에서 빼주므로, 못 본 매물을
     사라진 것으로 오해하지 않는다.
     """
-    collected, complete_brands = await collect_brands(
+    collected, complete_brands, health_by_brand = await collect_brands(
         source_name=source_name,
         brands=LUXURY_BRANDS,
         crawl_brand=crawl_brand,
@@ -73,10 +73,14 @@ async def _collect_and_store(
 
     logger.info("%s 자동 크롤링 완료: 총 %s건", source_name, saved)
 
-    return saved
+    return saved, {
+        source_name: {
+            brand: health.to_dict() for brand, health in health_by_brand.items()
+        }
+    }
 
 
-async def crawl_daangn_once() -> int:
+async def crawl_daangn_once() -> tuple[int, dict[str, dict]]:
     """당근마켓을 브랜드별로 한 바퀴 수집한다."""
     logger.info("당근마켓 자동 크롤링 시작")
 
@@ -93,7 +97,7 @@ async def crawl_daangn_once() -> int:
     return await _collect_and_store(source_name=DAANGN, crawl_brand=crawl_brand)
 
 
-async def crawl_joongna_once() -> int:
+async def crawl_joongna_once() -> tuple[int, dict[str, dict]]:
     """중고나라를 브랜드별로 한 바퀴 수집한다."""
     logger.info("중고나라 자동 크롤링 시작")
 

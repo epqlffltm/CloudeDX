@@ -22,6 +22,7 @@ import logging
 from collections.abc import Awaitable, Callable, Sequence
 
 from app.domain.collection import Collection
+from app.domain.parse_health import ParseHealth
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ async def collect_brands[T](
     source_name: str,
     brands: Sequence[str],
     crawl_brand: Callable[[str], Awaitable[Collection[T]]],
-) -> tuple[Collection[T], set[str]]:
+) -> tuple[Collection[T], set[str], dict[str, ParseHealth]]:
     """
     브랜드들을 순서대로 수집한다. 결과와 함께 **완전히 훑은 브랜드 집합**을 반환한다.
 
@@ -61,6 +62,9 @@ async def collect_brands[T](
 
     collected: Collection[T] = Collection()
     complete_brands: set[str] = set()
+    # 브랜드별로 따로 센다. 라운드 전체로 합치면 한 브랜드만 깨진 것이 희석된다 —
+    # 당근 네 브랜드 중 루이비통만 5/50이어도 전체로는 실패율 22%라 임계값에 안 걸린다.
+    health_by_brand: dict[str, ParseHealth] = {}
     succeeded = 0
     errors: list[str] = []
 
@@ -75,6 +79,18 @@ async def collect_brands[T](
 
         succeeded += 1
         collected.items.extend(result.items)
+        collected.health.merge(result.health)
+        health_by_brand[brand] = result.health
+
+        if result.health.is_degraded:
+            logger.warning(
+                "%s '%s' 카드 파싱 실패율 %.0f%% (%d/%d). 미발견 판정에서 제외합니다.",
+                source_name,
+                brand,
+                result.health.failure_rate * 100,
+                result.health.failed,
+                result.health.attempted,
+            )
 
         if result.complete and result.items:
             complete_brands.add(brand)
@@ -100,7 +116,7 @@ async def collect_brands[T](
 
     collected.complete = len(complete_brands) == len(brands)
 
-    return collected, complete_brands
+    return collected, complete_brands, health_by_brand
 
 
 async def collect_pages[T](
@@ -183,4 +199,6 @@ async def collect_pages[T](
             max_pages,
         )
 
+    # collect_pages는 파싱 성적을 직접 세지 않는다. 페이지별 collect_cards가
+    # 세서 크롤러가 누적하므로, 여기서는 페이지 도달 여부만 판단한다.
     return Collection(items=all_items, complete=complete)

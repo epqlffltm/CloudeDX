@@ -49,7 +49,12 @@ async def start_run() -> int:
         return run.id
 
 
-async def finish_run(run_id: int, item_count: int, errors: list[str] | None = None) -> None:
+async def finish_run(
+    run_id: int,
+    item_count: int,
+    errors: list[str] | None = None,
+    parse_health: dict | None = None,
+) -> None:
     """
     라운드 성공을 기록한다.
 
@@ -67,6 +72,7 @@ async def finish_run(run_id: int, item_count: int, errors: list[str] | None = No
         run.finished_at = datetime.now(UTC)
         run.item_count = item_count
         run.error = " / ".join(errors) if errors else None
+        run.parse_health = parse_health
 
         await session.commit()
 

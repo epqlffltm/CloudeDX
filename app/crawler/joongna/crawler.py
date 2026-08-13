@@ -23,6 +23,7 @@ from app.crawler.joongna.parser import parse_card_text, parse_price_value
 from app.crawler.source_runner import collect_pages
 from app.domain.collection import Collection
 from app.domain.models import CrawledItem
+from app.domain.parse_health import ParseHealth
 
 logger = logging.getLogger(__name__)
 
@@ -86,15 +87,23 @@ class JoongnaCrawler:
             pause_seconds=self.config.scroll_pause_seconds,
         )
 
-        cards = await collect_cards(
+        cards, health = await collect_cards(
             page,
             link_selector=ITEM_LINK_SELECTOR,
             resolve_url=self._resolve_url,
             parse_card=self._parse_card,
         )
+
+        # 페이지마다 호출되므로 브랜드 단위로 누적한다. 페이지 하나에서 5건 실패는
+        # 흔하지만 세 페이지 내내 그러면 규칙이 안 맞는 것이다.
+        self._health.merge(health)
+
         return list(cards.values())
 
     async def crawl(self) -> Collection[CrawledItem]:
+        # 브랜드 한 번의 수집 동안 페이지별 파싱 성적을 누적한다.
+        self._health = ParseHealth()
+
         engine_config = EngineConfig(
             headless=self.config.headless,
             timeout_ms=self.config.timeout_ms,
@@ -121,7 +130,11 @@ class JoongnaCrawler:
         # 같은 URL이 여러 페이지에 다시 노출될 수 있으므로 마지막 값으로 중복 제거한다.
         all_parsed = {parsed["url"]: parsed for parsed in collected.items}
 
-        return Collection(
+        collection = Collection(
             items=[self._to_item(parsed) for parsed in all_parsed.values()],
             complete=collected.complete,
+            health=self._health,
         )
+        collection.apply_parse_health()
+
+        return collection

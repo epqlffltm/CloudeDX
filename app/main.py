@@ -61,6 +61,7 @@ from app.routers.health import router as health_router
 from app.routers.meta import router as meta_router
 from app.routers.products import router as products_router
 from app.routers.web import router as web_router
+from app.version import __version__
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +141,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="중고 명품 가방 조회 API",
-    version="0.6.0",
+    version=__version__,
     description=(
         "당근마켓·중고나라에서 수집한 중고 명품 가방 매물을 조회한다. "
         "모든 목록 응답은 total/count/limit/offset/has_next를 포함한다."

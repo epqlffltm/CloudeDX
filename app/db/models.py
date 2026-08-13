@@ -27,6 +27,7 @@ from sqlalchemy import (
     Text,
     func,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 # 제약조건/인덱스 이름 규칙.
@@ -234,6 +235,20 @@ class CrawlRun(Base):
 
     # 이 라운드에서 저장(upsert)한 건수. 실패하면 NULL.
     item_count: Mapped[int | None] = mapped_column(Integer)
+
+    # 수집처·브랜드별 카드 파싱 성적.
+    #
+    #   {"당근마켓": {"루이비통": {"attempted": 61, "parsed": 4, "failed": 57,
+    #                            "failure_rate": 0.934}}}
+    #
+    # 라운드 전체 수치 하나만 두지 않은 이유: 브랜드 하나만 깨졌을 때 전체로 합치면
+    # 실패율이 희석된다. 당근 네 브랜드 중 루이비통만 5/50이어도 전체로는 22%라
+    # 임계값에 안 걸리고, "당근은 살아 있는데 루이비통 파서만 깨졌다"를 알 수 없다.
+    #
+    # 별도 테이블 대신 JSONB로 둔 이유는 이 값을 조인하거나 집계할 일이 없어서다.
+    # 라운드 하나를 볼 때 통째로 읽는 게 전부라면 컬럼 하나가 단순하다. 시계열
+    # 분석이 필요해지면 그때 crawl_run_stats 테이블로 옮긴다.
+    parse_health: Mapped[dict | None] = mapped_column(JSONB)
 
     # 실패 사유. 일부 사이트만 실패한 경우 status는 success지만 여기에 기록이 남는다.
     # 어떤 사이트가 왜 막혔는지가 나중에 셀렉터를 고칠 때 유일한 단서라 길이 제한을 두지 않는다.

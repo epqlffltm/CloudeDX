@@ -142,6 +142,16 @@ class CrawlerStatus(BaseModel):
         default=None,
         description="마지막 라운드가 실패했다면 그 이유. 성공하면 null로 초기화된다",
     )
+    parse_health: dict | None = Field(
+        default=None,
+        description=(
+            "마지막 라운드의 수집처·브랜드별 카드 파싱 성적. "
+            '{"당근마켓": {"샤넬": {"attempted": 58, "parsed": 58, "failed": 0, '
+            '"failure_rate": 0.0}}} 형태다. '
+            "failure_rate가 높은 브랜드가 있으면 그 사이트의 DOM이 바뀌었을 수 있고, "
+            "해당 범위는 미발견 판정에서 제외된다"
+        ),
+    )
     rounds_completed: int = Field(
         description="성공한 라운드 수. 0이면 아직 한 번도 성공하지 못했다는 뜻"
     )

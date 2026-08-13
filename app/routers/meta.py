@@ -82,6 +82,7 @@ async def get_meta(session: Annotated[AsyncSession, Depends(get_session)]):
             last_finished_at=latest.finished_at if latest else None,
             last_item_count=latest.item_count if latest else None,
             last_error=latest.error if latest else None,
+            parse_health=latest.parse_health if latest else None,
             rounds_completed=rounds_completed,
             interval_minutes=CRAWL_INTERVAL_MINUTES,
         ),
