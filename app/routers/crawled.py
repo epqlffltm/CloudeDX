@@ -24,7 +24,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import repository
 from app.db.engine import get_session
 from app.schemas.requests import CrawledItemFilterParams
-from app.schemas.responses import CrawledItemListResponse, CrawledItemOut
+from app.schemas.responses import (
+    CrawledItemListResponse,
+    CrawledItemOut,
+    PriceDrop,
+    PriceDropListResponse,
+    PriceHistoryResponse,
+    PricePoint,
+)
 
 router = APIRouter(prefix="/crawled-items", tags=["crawled-items"])
 
@@ -59,6 +66,45 @@ async def get_crawled_items(
     )
 
 
+# 경로 순서에 주의. FastAPI는 등록 순서대로 매칭하므로 "/{item_id}" 가 먼저 오면
+# "/price-drops" 요청이 item_id="price-drops" 로 해석돼 422가 난다.
+# 고정 경로를 항상 경로 변수보다 먼저 등록한다.
+@router.get(
+    "/price-drops",
+    response_model=PriceDropListResponse,
+    status_code=status.HTTP_200_OK,
+    operation_id="listPriceDrops",
+    summary="값을 내린 매물",
+)
+async def get_price_drops(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    days: Annotated[int, Query(ge=1, le=90, description="조회 기간(일)")] = 7,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+):
+    """
+    최근 값을 내린 매물을 낙폭이 큰 순으로 반환한다.
+
+    중고 거래에서 값을 내렸다는 건 파는 쪽이 급해졌다는 신호다. 매물 목록만으로는
+    알 수 없고 가격 이력이 있어야 나오는 정보다.
+    """
+    drops = await repository.list_price_drops(session, days=days, limit=limit)
+
+    return PriceDropListResponse(
+        days=days,
+        count=len(drops),
+        items=[
+            PriceDrop(
+                item=CrawledItemOut.model_validate(d["item"]),
+                old_price=d["old_price"],
+                new_price=d["new_price"],
+                drop_amount=d["drop_amount"],
+                drop_rate=d["drop_rate"],
+            )
+            for d in drops
+        ],
+    )
+
+
 @router.get(
     "/{item_id}",
     response_model=CrawledItemOut,
@@ -81,3 +127,39 @@ async def get_crawled_item(
         )
 
     return CrawledItemOut.model_validate(row)
+
+
+@router.get(
+    "/{item_id}/price-history",
+    response_model=PriceHistoryResponse,
+    status_code=status.HTTP_200_OK,
+    operation_id="getPriceHistory",
+    summary="매물 가격 이력",
+    responses={404: {"description": "해당 id의 매물을 찾을 수 없습니다."}},
+)
+async def get_price_history(
+    item_id: int,
+    session: Annotated[AsyncSession, Depends(get_session)],
+):
+    """
+    가격이 바뀐 시점들을 오래된 순으로 반환한다.
+
+    매 관측이 아니라 변화 시점만 담긴다 — 30분마다 쌓으면 대부분이 "어제와 같음"
+    이라 정보가 없고 양만 늘어난다.
+    """
+    if await repository.get_item(session, item_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="해당 id의 매물을 찾을 수 없습니다.",
+        )
+
+    records = await repository.get_price_history(session, item_id)
+    prices = [r.price_value for r in records]
+
+    return PriceHistoryResponse(
+        item_id=item_id,
+        points=[PricePoint.model_validate(r) for r in records],
+        lowest=min(prices) if prices else None,
+        highest=max(prices) if prices else None,
+        total_change=(prices[-1] - prices[0]) if len(prices) >= 2 else None,
+    )

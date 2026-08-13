@@ -607,6 +607,43 @@ uv run python -m app.crawler.daangn.debug_cards --query "샤넬 가방"
 판매완료 데이터가 필요하면 `include_inactive=true`를 붙인다. 실거래가 분석이 그런
 경우다. `/api/meta`의 `total_items`도 활성 기준이라 목록 건수와 일치한다.
 
+### item_price_history — 가격 이력
+
+가격이 **바뀐 시점만** 남긴다. 매 라운드마다 쌓으면 30분 주기 × 매물 500건이면
+하루 24,000행이고 한 달이면 72만 행인데, 대부분이 "어제와 같음"이라 정보가 없다.
+
+첫 관측도 기록한다. 그래야 "3개월째 200만원 그대로"를 말할 수 있다 — 변화만
+기록하면 한 번도 안 바뀐 매물은 이력이 비어서 그 사실 자체를 알 수 없다.
+
+**기록하지 않는 경우가 더 중요하다.**
+
+| 상황 | 왜 기록하지 않는가 |
+|---|---|
+| 값이 같음 | 대부분의 라운드. 이걸 걸러야 이력이 의미 있는 크기로 유지된다 |
+| 가격 파싱 실패 | 값을 못 읽은 것과 가격이 바뀐 것은 다르다 |
+
+파싱 실패 처리에는 함정이 있었다. `price_value`를 NULL로 덮으면 다음 라운드에
+복구됐을 때 "가격이 바뀌었다"로 보여 **같은 값이 중복 기록된다.** 만들면서 실제로
+이 결함이 났고, `posted_at`과 같이 `COALESCE`로 기존 값을 지키도록 고쳤다.
+
+upsert가 벌크 `INSERT ... ON CONFLICT`라 이전 가격을 알 수 없다는 문제도 있었다.
+갱신 후의 행만 돌려주기 때문이다. 청크마다 SELECT를 한 번 먼저 던져 현재 가격을
+읽어 두는 방식으로 풀었다.
+
+#### 이 테이블이 있어야 답할 수 있는 것
+
+```
+GET /api/crawled-items/{id}/price-history   이 매물이 얼마에 올라왔다 얼마가 됐나
+GET /api/crawled-items/price-drops?days=7   최근 값을 내린 매물 (낙폭 큰 순)
+```
+
+`price-drops`가 이 프로젝트가 단순 목록과 갈리는 지점이다. 중고 거래에서 값을
+내렸다는 건 파는 쪽이 급해졌다는 신호이고, 사는 쪽에는 협상 여지가 있다는 뜻이다.
+매물 목록만으로는 알 수 없고 이력이 있어야 나온다.
+
+나중에 판매완료 시점과 대조하면 **"얼마나 내려야 팔리는가"**를 볼 수 있다. 판매중
+매물의 호가는 희망가격이지만, "내린 뒤 팔렸다"는 기록은 실거래가에 훨씬 가깝다.
+
 ### crawl_runs — 수집 상태
 
 수집 라운드마다 한 행을 남긴다. `status`(running/success/failed), `started_at`,
@@ -728,6 +765,8 @@ uv run python -m app.crawler.daangn.debug_cards --query "냉장고"
 | GET | `/board/{item_id}` | 게시판 상세 화면 |
 | GET | `/api/crawled-items` | 매물 목록 JSON |
 | GET | `/api/crawled-items/{item_id}` | 매물 단건 JSON |
+| GET | `/api/crawled-items/{item_id}/price-history` | 가격 이력 |
+| GET | `/api/crawled-items/price-drops` | 최근 값을 내린 매물 |
 | GET | `/api/meta` | 필터 선택지(브랜드/수집처)와 수집 현황 |
 
 `/api/meta`의 `crawler` 항목은 백그라운드 수집기의 상태다. 서버가 크롤링을 기다리지
@@ -1000,6 +1039,7 @@ uv run pytest
 | `test_source_runner.py` | 사이트 내부 실패 정책 — 전체/부분 실패, 정상 0건, 페이지 실패 |
 | `test_crawl_runs.py` | 라운드 상태 전이, stale 판정 |
 | `test_lifecycle.py` | 매물 활성/비활성 전이, 범위 보호 |
+| `test_price_history.py` | 가격 변동 기록, 인하 목록 |
 | `test_listing_status.py` | 판매완료 판정, 배지로 인한 제목 오염 방지 |
 | `test_layering.py` | 패키지 경계 (백엔드가 크롤러를 임포트하지 않는지) |
 | `test_config.py` | 설정 검증, 로그 형식 |

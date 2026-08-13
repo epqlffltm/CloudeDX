@@ -20,6 +20,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     DateTime,
+    ForeignKey,
     Integer,
     MetaData,
     String,
@@ -129,6 +130,46 @@ class ItemRecord(Base):
     )
     last_seen_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class PriceRecord(Base):
+    """
+    매물 가격이 바뀐 시점의 기록.
+
+    **가격이 달라졌을 때만 남긴다.** 매 라운드마다 쌓으면 30분 주기 × 매물 500건이면
+    하루 24,000행이고 한 달이면 72만 행인데, 대부분이 "어제와 같음"이라 정보가 없다.
+    변화 시점만 남기면 같은 질문에 훨씬 적은 데이터로 답할 수 있다.
+
+    첫 관측도 기록한다. 그래야 "3개월째 200만원 그대로"를 말할 수 있다 — 변화만
+    기록하면 한 번도 안 바뀐 매물은 이력이 비어서 그 사실 자체를 알 수 없다.
+
+    이 테이블이 있어야 답할 수 있는 것:
+
+    - 이 매물이 얼마에 올라왔다가 얼마로 내려갔나
+    - 모델별 시세가 최근 한 달간 어떻게 움직였나
+    - 가격을 내린 매물은 얼마 만에 팔리나 (판매완료 시점과 대조)
+
+    마지막이 특히 이 프로젝트의 목표에 가깝다. 판매중 매물의 호가는 희망가격이지만,
+    "내린 뒤 팔렸다"는 기록은 실거래가에 훨씬 가깝다.
+    """
+
+    __tablename__ = "item_price_history"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+
+    # 매물이 지워지면 이력도 함께 지운다. 이력만 남아도 무엇의 가격인지 알 수 없다.
+    item_id: Mapped[int] = mapped_column(
+        ForeignKey("items.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    # 파싱된 숫자만 담는다. 원문 표기는 items.price에 있고, 이력에서는 비교가
+    # 목적이라 숫자가 필요하다. 파싱에 실패한 관측은 아예 기록하지 않는다 —
+    # 값을 못 읽은 것과 가격이 바뀐 것은 다르다.
+    price_value: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
     )
 
 

@@ -148,6 +148,50 @@ class CrawlerStatus(BaseModel):
     interval_minutes: int = Field(description="수집 주기(분)")
 
 
+class PricePoint(BaseModel):
+    """가격이 바뀐 시점 하나."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    price_value: int = Field(description="그 시점의 가격(원)")
+    recorded_at: datetime = Field(description="이 가격으로 관측된 시각")
+
+
+class PriceHistoryResponse(BaseModel):
+    """
+    한 매물의 가격 이력.
+
+    변화 시점만 담긴다. 두 점 사이의 기간은 그 가격이 유지된 구간이고, 마지막
+    점부터 지금까지가 현재 가격이 유지된 기간이다. 점이 하나면 등록 후 한 번도
+    가격이 바뀌지 않았다는 뜻이다.
+    """
+
+    item_id: int
+    points: list[PricePoint]
+    lowest: int | None = Field(default=None, description="관측된 최저가")
+    highest: int | None = Field(default=None, description="관측된 최고가")
+    total_change: int | None = Field(
+        default=None,
+        description="첫 관측 대비 현재 가격의 변화량(원). 음수면 인하",
+    )
+
+
+class PriceDrop(BaseModel):
+    """값을 내린 매물."""
+
+    item: "CrawledItemOut"
+    old_price: int = Field(description="기간 내 첫 관측 가격")
+    new_price: int = Field(description="현재 가격")
+    drop_amount: int = Field(description="내린 금액(원)")
+    drop_rate: float = Field(description="내린 비율(%)")
+
+
+class PriceDropListResponse(BaseModel):
+    days: int = Field(description="조회 기간(일)")
+    count: int
+    items: list[PriceDrop]
+
+
 class ModelSummary(BaseModel):
     """모델별 집계. 필터 선택지이자 시세의 출발점이다."""
 
