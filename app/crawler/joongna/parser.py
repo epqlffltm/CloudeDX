@@ -13,6 +13,7 @@ from app.domain.listing_status import (
     is_title_candidate,
     strip_status_markers,
 )
+from app.domain.seller import detect_seller_type
 from app.domain.timeparse import find_relative_time_text
 
 
@@ -136,6 +137,9 @@ def parse_card_text(
         "price": price or None,
         "time_text": find_relative_time_text(raw_text),
         "is_sold": is_sold(raw_text),
+        # 중고나라는 인증셀러 배지를 카드에 노출한다. 당근에는 없는 개념이라
+        # 사이트별로 판정 가능 여부가 다르다(app/domain/seller.py 참고).
+        "seller_type": detect_seller_type(raw_text),
         "url": url,
         "image_url": image_url,
     }

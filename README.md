@@ -105,6 +105,7 @@ app/
 │   └── repository.py                # items 테이블 접근 전담: 조회/카운트/배치 upsert
 ├── routers/
 │   ├── health.py                  # /health, /ready — 운영용 상태 확인
+│   ├── products.py                 # /api/products — 프론트 계약 어댑터
 │   ├── web.py                      # /board — 게시판 화면 (목록 → 상세)
 │   ├── crawled.py                  # /api/crawled-items — 매물 JSON API
 │   └── meta.py                      # /api/meta — 필터 선택지/수집 현황
@@ -768,6 +769,9 @@ uv run python -m app.crawler.daangn.debug_cards --query "냉장고"
 | GET | `/api/crawled-items/{item_id}/price-history` | 가격 이력 |
 | GET | `/api/crawled-items/price-drops` | 최근 값을 내린 매물 |
 | GET | `/api/meta` | 필터 선택지(브랜드/수집처)와 수집 현황 |
+| GET | `/api/products` | 프론트엔드용 상품 목록 |
+| GET | `/api/products/deals` | 값을 내린 상품 |
+| GET | `/api/products/{product_id}` | 상품 단건 |
 
 `/api/meta`의 `crawler` 항목은 백그라운드 수집기의 상태다. 서버가 크롤링을 기다리지
 않고 바로 열리기 때문에, 방금 뜬 서버는 목록이 비어 있다. 그게 "매물이 없다"인지
@@ -814,6 +818,57 @@ uv run python -m app.crawler.daangn.debug_cards --query "냉장고"
 복사되는 걸 막기 위해서다 — 나중에 커서 기반으로 바꿔도 클라이언트는 그대로 둘 수 있다.
 
 `items` 원소의 전체 필드와 주의할 점은 아래 "프론트엔드 연결"의 응답 예시를 참고.
+
+### 상품 API — 도메인과 프론트 계약의 경계
+
+`/api/crawled-items`가 우리 도메인 그대로의 **매물**을 준다면, `/api/products`는
+프론트엔드(ReLuxe)가 기대하는 **상품** 모양으로 바꿔서 준다.
+
+두 모양이 다른 이유는 프론트가 "하나의 상품에 여러 플랫폼 가격이 붙는" 구조로
+설계됐기 때문이다. 우리는 게시글 하나가 한 행이다.
+
+지금은 **매물 하나를 상품 하나로** 내려준다. `platform_prices`의 원소가 항상 1개다.
+프론트의 mock도 실제로 그랬다 — 62개 상품 중 57개가 플랫폼 하나짜리였고, 겉모습만
+상품이지 실제로는 매물이었다.
+
+진짜 그룹화는 모델 추출률이 올라간 뒤에 한다. 현재 37%라 지금 묶으면 나머지 63%가
+"모델 불명" 한 덩어리로 몰린다.
+
+#### 프론트 타입에서 뺀 것
+
+팀과 합의해 제거했다. **사이트가 주지 않는 값을 지어내지 않는다**는 원칙이다.
+
+| 필드 | 왜 뺐나 |
+|---|---|
+| `views`, `likes` | 사이트가 카드에 주지 않는다 |
+| `popularityRank` | 조회수가 없으니 산출할 근거가 없다 |
+| `grade` (S/A+/A/B) | 제목의 "정품S급"은 셀러 자칭이다. 등급으로 보여주면 우리가 검증한 것처럼 오해된다 |
+| `retailPrice` | 정가 데이터가 없다 |
+
+**`model_name`은 추출 실패 시 `null`이다.** 제목으로 채우지 않는다 — 나중에 진짜
+모델 그룹화를 할 때 가짜 모델명이 섞이면 그룹이 어긋난다.
+
+#### 대신 넣은 것
+
+경쟁 서비스의 단순 목록에는 없는 값들이다.
+
+| 필드 | 의미 |
+|---|---|
+| `listed_days` | 며칠째 안 팔리고 있는가. 오래된 매물은 값을 깎을 여지가 있다 |
+| `price_drop_rate` | 최근 인하율(%). `/deals`에서만 채워진다 |
+| `posted_at` | 원글 등록 시각 |
+
+`price_drop_rate`를 일반 목록에서 계산하지 않는 이유는 매물마다 이력을 조회하면
+N+1이 되기 때문이다. 인하 정보가 필요한 화면은 `/api/products/deals`를 쓴다.
+
+#### seller_type의 null
+
+`certified`(사이트 인증 셀러) / `individual` / `null` 세 갈래다.
+
+**`null`은 "개인 판매자"가 아니라 "판정할 수 없음"이다.** 당근마켓에는 인증 배지
+체계가 없어서 전부 `null`이 된다. 이걸 `individual`로 적으면 "당근은 개인거래만"
+이라는 잘못된 사실이 데이터에 박힌다. 매물 생명주기에서 `sold`(사실)와
+`missing`(추정)을 나눈 것과 같은 방침이다.
 
 ### 프론트엔드 연결
 
@@ -1040,6 +1095,7 @@ uv run pytest
 | `test_crawl_runs.py` | 라운드 상태 전이, stale 판정 |
 | `test_lifecycle.py` | 매물 활성/비활성 전이, 범위 보호 |
 | `test_price_history.py` | 가격 변동 기록, 인하 목록 |
+| `test_products.py` | 프론트 계약 어댑터 |
 | `test_listing_status.py` | 판매완료 판정, 배지로 인한 제목 오염 방지 |
 | `test_layering.py` | 패키지 경계 (백엔드가 크롤러를 임포트하지 않는지) |
 | `test_config.py` | 설정 검증, 로그 형식 |

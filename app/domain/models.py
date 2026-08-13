@@ -22,6 +22,9 @@ class CrawledItem:
     image_url: str | None
     url: str
     is_sold: bool
+    # 판매자 유형. 배지 체계가 있는 사이트에서만 채워지고, 당근마켓은 항상 None이다.
+    # None은 "개인 판매자"가 아니라 "판정할 수 없음"을 뜻한다.
+    seller_type: str | None = None
 
     @property
     def posted_at(self) -> datetime | None:

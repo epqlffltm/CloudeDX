@@ -72,6 +72,11 @@ class ItemRecord(Base):
         DateTime(timezone=True), index=True
     )
 
+    # 판매자 유형. 중고나라의 인증셀러 배지에서 온다.
+    # 당근마켓에는 대응 배지가 없어 항상 NULL이고, 그건 "개인 판매자"가 아니라
+    # "판정할 수 없음"을 뜻한다 (app/domain/seller.py 참고).
+    seller_type: Mapped[str | None] = mapped_column(String(20))
+
     # ---- 정제 결과 --------------------------------------------------------
     #
     # brand는 크롤러의 검색어가 아니라 제목에서 다시 판정한 값이다. 실측 599건에서

@@ -63,6 +63,7 @@ class JoongnaCrawler:
             # 파서가 카드 원문에서 판매완료 배지를 찾아 넣어준다.
             # 값이 없는 옛 데이터를 대비해 기본값을 False로 둔다.
             is_sold=parsed.get("is_sold", False),
+            seller_type=parsed.get("seller_type"),
         )
 
     async def _collect_page(self, page, page_num: int) -> list[dict]:

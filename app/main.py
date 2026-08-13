@@ -9,6 +9,7 @@
     /board              Jinja2로 그린 게시판 화면 (목록 -> 제목 클릭 -> 상세)
     /api/crawled-items  같은 데이터를 주는 JSON API
     /api/meta           필터 선택지와 수집 현황
+    /api/products       프론트엔드(ReLuxe)가 소비하는 상품 모양
 조회 경로는 모두 app.db.repository를 통하므로 필터/정렬 동작이 갈라지지 않는다.
 
 크롤러 임포트에 대해:
@@ -58,6 +59,7 @@ from app.logging_config import setup_logging
 from app.routers.crawled import router as crawled_router
 from app.routers.health import router as health_router
 from app.routers.meta import router as meta_router
+from app.routers.products import router as products_router
 from app.routers.web import router as web_router
 
 logger = logging.getLogger(__name__)
@@ -160,6 +162,7 @@ app.include_router(health_router)
 app.include_router(web_router)
 app.include_router(crawled_router, prefix=API_PREFIX)
 app.include_router(meta_router, prefix=API_PREFIX)
+app.include_router(products_router, prefix=API_PREFIX)
 
 
 @app.get("/", status_code=status.HTTP_307_TEMPORARY_REDIRECT, include_in_schema=False)

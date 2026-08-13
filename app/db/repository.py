@@ -50,6 +50,7 @@ _UPDATABLE_COLUMNS = (
     "time_text",
     "image_url",
     "is_sold",
+    "seller_type",
     # 다시 발견됐다는 뜻이므로 미발견 카운트를 되돌리고 활성 상태를 복구한다.
     # 판매완료로 다시 올라온 경우는 _dedupe_by_url이 is_active=False로 계산해 둔다.
     "missing_count",
@@ -186,6 +187,7 @@ def _dedupe_by_url(items: list[CrawledItem]) -> list[dict]:
             "image_url": item.image_url,
             "url": item.url,
             "is_sold": item.is_sold,
+            "seller_type": item.seller_type,
             "posted_at": item.posted_at,
             # 이번 라운드에서 봤으므로 미발견 카운트를 되돌린다. 판매완료 표기가
             # 있으면 그 자리에서 비활성 처리한다 — 사이트가 알려준 사실이라
