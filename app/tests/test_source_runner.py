@@ -17,46 +17,51 @@ import pytest
 from app.crawler.source_runner import (
     AllBrandsFailedError,
     AllPagesFailedError,
-    collect_brands,
+    collect_jobs,
     collect_pages,
 )
-from app.domain.collection import Collection
+from app.domain.collection import Collection, SearchJob
+
+# 테스트용 검색 잡 두 개. 카테고리 확장 전에는 브랜드 문자열이 곧 수집 단위였는데,
+# 이제 (브랜드, 카테고리, 서픽스)가 한 단위다 — 정책 자체는 그대로다.
+GUCCI = SearchJob(brand="구찌", category="bag", suffix="가방")
+CHANEL = SearchJob(brand="샤넬", category="bag", suffix="가방")
 
 # ---------------------------------------------------------------------------
-# collect_brands
+# collect_jobs
 # ---------------------------------------------------------------------------
 
 
 async def test_sums_successful_results():
-    async def crawl_brand(brand: str) -> Collection[str]:
-        return Collection(items=[f"{brand}-1", f"{brand}-2"])
+    async def crawl_job(job: SearchJob) -> Collection[str]:
+        return Collection(items=[f"{job.brand}-1", f"{job.brand}-2"])
 
-    collected, complete, health = await collect_brands(
+    collected, complete, health = await collect_jobs(
         source_name="테스트",
-        brands=("구찌", "샤넬"),
-        crawl_brand=crawl_brand,
+        jobs=(GUCCI, CHANEL),
+        crawl_job=crawl_job,
     )
 
     assert collected.items == ["구찌-1", "구찌-2", "샤넬-1", "샤넬-2"]
-    assert complete == {"구찌", "샤넬"}
+    assert complete == {GUCCI, CHANEL}
     assert collected.complete is True
 
 
 async def test_partial_failure_still_succeeds():
-    async def crawl_brand(brand: str) -> Collection[str]:
-        if brand == "구찌":
+    async def crawl_job(job: SearchJob) -> Collection[str]:
+        if job.brand == "구찌":
             raise RuntimeError("timeout")
-        return Collection(items=[brand])
+        return Collection(items=[job.brand])
 
-    collected, complete, health = await collect_brands(
+    collected, complete, health = await collect_jobs(
         source_name="테스트",
-        brands=("구찌", "샤넬"),
-        crawl_brand=crawl_brand,
+        jobs=(GUCCI, CHANEL),
+        crawl_job=crawl_job,
     )
 
     assert collected.items == ["샤넬"]
-    # 실패한 브랜드는 "다 봤다"고 말할 수 없다. 그 매물을 사라졌다고 판단하면 안 된다.
-    assert complete == {"샤넬"}
+    # 실패한 잡은 "다 봤다"고 말할 수 없다. 그 매물을 사라졌다고 판단하면 안 된다.
+    assert complete == {CHANEL}
     assert collected.complete is False
 
 
@@ -70,53 +75,53 @@ async def test_zero_items_is_success_but_not_verified():
     60건씩이었다. 이걸 믿고 미발견 처리하면 해당 브랜드 매물이 전량 사라진다.
     """
 
-    async def crawl_brand(brand: str) -> Collection[str]:
+    async def crawl_job(job: SearchJob) -> Collection[str]:
         return Collection(items=[], complete=True)
 
-    collected, complete, health = await collect_brands(
+    collected, complete, health = await collect_jobs(
         source_name="테스트",
-        brands=("구찌", "샤넬"),
-        crawl_brand=crawl_brand,
+        jobs=(GUCCI, CHANEL),
+        crawl_job=crawl_job,
     )
 
     assert collected.items == []
-    assert complete == set(), "0건 브랜드는 미발견 판정에서 빠져야 한다"
+    assert complete == set(), "0건 잡은 미발견 판정에서 빠져야 한다"
 
 
 async def test_incomplete_brand_is_excluded():
     """수집 범위 한계에 걸린 브랜드는 결과에 포함하되 판정 대상에서는 뺀다."""
 
-    async def crawl_brand(brand: str) -> Collection[str]:
-        return Collection(items=[brand], complete=(brand == "샤넬"))
+    async def crawl_job(job: SearchJob) -> Collection[str]:
+        return Collection(items=[job.brand], complete=(job.brand == "샤넬"))
 
-    collected, complete, health = await collect_brands(
+    collected, complete, health = await collect_jobs(
         source_name="테스트",
-        brands=("구찌", "샤넬"),
-        crawl_brand=crawl_brand,
+        jobs=(GUCCI, CHANEL),
+        crawl_job=crawl_job,
     )
 
     assert set(collected.items) == {"구찌", "샤넬"}
-    assert complete == {"샤넬"}
+    assert complete == {CHANEL}
 
 
 async def test_all_brands_failing_raises():
-    async def crawl_brand(brand: str) -> Collection[str]:
+    async def crawl_job(job: SearchJob) -> Collection[str]:
         raise RuntimeError("차단")
 
     with pytest.raises(AllBrandsFailedError):
-        await collect_brands(
+        await collect_jobs(
             source_name="테스트",
-            brands=("구찌", "샤넬"),
-            crawl_brand=crawl_brand,
+            jobs=(GUCCI, CHANEL),
+            crawl_job=crawl_job,
         )
 
 
-async def test_empty_brand_list_rejected():
-    async def crawl_brand(brand: str) -> Collection[str]:
+async def test_empty_job_list_rejected():
+    async def crawl_job(job: SearchJob) -> Collection[str]:
         return Collection()
 
     with pytest.raises(ValueError):
-        await collect_brands(source_name="테스트", brands=(), crawl_brand=crawl_brand)
+        await collect_jobs(source_name="테스트", jobs=(), crawl_job=crawl_job)
 
 
 # ---------------------------------------------------------------------------

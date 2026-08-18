@@ -20,7 +20,6 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     DateTime,
-    ForeignKey,
     Integer,
     MetaData,
     String,
@@ -56,6 +55,13 @@ class ItemRecord(Base):
 
     source: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     brand: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+
+    # 상품 분류. 지금은 크롤러가 가방만 수집하므로 전 행이 'bag'이고, DB 기본값이
+    # 그 사실을 대신 채운다 — 크롤러와 upsert는 이 컬럼을 모른 채로 동작한다.
+    # 시계 등 두 번째 카테고리를 열 때 CrawledItem에 필드를 추가하고 여기로 흘린다.
+    category: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="bag", index=True
+    )
     title: Mapped[str] = mapped_column(Text, nullable=False)
     price: Mapped[str | None] = mapped_column(String(50))
     price_value: Mapped[int | None] = mapped_column(BigInteger, index=True)
@@ -86,15 +92,10 @@ class ItemRecord(Base):
     # 검색어는 search_brand에 그대로 남겨, 판정이 틀렸을 때 대조할 수 있게 한다.
     search_brand: Mapped[str | None] = mapped_column(String(20), index=True)
 
-    # 스팸 꼬리를 뗀 제목. 화면 표시와 모델 추출에 쓴다. 원본은 title에 남는다.
+    # 스팸 꼬리를 뗀 제목. 화면 표시에 쓴다. 원본은 title에 남는다.
     clean_title: Mapped[str | None] = mapped_column(Text)
 
-    # 추출한 모델명(정규형). 시세 계산의 그룹 키가 된다. 못 찾으면 NULL이고,
-    # 실측 기준 유효 매물의 37%에서만 잡힌다 — 나머지는 제목이 모델을 특정하지
-    # 못하는 경우다("샤넬 미니 가방", "새상품 구찌가방").
-    model: Mapped[str | None] = mapped_column(String(40), index=True)
-
-    # 시세 계산에 쓸 수 있는 매물인지. 가방이 아니거나(향수·신발·쇼핑백) 대상 외
+    # 목록에 노출할 수 있는 매물인지. 가방이 아니거나(향수·신발·쇼핑백) 대상 외
     # 브랜드면 False다. is_active와는 다른 축이다 — is_active는 "지금 살 수 있는가",
     # 이쪽은 "애초에 우리가 다루는 상품인가"를 뜻한다.
     is_usable: Mapped[bool] = mapped_column(
@@ -111,8 +112,8 @@ class ItemRecord(Base):
     # 그래서 바로 지우지 않고 미발견 횟수를 세다가, 임계값을 넘으면 비활성 처리한다.
 
     # 화면에 기본 노출할지 여부. **데이터로서 유효한지가 아니다.**
-    # 판매완료 매물은 is_active=false지만 시세 계산에는 오히려 중요한 입력이다 —
-    # 판매중 호가는 희망가격이고 판매완료가 실거래에 가깝다. 정리한다고 지우지 말 것.
+    # 비활성 매물도 지우지 않는다. url이 유니크 키라서 행이 남아 있어야, 같은 매물이
+    # 끌올로 재등장했을 때 새 매물로 중복 집계되지 않고 기존 행이 복구된다.
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default="true", index=True
     )
@@ -136,46 +137,6 @@ class ItemRecord(Base):
     )
     last_seen_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
-
-
-class PriceRecord(Base):
-    """
-    매물 가격이 바뀐 시점의 기록.
-
-    **가격이 달라졌을 때만 남긴다.** 매 라운드마다 쌓으면 30분 주기 × 매물 500건이면
-    하루 24,000행이고 한 달이면 72만 행인데, 대부분이 "어제와 같음"이라 정보가 없다.
-    변화 시점만 남기면 같은 질문에 훨씬 적은 데이터로 답할 수 있다.
-
-    첫 관측도 기록한다. 그래야 "3개월째 200만원 그대로"를 말할 수 있다 — 변화만
-    기록하면 한 번도 안 바뀐 매물은 이력이 비어서 그 사실 자체를 알 수 없다.
-
-    이 테이블이 있어야 답할 수 있는 것:
-
-    - 이 매물이 얼마에 올라왔다가 얼마로 내려갔나
-    - 모델별 시세가 최근 한 달간 어떻게 움직였나
-    - 가격을 내린 매물은 얼마 만에 팔리나 (판매완료 시점과 대조)
-
-    마지막이 특히 이 프로젝트의 목표에 가깝다. 판매중 매물의 호가는 희망가격이지만,
-    "내린 뒤 팔렸다"는 기록은 실거래가에 훨씬 가깝다.
-    """
-
-    __tablename__ = "item_price_history"
-
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-
-    # 매물이 지워지면 이력도 함께 지운다. 이력만 남아도 무엇의 가격인지 알 수 없다.
-    item_id: Mapped[int] = mapped_column(
-        ForeignKey("items.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-
-    # 파싱된 숫자만 담는다. 원문 표기는 items.price에 있고, 이력에서는 비교가
-    # 목적이라 숫자가 필요하다. 파싱에 실패한 관측은 아예 기록하지 않는다 —
-    # 값을 못 읽은 것과 가격이 바뀐 것은 다르다.
-    price_value: Mapped[int] = mapped_column(BigInteger, nullable=False)
-
-    recorded_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
     )
 
 

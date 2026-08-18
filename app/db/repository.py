@@ -13,23 +13,22 @@ items 테이블에 대한 DB 접근을 한 곳에 모은 계층 (repository).
 
 import logging
 from collections.abc import Sequence
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from sqlalchemy import Select, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased
 
 from app.config import MISSING_THRESHOLD
 from app.db.engine import async_session
-from app.db.models import ItemRecord, PriceRecord, UnavailableReason
+from app.db.models import ItemRecord, UnavailableReason
 from app.domain.cleaning import clean_title
 from app.domain.collection import CrawlScope
 from app.domain.models import CrawledItem
 from app.schemas.requests import CrawledItemFilterParams
 
 # 한 INSERT 문에 넣을 최대 행 수. 너무 크면 바인드 파라미터가 폭증해서
-# Postgres 한계(문당 65535개)에 걸린다. 컬럼 11개 기준 여유 있는 값으로 잡는다.
+# Postgres 한계(문당 65535개)에 걸린다. 컬럼 20개 기준으로도 1만 개라 여유 있다.
 logger = logging.getLogger(__name__)
 
 UPSERT_CHUNK_SIZE = 500
@@ -41,7 +40,6 @@ _UPDATABLE_COLUMNS = (
     "brand",
     "search_brand",
     "clean_title",
-    "model",
     "is_usable",
     "reject_reason",
     "title",
@@ -71,6 +69,9 @@ def _apply_filters(stmt: Select, filters: CrawledItemFilterParams) -> Select:
     if filters.brand:
         stmt = stmt.where(ItemRecord.brand == filters.brand)
 
+    if filters.category:
+        stmt = stmt.where(ItemRecord.category == filters.category)
+
     if filters.search:
         # ilike는 대소문자 무시 부분 일치. 한글에는 영향이 없지만 브랜드 영문 표기가
         # 섞여 들어올 수 있어서 like 대신 쓴다.
@@ -85,37 +86,45 @@ def _apply_filters(stmt: Select, filters: CrawledItemFilterParams) -> Select:
     if filters.is_sold is not None:
         stmt = stmt.where(ItemRecord.is_sold == filters.is_sold)
 
-    # 기본은 활성 매물만. 이미 사라진 매물을 가격비교 목록에 보여주면 잘못된 시세를 준다.
-    # 판매완료 데이터가 필요한 쪽(실거래가 분석 등)은 include_inactive=true로 요청한다.
+    # 기본은 활성 매물만. 이미 사라진 매물이 목록에 남으면 클릭이 죽은 링크로 이어지는데,
+    # 원문 아웃링크가 서비스의 전부인 구조에서 죽은 링크는 치명적이다.
+    # 판매완료까지 봐야 하는 쪽(정제 규칙 점검 등)은 include_inactive=true로 요청한다.
     if not filters.include_inactive:
         stmt = stmt.where(ItemRecord.is_active.is_(True))
 
-    # 정제에서 걸러진 매물은 기본 조회에서 뺀다. 향수·신발·쇼핑백이 섞이면
-    # "샤넬 최저가"가 카드지갑 가격이 되어 시세가 무너진다.
+    # 정제에서 걸러진 매물은 기본 조회에서 뺀다. "샤넬 가방" 목록에 향수·신발·
+    # 쇼핑백이 섞이면 탐색 자체가 오염된다.
     if not filters.include_unusable:
         stmt = stmt.where(ItemRecord.is_usable.is_(True))
-
-    if filters.model:
-        stmt = stmt.where(ItemRecord.model == filters.model)
 
     return stmt
 
 
-def _order_key():
+def _order_key(order_by: str = "latest"):
     """
-    목록 정렬 기준: 최근에 올라온 글이 위로.
+    목록 정렬 기준. 기본은 최근에 올라온 글이 위로.
 
     posted_at은 사이트가 시각을 표기하지 않으면 NULL이라, 그런 행은 first_seen_at으로
     대체해서 정렬한다(coalesce). 안 그러면 NULL 행이 전부 맨 뒤나 맨 앞으로 몰린다.
 
+    가격 정렬(price_asc/price_desc)에서 price_value NULL(가격 미상)은 방향과 무관하게
+    nulls_last로 맨 뒤에 보낸다 — 낮은 가격순을 물었는데 가격 없는 매물이 첫 화면을
+    채우면 정렬이 고장 난 것처럼 보인다.
+
     id를 2차 정렬에 넣는 이유: "3일 전"으로 표기된 매물은 환산 결과가 초 단위까지
-    같아질 수 있고, 그러면 정렬 순서가 매 요청마다 달라진다. 페이지를 넘길 때 같은
-    매물이 두 번 보이거나 아예 건너뛰어지는 문제가 생긴다.
+    같아질 수 있고(가격도 같은 값이 흔하다), 그러면 정렬 순서가 매 요청마다 달라진다.
+    페이지를 넘길 때 같은 매물이 두 번 보이거나 아예 건너뛰어지는 문제가 생긴다.
     """
-    return (
-        func.coalesce(ItemRecord.posted_at, ItemRecord.first_seen_at).desc(),
-        ItemRecord.id.desc(),
-    )
+    posted = func.coalesce(ItemRecord.posted_at, ItemRecord.first_seen_at)
+    match order_by:
+        case "oldest":
+            return (posted.asc(), ItemRecord.id.asc())
+        case "price_asc":
+            return (ItemRecord.price_value.asc().nulls_last(), ItemRecord.id.desc())
+        case "price_desc":
+            return (ItemRecord.price_value.desc().nulls_last(), ItemRecord.id.desc())
+        case _:
+            return (posted.desc(), ItemRecord.id.desc())
 
 
 async def count_items(session: AsyncSession, filters: CrawledItemFilterParams) -> int:
@@ -131,10 +140,34 @@ async def list_items(
 ) -> Sequence[ItemRecord]:
     """필터 + 페이지네이션을 적용한 매물 목록."""
     stmt = _apply_filters(select(ItemRecord), filters)
-    stmt = stmt.order_by(*_order_key()).limit(filters.limit).offset(filters.offset)
+    stmt = stmt.order_by(*_order_key(filters.order_by)).limit(filters.limit).offset(filters.offset)
     result = await session.execute(stmt)
 
     return result.scalars().all()
+
+
+CATEGORIES: tuple[str, ...] = ("bag", "watch", "jewelry", "apparel", "shoes")
+
+
+async def count_by_category(session: AsyncSession) -> dict[str, int]:
+    """
+    카테고리별 노출 가능(활성 + 정제 통과) 매물 수. 화면의 카테고리 카드가 쓴다.
+
+    5종 키를 항상 0으로 깔고 시작한다 — 아직 한 건도 없는 카테고리도 카드에는
+    "0개"로 정직하게 표시돼야 하고, 키가 아예 빠지면 프론트가 undefined를 다룬다.
+    'unknown'(분류 실패분)은 노출 대상이 아니라 여기 안 나온다.
+    """
+    stmt = (
+        select(ItemRecord.category, func.count())
+        .where(ItemRecord.is_active.is_(True), ItemRecord.is_usable.is_(True))
+        .group_by(ItemRecord.category)
+    )
+    result = await session.execute(stmt)
+
+    counts = dict.fromkeys(CATEGORIES, 0)
+    counts.update({cat: n for cat, n in result.all() if cat in counts})
+
+    return counts
 
 
 async def get_item(session: AsyncSession, item_id: int) -> ItemRecord | None:
@@ -176,7 +209,9 @@ def _dedupe_by_url(items: list[CrawledItem]) -> list[dict]:
             "brand": cleaned.brand or item.brand,
             "search_brand": item.brand,
             "clean_title": cleaned.clean_title,
-            "model": cleaned.model,
+            # 분류 실패는 NULL이 아니라 'unknown'이다 — 컬럼이 NOT NULL(기본 'bag')로
+            # 이미 배포돼 있어서, 센티널을 쓰면 마이그레이션 없이 확장된다.
+            "category": cleaned.category or "unknown",
             "is_usable": cleaned.is_usable,
             "reject_reason": cleaned.reject_reason,
             "title": item.title,
@@ -225,11 +260,6 @@ async def upsert_items(items: list[CrawledItem]) -> int:
         for start in range(0, len(rows), UPSERT_CHUNK_SIZE):
             chunk = rows[start : start + UPSERT_CHUNK_SIZE]
 
-            # upsert 전에 현재 가격을 읽어 둔다. ON CONFLICT DO UPDATE는 갱신 후의
-            # 행만 돌려주므로, 이전 값을 알려면 미리 조회하는 수밖에 없다.
-            # 청크당 SELECT 한 번이라 왕복 비용은 크지 않다.
-            previous = await _fetch_current_prices(session, [r["url"] for r in chunk])
-
             stmt = pg_insert(ItemRecord).values(chunk)
             stmt = stmt.on_conflict_do_update(
                 index_elements=[ItemRecord.url],
@@ -239,9 +269,9 @@ async def upsert_items(items: list[CrawledItem]) -> int:
                         ItemRecord.posted_at, stmt.excluded.posted_at
                     ),
                     # 파싱에 실패했다고 기존 가격을 지우지 않는다. 사이트 표기가
-                    # 잠깐 달라져 값을 못 읽는 경우가 있는데, NULL로 덮으면
-                    # 다음 라운드에 복구됐을 때 "가격이 바뀌었다"고 오해해
-                    # 같은 값이 이력에 중복 기록된다.
+                    # 잠깐 달라져 값을 못 읽는 경우가 있는데, NULL로 덮으면 그
+                    # 라운드 동안 화면이 '가격 미상'으로 깜빡이고, 가격 필터가 걸린
+                    # 조회에서는 매물이 사라졌다 나타나기를 반복한다.
                     "price_value": func.coalesce(
                         stmt.excluded.price_value, ItemRecord.price_value
                     ),
@@ -251,96 +281,9 @@ async def upsert_items(items: list[CrawledItem]) -> int:
 
             await session.execute(stmt)
 
-            # 이력은 upsert 뒤에 남긴다. 새 매물의 id가 있어야 하기 때문이다.
-            await _record_price_changes(session, chunk, previous)
-
         await session.commit()
 
     return len(rows)
-
-
-async def _fetch_current_prices(
-    session: AsyncSession, urls: list[str]
-) -> dict[str, tuple[int, int | None]]:
-    """
-    주어진 url들의 현재 (id, price_value)를 읽는다. 없는 매물은 빠진다.
-
-    가격 이력을 남길지 판단하려면 갱신 전 값이 필요하다.
-    """
-    result = await session.execute(
-        select(ItemRecord.url, ItemRecord.id, ItemRecord.price_value).where(
-            ItemRecord.url.in_(urls)
-        )
-    )
-
-    return {row.url: (row.id, row.price_value) for row in result}
-
-
-async def _record_price_changes(
-    session: AsyncSession,
-    chunk: list[dict],
-    previous: dict[str, tuple[int, int | None]],
-) -> int:
-    """
-    가격이 바뀐 매물의 이력을 남기고 기록한 건수를 반환한다.
-
-    남기는 경우는 둘이다.
-
-    - **첫 관측** — 이전 기록이 없는 새 매물. 기준선이 있어야 "3개월째 그대로"를
-      말할 수 있다. 변화만 남기면 한 번도 안 바뀐 매물은 이력이 비어 그 사실조차
-      알 수 없다.
-    - **가격 변동** — 이전 값과 다를 때.
-
-    남기지 않는 경우:
-
-    - **가격을 파싱하지 못했을 때(None)** — 값을 못 읽은 것과 가격이 바뀐 것은
-      다르다. 사이트 표기가 잠깐 달라져 파싱이 실패하면 "가격이 사라졌다"는
-      가짜 이력이 생기고, 다음 라운드에 복구되면 "가격이 돌아왔다"가 또 쌓인다.
-    - **값이 같을 때** — 대부분의 라운드가 여기 해당한다. 이걸 걸러야 이력이
-      의미 있는 크기로 유지된다.
-    """
-    to_insert = []
-
-    for row in chunk:
-        new_price = row.get("price_value")
-
-        if new_price is None:
-            continue
-
-        existing = previous.get(row["url"])
-
-        if existing is None:
-            # 방금 insert된 새 매물. id를 모르므로 아래에서 한 번에 조회한다.
-            to_insert.append((row["url"], new_price))
-            continue
-
-        item_id, old_price = existing
-
-        if old_price != new_price:
-            to_insert.append((row["url"], new_price))
-
-    if not to_insert:
-        return 0
-
-    # url -> id 를 다시 조회한다. 새 매물은 방금 생겼고, 기존 매물도 같은 방법으로
-    # 얻는 편이 두 경로를 나누는 것보다 단순하다.
-    result = await session.execute(
-        select(ItemRecord.url, ItemRecord.id).where(
-            ItemRecord.url.in_([url for url, _ in to_insert])
-        )
-    )
-    id_by_url = {row.url: row.id for row in result}
-
-    records = [
-        {"item_id": id_by_url[url], "price_value": price}
-        for url, price in to_insert
-        if url in id_by_url
-    ]
-
-    if records:
-        await session.execute(pg_insert(PriceRecord).values(records))
-
-    return len(records)
 
 
 async def sweep_missing(scope: CrawlScope, seen_urls: set[str]) -> dict[str, int]:
@@ -368,6 +311,9 @@ async def sweep_missing(scope: CrawlScope, seen_urls: set[str]) -> dict[str, int
         base = (
             ItemRecord.source == scope.source,
             ItemRecord.brand.in_(scope.brands),
+            # 검색 잡의 카테고리 안에서만 판정한다. "샤넬 가방" 라운드가
+            # 샤넬 시계를 "안 보였다"고 오판하는 것을 막는 조건이다.
+            ItemRecord.category == scope.category,
             ItemRecord.is_active.is_(True),
         )
 
@@ -415,134 +361,3 @@ async def sweep_missing(scope: CrawlScope, seen_urls: set[str]) -> dict[str, int
         )
 
     return {"marked": marked, "deactivated": deactivated}
-
-
-async def list_models(session: AsyncSession, brand: str | None = None) -> list[dict]:
-    """
-    수집된 모델과 각 모델의 매물 수·최저가를 반환한다.
-
-    프론트의 모델 필터를 채우고, 시세 화면의 기초 자료가 된다. 정제를 통과한
-    활성 매물만 센다 — 향수나 판매완료 매물이 섞이면 최저가가 실제와 달라진다.
-
-    가격이 없는 매물(price_value가 NULL)은 최저가 계산에서 자연히 빠지지만
-    매물 수에는 포함한다. "3건 있는데 가격은 2건만 안다"가 정직한 표현이다.
-    """
-    stmt = (
-        select(
-            ItemRecord.brand,
-            ItemRecord.model,
-            func.count().label("count"),
-            func.min(ItemRecord.price_value).label("min_price"),
-        )
-        .where(
-            ItemRecord.model.is_not(None),
-            ItemRecord.is_usable.is_(True),
-            ItemRecord.is_active.is_(True),
-        )
-        .group_by(ItemRecord.brand, ItemRecord.model)
-        .order_by(func.count().desc())
-    )
-
-    if brand:
-        stmt = stmt.where(ItemRecord.brand == brand)
-
-    result = await session.execute(stmt)
-
-    return [
-        {
-            "brand": row.brand,
-            "model": row.model,
-            "count": row.count,
-            "min_price": row.min_price,
-        }
-        for row in result
-    ]
-
-
-async def get_price_history(session: AsyncSession, item_id: int) -> list[PriceRecord]:
-    """
-    한 매물의 가격 이력을 오래된 순으로 반환한다.
-
-    변화 시점만 담겨 있으므로, 두 기록 사이의 기간은 그 가격이 유지된 구간이다.
-    마지막 기록부터 지금까지가 현재 가격이 유지된 기간이 된다.
-    """
-    result = await session.execute(
-        select(PriceRecord)
-        .where(PriceRecord.item_id == item_id)
-        .order_by(PriceRecord.recorded_at, PriceRecord.id)
-    )
-
-    return list(result.scalars().all())
-
-
-async def list_price_drops(
-    session: AsyncSession, *, days: int = 7, limit: int = 20
-) -> list[dict]:
-    """
-    최근 값을 내린 매물을 낙폭이 큰 순으로 반환한다.
-
-    이 프로젝트가 단순 목록과 갈리는 지점이다. 중고 거래에서 "값을 내렸다"는
-    파는 쪽이 급해졌다는 신호이고, 사는 쪽에는 협상 여지가 있다는 뜻이다.
-    매물 목록만으로는 알 수 없고 이력이 있어야 나온다.
-
-    같은 매물의 첫 기록과 마지막 기록을 비교한다. 중간에 오르내렸더라도
-    사는 사람이 관심 있는 건 "지금이 처음보다 싼가"이기 때문이다.
-    """
-    since = datetime.now(UTC) - timedelta(days=days)
-
-    # 기간 안에 두 번 이상 기록된 매물만 대상. 한 번뿐이면 변화가 없었다는 뜻이다.
-    first = (
-        select(
-            PriceRecord.item_id,
-            func.min(PriceRecord.recorded_at).label("first_at"),
-            func.max(PriceRecord.recorded_at).label("last_at"),
-        )
-        .where(PriceRecord.recorded_at >= since)
-        .group_by(PriceRecord.item_id)
-        .having(func.count() >= 2)
-        .subquery()
-    )
-
-    old_price = aliased(PriceRecord)
-    new_price = aliased(PriceRecord)
-
-    stmt = (
-        select(
-            ItemRecord,
-            old_price.price_value.label("old_price"),
-            new_price.price_value.label("new_price"),
-        )
-        .join(first, first.c.item_id == ItemRecord.id)
-        .join(
-            old_price,
-            (old_price.item_id == ItemRecord.id)
-            & (old_price.recorded_at == first.c.first_at),
-        )
-        .join(
-            new_price,
-            (new_price.item_id == ItemRecord.id)
-            & (new_price.recorded_at == first.c.last_at),
-        )
-        .where(
-            new_price.price_value < old_price.price_value,
-            ItemRecord.is_active.is_(True),
-            ItemRecord.is_usable.is_(True),
-        )
-        .order_by((old_price.price_value - new_price.price_value).desc())
-        .limit(limit)
-    )
-
-    result = await session.execute(stmt)
-
-    return [
-        {
-            "item": row.ItemRecord,
-            "old_price": row.old_price,
-            "new_price": row.new_price,
-            "drop_amount": row.old_price - row.new_price,
-            "drop_rate": round(
-                (row.old_price - row.new_price) / row.old_price * 100, 1
-            ),
-        }
-        for row in result
-    ]

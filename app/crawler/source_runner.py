@@ -21,7 +21,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Sequence
 
-from app.domain.collection import Collection
+from app.domain.collection import Collection, SearchJob
 from app.domain.parse_health import ParseHealth
 
 logger = logging.getLogger(__name__)
@@ -29,19 +29,19 @@ logger = logging.getLogger(__name__)
 
 
 class AllBrandsFailedError(RuntimeError):
-    """한 사이트에서 시도한 모든 브랜드 수집이 예외로 실패했을 때 발생한다."""
+    """한 사이트에서 시도한 모든 검색 잡이 예외로 실패했을 때 발생한다."""
 
 
 class AllPagesFailedError(RuntimeError):
     """한 브랜드에서 시도한 모든 페이지 수집이 예외로 실패했을 때 발생한다."""
 
 
-async def collect_brands[T](
+async def collect_jobs[T](
     *,
     source_name: str,
-    brands: Sequence[str],
-    crawl_brand: Callable[[str], Awaitable[Collection[T]]],
-) -> tuple[Collection[T], set[str], dict[str, ParseHealth]]:
+    jobs: Sequence[SearchJob],
+    crawl_job: Callable[[SearchJob], Awaitable[Collection[T]]],
+) -> tuple[Collection[T], set[SearchJob], dict[str, ParseHealth]]:
     """
     브랜드들을 순서대로 수집한다. 결과와 함께 **완전히 훑은 브랜드 집합**을 반환한다.
 
@@ -57,66 +57,66 @@ async def collect_brands[T](
       사라졌다"로 해석하면 해당 브랜드 매물이 전량 비활성 처리된다.
       진짜 0건이면 다음 라운드에도 0건일 테니, 며칠치 기록으로 판단하는 편이 안전하다.
     """
-    if not brands:
-        raise ValueError("수집할 브랜드가 없습니다.")
+    if not jobs:
+        raise ValueError("수집할 검색 잡이 없습니다.")
 
     collected: Collection[T] = Collection()
-    complete_brands: set[str] = set()
-    # 브랜드별로 따로 센다. 라운드 전체로 합치면 한 브랜드만 깨진 것이 희석된다 —
+    complete_jobs: set[SearchJob] = set()
+    # 잡별로 따로 센다. 라운드 전체로 합치면 한 잡만 깨진 것이 희석된다 —
     # 당근 네 브랜드 중 루이비통만 5/50이어도 전체로는 실패율 22%라 임계값에 안 걸린다.
-    health_by_brand: dict[str, ParseHealth] = {}
+    health_by_job: dict[str, ParseHealth] = {}
     succeeded = 0
     errors: list[str] = []
 
-    for brand in brands:
+    for job in jobs:
         try:
-            result = await crawl_brand(brand)
+            result = await crawl_job(job)
         except Exception as exc:
-            error = f"{brand}: {type(exc).__name__}: {exc}"
+            error = f"{job.label}: {type(exc).__name__}: {exc}"
             errors.append(error)
-            logger.warning("%s '%s' 크롤링 실패: %s", source_name, brand, exc)
+            logger.warning("%s '%s' 크롤링 실패: %s", source_name, job.label, exc)
             continue
 
         succeeded += 1
         collected.items.extend(result.items)
         collected.health.merge(result.health)
-        health_by_brand[brand] = result.health
+        health_by_job[job.label] = result.health
 
         if result.health.is_degraded:
             logger.warning(
                 "%s '%s' 카드 파싱 실패율 %.0f%% (%d/%d). 미발견 판정에서 제외합니다.",
                 source_name,
-                brand,
+                job.label,
                 result.health.failure_rate * 100,
                 result.health.failed,
                 result.health.attempted,
             )
 
         if result.complete and result.items:
-            complete_brands.add(brand)
+            complete_jobs.add(job)
         elif not result.items:
             logger.warning(
                 "%s '%s' 0건. 차단 가능성이 있어 미발견 판정에서 제외합니다.",
                 source_name,
-                brand,
+                job.label,
             )
         else:
             logger.info(
                 "%s '%s' 수집 범위 한계에 걸려 미발견 판정에서 제외합니다.",
                 source_name,
-                brand,
+                job.label,
             )
 
-        logger.info("%s '%s' %s건", source_name, brand, len(result.items))
+        logger.info("%s '%s' %s건", source_name, job.label, len(result.items))
 
     if succeeded == 0:
         raise AllBrandsFailedError(
-            f"{source_name} 모든 브랜드 크롤링 실패: " + " / ".join(errors)
+            f"{source_name} 모든 검색 잡 크롤링 실패: " + " / ".join(errors)
         )
 
-    collected.complete = len(complete_brands) == len(brands)
+    collected.complete = len(complete_jobs) == len(jobs)
 
-    return collected, complete_brands, health_by_brand
+    return collected, complete_jobs, health_by_job
 
 
 async def collect_pages[T](

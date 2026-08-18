@@ -38,6 +38,7 @@ class CrawledItemOut(BaseModel):
     id: int = Field(description="영구 식별자. 크롤링이 다시 돌아도 바뀌지 않는다")
     source: str = Field(description="수집처 ('당근마켓' / '중고나라')")
     brand: str
+    category: str = Field(description="상품 분류. 지금은 가방('bag')만 수집한다")
     title: str
     price: str | None = Field(default=None, description="원문 가격 문자열 (예: '4,000,000원')")
     price_value: int | None = Field(
@@ -71,13 +72,9 @@ class CrawledItemOut(BaseModel):
         default=None,
         description="검색용 브랜드 나열 꼬리를 뗀 제목. 화면에는 이쪽을 쓰는 게 읽기 좋다",
     )
-    model: str | None = Field(
-        default=None,
-        description="추출한 모델명(정규형). 특정할 수 없으면 null",
-    )
     is_usable: bool = Field(
         description=(
-            "시세 계산에 쓸 수 있는 매물인지. 가방이 아니거나 대상 외 브랜드면 false. "
+            "목록에 노출할 수 있는 매물인지. 가방이 아니거나 대상 외 브랜드면 false. "
             "is_active('지금 살 수 있는가')와는 다른 축이다"
         )
     )
@@ -87,8 +84,7 @@ class CrawledItemOut(BaseModel):
     is_active: bool = Field(
         description=(
             "화면에 기본 노출할 대상인지. 판매완료이거나 연속으로 발견되지 않으면 false다. "
-            "false여도 데이터가 무효한 것은 아니다 — 판매완료 매물은 실거래가에 가까워 "
-            "시세 계산에서는 오히려 중요하다"
+            "false여도 행은 지우지 않는다 — 같은 매물이 끌올로 재등장하면 이 행이 복구된다"
         )
     )
     unavailable_at: datetime | None = Field(
@@ -158,65 +154,6 @@ class CrawlerStatus(BaseModel):
     interval_minutes: int = Field(description="수집 주기(분)")
 
 
-class PricePoint(BaseModel):
-    """가격이 바뀐 시점 하나."""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    price_value: int = Field(description="그 시점의 가격(원)")
-    recorded_at: datetime = Field(description="이 가격으로 관측된 시각")
-
-
-class PriceHistoryResponse(BaseModel):
-    """
-    한 매물의 가격 이력.
-
-    변화 시점만 담긴다. 두 점 사이의 기간은 그 가격이 유지된 구간이고, 마지막
-    점부터 지금까지가 현재 가격이 유지된 기간이다. 점이 하나면 등록 후 한 번도
-    가격이 바뀌지 않았다는 뜻이다.
-    """
-
-    item_id: int
-    points: list[PricePoint]
-    lowest: int | None = Field(default=None, description="관측된 최저가")
-    highest: int | None = Field(default=None, description="관측된 최고가")
-    total_change: int | None = Field(
-        default=None,
-        description="첫 관측 대비 현재 가격의 변화량(원). 음수면 인하",
-    )
-
-
-class PriceDrop(BaseModel):
-    """값을 내린 매물."""
-
-    item: "CrawledItemOut"
-    old_price: int = Field(description="기간 내 첫 관측 가격")
-    new_price: int = Field(description="현재 가격")
-    drop_amount: int = Field(description="내린 금액(원)")
-    drop_rate: float = Field(description="내린 비율(%)")
-
-
-class PriceDropListResponse(BaseModel):
-    days: int = Field(description="조회 기간(일)")
-    count: int
-    items: list[PriceDrop]
-
-
-class ModelSummary(BaseModel):
-    """모델별 집계. 필터 선택지이자 시세의 출발점이다."""
-
-    brand: str
-    model: str
-    count: int = Field(description="이 모델의 활성 매물 수")
-    min_price: int | None = Field(
-        default=None,
-        description=(
-            "최저가(원). 가격을 파싱하지 못한 매물은 계산에서 빠지므로 "
-            "count와 개수가 다를 수 있다"
-        ),
-    )
-
-
 class MetaResponse(BaseModel):
     """
     필터 UI를 그리는 데 필요한 값들.
@@ -226,7 +163,19 @@ class MetaResponse(BaseModel):
     """
 
     sources: list[str] = Field(description="수집처 목록. source 필터에 그대로 넣을 수 있다")
-    brands: list[str] = Field(description="브랜드 목록. brand 필터에 그대로 넣을 수 있다")
+    brands: list[str] = Field(description="전체 수집 대상 브랜드. brand 필터에 그대로 넣을 수 있다")
+    categories: dict[str, int] = Field(
+        description=(
+            "카테고리별 노출 가능 매물 수. 키는 bag/watch/jewelry/apparel/shoes 5종 "
+            "고정이고, 아직 수집 전인 카테고리는 0이다"
+        )
+    )
+    brands_by_category: dict[str, list[str]] = Field(
+        description=(
+            "카테고리별 수집 브랜드. 검색 계획(search_plan)이 정본이다 — 화면이 "
+            "카테고리를 바꿀 때 브랜드 필터 선택지를 이 목록으로 바꾼다"
+        )
+    )
     total_items: int = Field(
         description=(
             "현재 노출 가능한 활성 매물 수. 판매완료·미발견으로 비활성이 된 매물은 "
@@ -236,10 +185,6 @@ class MetaResponse(BaseModel):
     last_crawled_at: datetime | None = Field(
         default=None,
         description="DB 기준 마지막 수집 시각. 데이터가 한 건도 없으면 null",
-    )
-    models: list[ModelSummary] = Field(
-        default_factory=list,
-        description="수집된 모델 목록. model 필터에 그대로 쓸 수 있다",
     )
     crawler: CrawlerStatus = Field(description="백그라운드 수집기의 현재 상태")
 

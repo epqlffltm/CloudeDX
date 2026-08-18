@@ -15,6 +15,8 @@ JSON API(/crawled-items)와 HTML 게시판(/board)이 같은 모델을 공유한
 422로 걸러진다.
 """
 
+from typing import Literal
+
 from pydantic import BaseModel, Field, model_validator
 
 
@@ -46,25 +48,37 @@ class CrawledItemFilterParams(PaginationParams):
         default=None,
         description="판매완료 여부. 지정하지 않으면 활성 매물 기준으로 전부 포함",
     )
-    model: str | None = Field(
-        default=None,
-        description="모델명으로 필터링. /api/meta 의 models 에서 값을 받을 수 있다",
-        examples=["마몬트"],
-    )
     include_unusable: bool = Field(
         default=False,
         description=(
             "정제에서 걸러진 매물(가방 아님·대상 외 브랜드)까지 포함할지. 기본은 "
-            "제외한다 — 향수나 쇼핑백 가격이 가방 최저가로 잡히면 시세가 무너진다. "
+            "제외한다 — 향수나 쇼핑백이 가방 목록에 섞인다. "
             "정제 규칙을 점검할 때만 true로 둔다"
+        ),
+    )
+    category: Literal["bag", "watch", "jewelry", "apparel", "shoes", "unknown"] | None = Field(
+        default=None,
+        description=(
+            "카테고리. bag/watch/jewelry/apparel/shoes 중 하나. 지정하지 않으면 전체. "
+            "'unknown'은 분류 실패분으로, 정제 규칙을 점검할 때만 쓴다"
+        ),
+    )
+    order_by: Literal["latest", "oldest", "price_asc", "price_desc"] = Field(
+        default="latest",
+        description=(
+            "정렬. latest(최신순, 기본) / oldest(오래된순) / "
+            "price_asc(낮은 가격순) / price_desc(높은 가격순). "
+            "가격 정렬에서 price_value가 NULL인 매물(가격 미상)은 방향과 무관하게 "
+            "항상 맨 뒤다 — 가격을 물어본 정렬에서 가격 없는 행이 먼저 나오면 안 된다. "
+            "Literal이라 목록 밖의 값은 422로 걸러진다"
         ),
     )
     include_inactive: bool = Field(
         default=False,
         description=(
             "비활성 매물(판매완료·연속 미발견)까지 포함할지. 기본은 제외한다 — "
-            "이미 사라진 매물을 가격비교 목록에 보여주면 잘못된 시세를 준다. "
-            "실거래가 분석처럼 판매완료가 필요한 경우에만 true로 둔다"
+            "이미 사라진 매물이 목록에 남으면 클릭이 죽은 링크로 이어진다. "
+            "정제 규칙 점검처럼 전체 데이터가 필요한 경우에만 true로 둔다"
         ),
     )
     min_price: int | None = Field(default=None, ge=0, description="최소 가격 (원)")

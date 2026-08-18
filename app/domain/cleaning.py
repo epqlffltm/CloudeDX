@@ -28,7 +28,7 @@ from app.domain.brands import (
     is_target_brand,
     strip_spam_tail,
 )
-from app.domain.product_type import find_model, is_bag
+from app.domain.product_type import classify_category, find_model
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +44,7 @@ class CleanedTitle:
     clean_title: str
     brand: str | None
     model: str | None
+    category: str | None
     is_usable: bool
     reject_reason: str | None
 
@@ -64,19 +65,27 @@ def clean_title(title: str, *, search_brand: str | None = None) -> CleanedTitle:
     clean = strip_spam_tail(title)
 
     if not clean:
-        return CleanedTitle(title, "", None, None, False, "제목이 비어 있음")
+        return CleanedTitle(title, "", None, None, None, False, "제목이 비어 있음")
 
     brand = detect_brand_with_model_hint(clean)
+    # 카테고리는 브랜드 판정과 독립으로 기록한다. 대상 외 브랜드의 시계여도
+    # category="watch"는 사실이고, 규칙을 고쳐 재판정할 때 이 축이 남아 있어야 한다.
+    category, detail = classify_category(clean, brand)
 
     if brand is None:
-        return CleanedTitle(title, clean, None, None, False, "브랜드 판정 불가")
+        return CleanedTitle(title, clean, None, None, category, False, "브랜드 판정 불가")
 
     if not is_target_brand(brand):
-        return CleanedTitle(title, clean, brand, None, False, f"대상 외 브랜드: {brand}")
+        return CleanedTitle(
+            title, clean, brand, None, category, False, f"대상 외 브랜드: {brand}"
+        )
 
-    usable, reason = is_bag(clean, brand)
+    if category is None:
+        return CleanedTitle(
+            title, clean, brand, None, None, False, f"대상 품목 아님: {detail}"
+        )
 
-    if not usable:
-        return CleanedTitle(title, clean, brand, None, False, f"가방 아님: {reason}")
+    # 모델 사전은 아직 가방만 있다. 다른 카테고리는 모델 없이 저장한다.
+    model = find_model(clean, brand) if category == "bag" else None
 
-    return CleanedTitle(title, clean, brand, find_model(clean, brand), True, None)
+    return CleanedTitle(title, clean, brand, model, category, True, None)

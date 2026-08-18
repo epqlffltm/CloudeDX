@@ -21,17 +21,39 @@
 
 import re
 
-# 수집 대상. 이 목록을 고치면 크롤러의 검색어와 화면의 필터 선택지가 함께 바뀐다.
-LUXURY_BRANDS: tuple[str, ...] = ("구찌", "에르메스", "샤넬", "루이비통")
+# 가방 검색 브랜드. 크롤러의 "{브랜드} 가방" 검색어가 이 목록에서 나온다.
+# 시계·주얼리 등 카테고리별 검색 브랜드는 search_plan.py에 따로 있다 —
+# 카테고리마다 유효한 브랜드가 다르기 때문이다 (롤렉스 가방을 검색할 이유가 없다).
+LUXURY_BRANDS: tuple[str, ...] = (
+    "구찌", "에르메스", "샤넬", "루이비통",
+    "프라다", "디올", "고야드", "셀린느",
+    "보테가", "생로랑", "발렌시아가", "버버리",
+)
 
 # 수집 대상 브랜드의 표기 변형.
 # 실측에서 "루이뷔통"(뷔) 표기가 나왔다. 사이트가 아니라 셀러가 쓰는 말이라
 # 오타와 변형이 계속 나온다고 보는 게 맞다.
 TARGET_ALIASES: dict[str, tuple[str, ...]] = {
+    # 가방 중심
     "샤넬": ("샤넬", "chanel"),
     "구찌": ("구찌", "gucci", "구찌시마"),
     "루이비통": ("루이비통", "루이뷔통", "louisvuitton", "louis vuitton"),
     "에르메스": ("에르메스", "hermes"),
+    "프라다": ("프라다", "prada"),
+    "디올": ("디올", "크리스챤디올", "크리스찬디올", "dior"),
+    "고야드": ("고야드", "goyard"),
+    "셀린느": ("셀린느", "셀린", "celine"),
+    "보테가": ("보테가베네타", "보테가", "bottega"),
+    "생로랑": ("생로랑", "입생로랑", "ysl", "saintlaurent"),
+    "발렌시아가": ("발렌시아가", "balenciaga"),
+    "버버리": ("버버리", "burberry"),
+    # 시계·주얼리 중심. 가방 검색에는 안 쓰이고 search_plan의 해당 카테고리에서 쓴다.
+    "롤렉스": ("롤렉스", "rolex"),
+    "오메가": ("오메가", "omega"),
+    "까르띠에": ("까르띠에", "카르티에", "cartier"),
+    "불가리": ("불가리", "bvlgari", "bulgari"),
+    "티파니": ("티파니앤코", "티파니", "tiffany"),
+    "반클리프": ("반클리프아펠", "반클리프", "vancleef"),
 }
 
 # 수집 대상은 아니지만 판정에 필요한 브랜드.
@@ -39,14 +61,6 @@ TARGET_ALIASES: dict[str, tuple[str, ...]] = {
 # 이 목록이 있어야 "구찌 제목인데 루이비통으로 저장된" 경우를 잡을 수 있고,
 # 대상 외 브랜드 상품을 걸러낼 수 있다. 실측에서 걸러진 것들을 그대로 담았다.
 OTHER_ALIASES: dict[str, tuple[str, ...]] = {
-    "프라다": ("프라다", "prada"),
-    "디올": ("디올", "dior"),
-    "셀린느": ("셀린느", "셀린", "celine"),
-    "보테가": ("보테가베네타", "보테가", "bottega"),
-    "생로랑": ("생로랑", "ysl", "saintlaurent"),
-    "발렌시아가": ("발렌시아가", "balenciaga"),
-    "고야드": ("고야드", "goyard"),
-    "버버리": ("버버리", "burberry"),
     "펜디": ("펜디", "fendi"),
     "미우미우": ("미우미우", "miumiu"),
     "마르지엘라": ("메종마르지엘라", "마르지엘라", "margiela"),
@@ -55,11 +69,17 @@ OTHER_ALIASES: dict[str, tuple[str, ...]] = {
     "르메르": ("르메르", "lemaire"),
     "바오바오": ("바오바오", "baobao"),
     "자크뮈스": ("자크뮈스", "jacquemus"),
-    "불가리": ("불가리", "bvlgari"),
-    "까르띠에": ("까르띠에", "cartier"),
     "토즈": ("토즈", "tods"),
     "질스튜어트": ("질스튜어트",),
     "더리움": ("더리움",),
+    "몽클레르": ("몽클레르", "moncler"),
+    "골든구스": ("골든구스", "goldengoose"),
+    "페라가모": ("페라가모", "ferragamo"),
+    "로에베": ("로에베", "loewe"),
+    "끌로에": ("끌로에", "chloe"),
+    "멀버리": ("멀버리", "mulberry"),
+    "태그호이어": ("태그호이어", "tagheuer"),
+    "몽블랑": ("몽블랑", "montblanc"),
 }
 
 ALL_ALIASES: dict[str, tuple[str, ...]] = {**TARGET_ALIASES, **OTHER_ALIASES}
@@ -93,6 +113,37 @@ def normalize(text: str) -> str:
     return re.sub(r"[\s\-_·,/.]", "", text.lower())
 
 
+# 스팸 꼬리를 자른 뒤 절단면에 남는 상태 마커. 상품이 무엇인지가 아니라
+# 상태·인증 서술이라, 정제 제목에서는 뗀다 (원본은 raw_title에 그대로 남는다).
+# 실측 예: "...클러치백 정품S급(감정서O)구찌프라다..." → 절단 후 "정품S급(감정서O)"가
+# 덜렁 남고, 괄호가 안 닫힌 채 끝나는 경우도 있다.
+_CONDITION_PAREN = re.compile(
+    r"\(\s*[^()]*(?:감정|영수증|보증|더스트|풀박|풀세트|정품)[^()]*\)?\s*$"
+)
+_CONDITION_WORD = re.compile(
+    r"(?:정품보장|정품|미러급|최상급|새상품급|새제품급|상태\s*(?:굿|좋아요|최상)|[SAB]급)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _strip_condition_tail(text: str) -> str:
+    """끝에 붙은 상태 마커와 닫히지 않은 괄호 조각을 걷어낸다."""
+    previous = None
+
+    while previous != text:
+        previous = text
+        text = text.rstrip(" ,./·-")
+        text = _CONDITION_PAREN.sub("", text)
+        text = _CONDITION_WORD.sub("", text)
+
+        # "...(감정서O" 처럼 여는 괄호만 남은 조각
+        open_at = text.rfind("(")
+        if open_at != -1 and ")" not in text[open_at:]:
+            text = text[:open_at]
+
+    return text.rstrip(" ,./·-")
+
+
 def strip_spam_tail(title: str) -> str:
     """
     브랜드명이 촘촘히 나열되는 꼬리를 잘라낸다.
@@ -118,9 +169,9 @@ def strip_spam_tail(title: str) -> str:
         window = positions[i : i + _SPAM_MIN_HITS]
 
         if window[-1] - window[0] <= _SPAM_WINDOW:
-            return title[: window[0]].strip(" ,./()")
+            return _strip_condition_tail(title[: window[0]].strip(" ,./()"))
 
-    return title.strip(" ,./()")
+    return _strip_condition_tail(title.strip(" ,./()"))
 
 
 def detect_brand(title: str) -> str | None:

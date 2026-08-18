@@ -75,6 +75,7 @@ async def test_item_fields(client, session):
         "id",
         "source",
         "brand",
+        "category",
         "title",
         "price",
         "price_value",
@@ -86,7 +87,6 @@ async def test_item_fields(client, session):
         "is_sold",
         "search_brand",
         "clean_title",
-        "model",
         "is_usable",
         "reject_reason",
         "is_active",
@@ -148,7 +148,15 @@ async def test_meta_returns_filter_options(client, session):
     body = (await client.get("/api/meta")).json()
 
     assert body["sources"] == ["당근마켓", "중고나라"]
-    assert body["brands"] == ["구찌", "에르메스", "샤넬", "루이비통"]
+    # 카테고리 확장으로 수집 대상이 18종이 됐다. 목록을 통째로 박제하면
+    # 브랜드를 추가할 때마다 테스트가 깨지므로, 계약의 본질(기존 4종 포함 +
+    # 카테고리별 목록과의 정합)만 검사한다.
+    assert {"구찌", "에르메스", "샤넬", "루이비통"} <= set(body["brands"])
+    assert len(body["brands"]) == 18
+    assert set(body["categories"]) == {"bag", "watch", "jewelry", "apparel", "shoes"}
+    assert set(body["brands_by_category"]) == set(body["categories"])
+    for brands in body["brands_by_category"].values():
+        assert set(brands) <= set(body["brands"]), "카테고리 브랜드는 전체 목록의 부분집합"
     assert body["total_items"] == 0
     assert body["last_crawled_at"] is None
 

@@ -64,6 +64,29 @@ class Collection[T]:
 
 
 @dataclass(frozen=True, slots=True)
+class SearchJob:
+    """
+    검색 한 번의 정의: 어느 브랜드를 어떤 서픽스로 검색해 어느 카테고리를 노리는가.
+
+    크롤러는 이 단위로 돌고, 미발견 정리(CrawlScope)도 이 단위로 좁힌다.
+    query가 실제 검색창에 들어가는 문자열이다.
+    """
+
+    brand: str
+    category: str
+    suffix: str
+
+    @property
+    def query(self) -> str:
+        return f"{self.brand} {self.suffix}".strip()
+
+    @property
+    def label(self) -> str:
+        """로그·헬스 리포트용 표기."""
+        return f"{self.brand}·{self.category}"
+
+
+@dataclass(frozen=True, slots=True)
 class CrawlScope:
     """
     미발견 판정을 적용해도 되는 범위.
@@ -77,6 +100,11 @@ class CrawlScope:
 
     source: str
     brands: frozenset[str]
+    # 검색 잡의 카테고리. 기본 "bag"은 기존 호출처(가방만 수집하던 시절의
+    # 테스트 포함)와의 호환용이다. 매물에 저장된 category는 분류 결과라
+    # 검색 카테고리와 다를 수 있다 — 그 어긋남을 다루는 방식은 sweep_missing
+    # 쪽 주석에 있다.
+    category: str = "bag"
 
     def is_empty(self) -> bool:
         return not self.brands

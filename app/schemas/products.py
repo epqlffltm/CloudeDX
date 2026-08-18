@@ -1,118 +1,72 @@
 # app/schemas/products.py
 
 """
-프론트엔드(ReLuxe)가 소비하는 상품 응답.
+프론트엔드(ReLuxe)가 소비하는 매물 응답.
 
-프론트는 **상품 단위**로 설계됐다. 하나의 상품에 여러 플랫폼 가격이 붙는 구조다.
-우리 DB는 **매물 단위**다 — 게시글 하나가 한 행이다. 이 간극을 여기서 메운다.
+예전에는 매물을 '상품' 모양으로 포장해서 내려줬다 — 하나의 상품에 플랫폼별 가격이
+붙는 다나와식 구조다. 그 포장을 걷어냈다. 데이터가 그 구조를 지지한 적이 없어서다.
 
-지금은 매물 하나를 상품 하나로 내려준다. `platform_prices`의 원소가 항상 1개다.
-프론트의 mock 데이터도 실제로 그렇게 되어 있었다 — 62개 상품 중 57개가 플랫폼
-하나짜리였다. 겉모습만 상품이고 실제로는 매물이었던 셈이다.
+- `platform_prices`는 항상 원소 1개였다. 여러 개가 되려면 같은 모델의 매물을 묶어야
+  하는데, 모델 추출률이 37%라 묶는 순간 나머지 63%가 "모델 불명" 한 덩어리로 몰린다.
+- `lowest_price`는 매물이 하나이므로 그냥 그 매물의 가격이었다. 이름만 최저가였다.
+- 수집처가 늘면서 등록 시각을 표기하지 않는 사이트, 가격 수정이 불가능해 내리려면
+  삭제 후 재등록해야 하는 사이트가 섞였다. 그 코퍼스에서 `listed_days`와
+  `price_drop_rate`는 결측을 넘어 역선택이 된다 — 값을 내린 매물일수록 재등록되어
+  "방금 올라온 정가 매물"로 보인다. 그래서 개별 매물 가격 이력 자체를 걷어냈다.
 
-진짜 그룹화(같은 모델의 여러 매물을 한 상품으로 묶기)는 모델 추출률이 올라간 뒤에
-한다. 현재 37%라서, 지금 묶으면 나머지 63%가 "모델 불명" 한 덩어리로 몰려 의미가 없다.
+지금 계약은 매물 한 건을 그대로 내려준다. 1점물 탐색 서비스의 원형(부동산 매물
+목록)과 같은 구조다: 목록 + 필터 + 원문 아웃링크.
 
-**프론트 타입에서 뺀 것들이 있다.** 팀과 합의한 내용이다.
+**계약에서 뺀 것들.** 팀과 합의한 내용이다.
 
 | 필드 | 왜 뺐나 |
 |---|---|
-| `views`, `likes` | 사이트가 카드에 주지 않는다. 지어내면 거짓말이다 |
-| `popularity_rank` | 조회수가 없으니 산출할 근거가 없다 |
-| `grade` (S/A+/A/B) | 제목의 "정품S급"은 셀러 자칭이다. 등급으로 보여주면 우리가 검증한 것처럼 오해된다 |
-| `retail_price` | 정가 데이터가 없다 |
+| `views`, `likes`, `grade`, `retail_price` | 사이트가 카드에 주지 않는 값. 지어내면 거짓말이다 |
+| `model_name` | 추출률 37%. 그룹핑을 포기했으므로 노출할 이유도 사라졌다 |
+| `platform_prices`, `lowest_price` | 매물 단위에서는 포장만 남은 껍데기였다 |
+| `posted_at`, `listed_days` | 등록 시각을 안 주는 수집처가 있어 사이트 간 비교가 성립하지 않는다 |
+| `price_drop_rate` | 가격 수정이 불가능한 수집처에서 신호가 반대로 뒤집힌다 |
 
-대신 **우리만 있는 데이터**를 넣었다. 가격 이력에서 나오는 값들이고, 경쟁 서비스의
-단순 목록에는 없다.
-
-    listed_days      며칠째 안 팔리고 있는가
-    price_drop_rate  최근 얼마나 값을 내렸는가
-    posted_at        언제 올라왔는가
+운영·디버깅용 전체 필드가 필요하면 /api/crawled-items(CrawledItemOut)를 쓴다.
 """
-
-from datetime import datetime
 
 from pydantic import BaseModel, Field
 
 
-class PlatformPrice(BaseModel):
-    """한 플랫폼에서의 가격. 프론트의 PlatformPrice에 대응한다."""
+class ListingOut(BaseModel):
+    """
+    프론트가 카드 하나로 그리는 단위. 매물 한 건이다.
 
-    platform_name: str = Field(description="수집처 ('당근마켓' / '중고나라')")
+    계산해서 만드는 값이 없다 — 전부 items 테이블 컬럼을 고른 것이다. 파생값이
+    필요해지면 여기서 지어내지 말고, 그 값이 전 수집처에서 성립하는지부터 따진다.
+    posted_at·listed_days가 사라진 이유가 그것이다.
+    """
+
+    id: int = Field(description="매물 영구 식별자. 크롤링이 다시 돌아도 바뀌지 않는다")
+    source: str = Field(
+        description="수집처 ('당근마켓' / '중고나라'). 플랫폼 필터와 카드 뱃지에 쓴다"
+    )
+    title: str = Field(
+        description=(
+            "화면에 보여줄 제목. 검색용 브랜드 나열 꼬리를 뗀 정제 제목이고, 정제 전이면 "
+            "원제목이다. 검색(search 파라미터)은 원제목을 대상으로 하므로, 검색어가 "
+            "화면 제목에 안 보일 수 있다 — 의도된 비대칭이다"
+        )
+    )
+    brand: str
+    category: str = Field(description="상품 분류. 지금은 가방('bag')만 수집한다")
     price: int | None = Field(
         default=None,
         description="가격(원). 파싱하지 못했으면 null이고, 그때 화면은 '가격 미상'으로 둔다",
     )
-    in_stock: bool = Field(description="아직 구매 가능한지 (판매완료·삭제면 false)")
-    link_url: str = Field(description="원글 주소")
-    seller_type: str | None = Field(
-        default=None,
-        description=(
-            "'certified'(사이트 인증 셀러) 또는 'individual'. null은 '개인 판매자'가 "
-            "아니라 **판정할 수 없음**을 뜻한다 — 당근마켓에는 인증 배지 체계가 없다"
-        ),
-    )
+    image_url: str | None = None
+    item_url: str = Field(description="원문 매물 주소. 거래는 각 수집처에서 이루어진다")
 
 
-class ProductOut(BaseModel):
-    """
-    프론트가 카드 하나로 그리는 단위.
-
-    id가 문자열인 이유는 나중에 진짜 그룹화를 도입할 때 `"item-123"`과
-    `"model-샤넬-클래식"`을 함께 담아야 하기 때문이다. 지금부터 문자열로 두면
-    그때 프론트를 고치지 않아도 된다.
-    """
-
-    id: str = Field(description="상품 식별자. 현재는 'item-{매물id}' 형태")
-    category: str = Field(default="bag", description="현재는 가방만 수집한다")
-    brand: str
-    model_name: str | None = Field(
-        default=None,
-        description=(
-            "추출한 모델명. **제목에서 특정하지 못하면 null이다**(현재 63%). "
-            "채워 넣지 않는 이유는 나중에 진짜 모델 그룹화를 할 때 "
-            "가짜 모델명이 섞이면 그룹이 어긋나기 때문이다"
-        ),
-    )
-    korean_name: str = Field(description="화면에 보여줄 제목. 검색용 브랜드 나열 꼬리를 뗀 것")
-    thumbnail_url: str | None = None
-
-    lowest_price: int | None = Field(
-        default=None, description="이 상품의 최저가(원). 매물이 하나면 그 가격이다"
-    )
-    platform_prices: list[PlatformPrice] = Field(
-        description="플랫폼별 가격. 현재는 항상 1개이고, 모델 그룹화 후 여러 개가 된다"
-    )
-
-    tags: list[str] = Field(
-        default_factory=list, description="브랜드·모델·수집처로 만든 검색 보조 태그"
-    )
-
-    # ---- 우리만 있는 데이터 ----
-
-    posted_at: datetime | None = Field(
-        default=None,
-        description="원글 등록 시각. 사이트가 표기하지 않으면 null",
-    )
-    listed_days: int = Field(
-        description=(
-            "우리가 이 매물을 관측한 일수. 오래 안 팔린 매물은 값을 깎을 여지가 "
-            "있다는 신호다"
-        )
-    )
-    price_drop_rate: float | None = Field(
-        default=None,
-        description=(
-            "첫 관측 가격 대비 현재 인하율(%). 값을 내렸다는 건 파는 쪽이 급해졌다는 "
-            "신호다. 가격이 그대로거나 올랐으면 null"
-        ),
-    )
-
-
-class ProductListResponse(BaseModel):
+class ListingListResponse(BaseModel):
     total: int
     count: int
     limit: int
     offset: int
     has_next: bool
-    items: list[ProductOut]
+    items: list[ListingOut]
