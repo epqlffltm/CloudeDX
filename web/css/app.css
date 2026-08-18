@@ -1,0 +1,1448 @@
+/* reluxe/css/app.css
+   화면 전체 스타일. 모바일 기준으로 쓰고 1024px에서 데스크톱으로 확장한다 —
+   중고거래 탐색은 모바일이 기본 화면이고 데스크톱이 확장판이다.
+   토큰(색·폰트·그림자)은 전부 tokens.css 변수를 참조한다. */
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+body.no-scroll {
+  overflow: hidden; /* 바텀시트가 열린 동안 뒤 배경 스크롤 잠금 */
+}
+
+::selection {
+  background: #e8dcc4;
+  color: var(--ink-strong);
+}
+
+img {
+  display: block;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+  border: 0;
+  background: none;
+  color: inherit;
+  padding: 0;
+}
+
+input {
+  font: inherit;
+}
+
+.wrap {
+  max-width: 80rem; /* 원본 max-w-7xl */
+  margin-inline: auto;
+  padding-inline: 16px;
+}
+
+/* ---------------------------------------------------------------------------
+   상단 브랜드 헤더 — 왕관 + Re:Luxe 워드마크
+--------------------------------------------------------------------------- */
+
+.hero {
+  position: relative;
+  text-align: center;
+  padding: 48px 16px 28px;
+}
+
+/* 원본의 radial glow. 장식이라 모바일에서도 싸다 — blur 한 장이 전부다. */
+.hero::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  translate: -50% 0;
+  width: 75%;
+  max-width: 56rem;
+  height: 240px;
+  background: linear-gradient(
+    to bottom,
+    var(--glow),
+    rgba(250, 243, 229, 0.6),
+    transparent
+  );
+  filter: blur(48px);
+  border-radius: 999px;
+  pointer-events: none;
+  z-index: -1;
+}
+
+.wordmark {
+  font-family: var(--font-brand);
+  font-size: clamp(3.4rem, 11vw, 6rem);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  line-height: 1;
+  margin: 0;
+  user-select: none;
+  display: inline-flex;
+  align-items: baseline;
+}
+
+.home-link {
+  color: inherit;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: baseline;
+}
+
+.wordmark .r-holder {
+  position: relative;
+  display: inline-flex;
+  justify-content: center;
+}
+
+.wordmark .crown {
+  position: absolute;
+  top: -0.62em;
+  left: 50%;
+  translate: -50% 0;
+  width: 0.62em;
+  height: 0.62em;
+  filter: drop-shadow(0 2px 8px rgba(212, 175, 55, 0.5));
+}
+
+.wordmark .g-r {
+  font-weight: 800;
+  background: linear-gradient(
+    to bottom,
+    var(--gold-soft),
+    var(--gold),
+    var(--gold-deep)
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.wordmark .g-e {
+  font-style: italic;
+  margin-right: 0.02em;
+  background: linear-gradient(
+    to right,
+    var(--gold-bright),
+    var(--gold),
+    #a27b32
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.wordmark .rest {
+  color: var(--ink-strong);
+  font-weight: 600;
+  letter-spacing: normal;
+}
+
+.hero__rule {
+  width: 144px;
+  height: 2px;
+  margin: 14px auto 0;
+  background: linear-gradient(to right, transparent, var(--gold), transparent);
+}
+
+.hero__sub {
+  font-family: var(--font-serif);
+  font-size: clamp(1.25rem, 4vw, 1.9rem);
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  color: #5a5043;
+  margin: 20px 0 0;
+}
+
+/* ---------------------------------------------------------------------------
+   카테고리 카드 — 모바일: 가로 스크롤 스트립 / 데스크톱: 5열 그리드
+   원본은 모바일 2열 그리드였는데 5장이 2+2+1로 어색하게 접혀서,
+   같은 카드 디자인을 유지한 채 배치만 가로 스냅 스크롤로 바꿨다.
+--------------------------------------------------------------------------- */
+
+.cats {
+  padding-block: 20px 8px;
+}
+
+.cats__grid {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  padding: 4px 4px 14px; /* 그림자 잘림 방지 */
+  scrollbar-width: none;
+}
+
+.cats__grid::-webkit-scrollbar {
+  display: none;
+}
+
+.cat {
+  scroll-snap-align: start;
+  flex: 0 0 148px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 18px 12px 16px;
+  border-radius: var(--r-2xl);
+  background: var(--panel);
+  border: 2px solid #eadfcf;
+  box-shadow: var(--shadow-card);
+  transition: transform 0.3s, border-color 0.3s, box-shadow 0.3s;
+}
+
+.cat--active {
+  border-color: var(--gold);
+}
+
+.cat:active {
+  transform: scale(0.97); /* 터치 피드백 — hover가 없는 기기 대응 */
+}
+
+.cat__icon {
+  width: 88px;
+  height: 88px;
+  border-radius: var(--r-2xl);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #fff9f0, #f5ece0);
+  box-shadow: inset 0 2px 6px rgba(180, 155, 120, 0.12);
+  color: var(--ink);
+}
+
+/* 주얼리·의류·신발의 선화 아이콘 — 원래 준비중 카드의 룩이었는데, 카드가
+   활성화된 뒤에도 시각 언어로 남겼다. 가방·시계의 스케치와 결이 같다. */
+.cat__icon--line {
+  background: rgba(249, 245, 238, 0.6);
+  box-shadow: none;
+  color: #8a7a67;
+}
+
+.cat__icon svg {
+  width: 62px;
+  height: 62px;
+}
+
+.cat__icon--line svg {
+  width: 40px;
+  height: 40px;
+}
+
+.cat__icon .en {
+  font-family: var(--font-serif);
+  font-size: 12px;
+  font-weight: 500;
+  margin-top: 2px;
+}
+
+.cat__title {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 12px 0 0;
+  letter-spacing: -0.02em;
+}
+
+.cat__count {
+  font-size: 12px;
+  font-weight: 500;
+  color: #8c7d6b;
+  margin-top: 5px;
+}
+
+
+/* ---------------------------------------------------------------------------
+   도구줄 — 검색 + (모바일) 필터 버튼. 스크롤해도 붙어 다닌다.
+--------------------------------------------------------------------------- */
+
+.toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(230, 215, 195, 0.6);
+}
+
+.toolbar__inner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-block: 10px;
+}
+
+.search {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #fff;
+  border: 1px solid #e0d5c5;
+  border-radius: var(--r-xl);
+  padding: 0 12px;
+  min-height: 44px; /* 터치 타겟 하한 */
+}
+
+.search:focus-within {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 2px rgba(197, 160, 89, 0.2);
+}
+
+.search__go {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  min-height: 34px;
+  margin-left: -6px; /* 입력칸 좌측 패딩과 시각적으로 맞춘다 */
+  border-radius: var(--r-lg);
+  flex: none;
+}
+
+.search__go:active {
+  transform: scale(0.9);
+}
+
+.search__go svg {
+  width: 17px;
+  height: 17px;
+  color: var(--gold);
+}
+
+.search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: none;
+  font-size: 15px;
+  color: var(--ink);
+}
+
+.search input::placeholder {
+  color: #a89a88;
+}
+
+.search__clear {
+  color: var(--ink-4);
+  font-size: 15px;
+  padding: 6px;
+  display: none;
+}
+
+.search.has-value .search__clear {
+  display: block;
+}
+
+.btn-filter {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  padding: 0 15px;
+  border-radius: var(--r-xl);
+  background: var(--dark);
+  color: var(--on-dark);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.btn-filter:active {
+  transform: scale(0.96);
+}
+
+.btn-filter svg {
+  width: 16px;
+  height: 16px;
+  color: var(--gold-soft);
+}
+
+.btn-filter__badge {
+  min-width: 19px;
+  height: 19px;
+  padding-inline: 5px;
+  border-radius: 999px;
+  background: var(--gold);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-filter__badge.on {
+  display: inline-flex;
+}
+
+/* ---------------------------------------------------------------------------
+   목록 머리 — 제목 + 건수·수집 시각
+--------------------------------------------------------------------------- */
+
+.listhead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+  padding: 22px 0 14px;
+  margin-bottom: 18px;
+}
+
+.listhead h2 {
+  font-family: var(--font-serif);
+  font-size: clamp(1.7rem, 5vw, 2.25rem);
+  font-weight: 700;
+  color: var(--ink-strong);
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.listhead h2 svg {
+  width: 30px;
+  height: 30px;
+  color: var(--gold);
+  flex: none;
+}
+
+.listhead__meta {
+  font-size: 12px;
+  color: var(--ink-3);
+  text-align: right;
+  flex: none;
+}
+
+.listhead__meta strong {
+  color: var(--gold);
+  font-weight: 800;
+}
+
+/* ---------------------------------------------------------------------------
+   필터 — 데스크톱: 항상 보이는 유리 패널 / 모바일: 바텀시트
+   같은 DOM 하나를 CSS로만 다르게 배치한다. 상태 분기가 없어야 안 꼬인다.
+--------------------------------------------------------------------------- */
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgba(30, 25, 20, 0.45);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s;
+}
+
+.backdrop.on {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.filters {
+  margin: 0 0 24px;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2xl);
+  padding: 16px;
+}
+
+.filters__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line-soft);
+  padding-bottom: 13px;
+  margin-bottom: 4px;
+}
+
+.filters__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 16px;
+}
+
+.filters__title svg {
+  width: 19px;
+  height: 19px;
+  color: var(--gold);
+}
+
+.btn-reset {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 13px;
+  border-radius: var(--r-xl);
+  background: #fff;
+  border: 1px solid var(--line-chip);
+  color: #7c6e5d;
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.btn-reset:hover {
+  background: var(--hover-bg);
+  color: var(--ink);
+}
+
+.btn-reset:active {
+  transform: scale(0.95);
+}
+
+.btn-reset svg {
+  width: 15px;
+  height: 15px;
+  color: var(--gold);
+}
+
+.filters fieldset {
+  border: 0;
+  margin: 0;
+  padding: 13px 0 0;
+}
+
+.filters fieldset + fieldset {
+  border-top: 1px solid var(--line-soft);
+  margin-top: 13px;
+}
+
+/* fieldset 자체에 flex를 주면 브라우저가 무시하는 quirk가 있어
+   legend는 제 줄에 두고, 컨트롤 래퍼(.frow)에 flex를 준다 */
+.frow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.filters legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  margin-bottom: 10px;
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--ink-2);
+}
+
+.filters legend svg {
+  width: 15px;
+  height: 15px;
+  color: var(--gold);
+}
+
+.chip {
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: var(--r-lg);
+  font-size: 14px;
+  font-weight: 500;
+  background: #fff;
+  color: #7c6e5d;
+  border: 1px solid var(--line-chip);
+  transition: background 0.15s, color 0.15s;
+}
+
+.chip:hover {
+  background: var(--hover-bg);
+}
+
+.chip:active {
+  transform: scale(0.95);
+}
+
+.chip.on {
+  background: var(--dark);
+  border-color: var(--dark);
+  color: var(--on-dark);
+  font-weight: 600;
+}
+
+.price-box {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: #fff;
+  border: 1px solid #e0d5c5;
+  border-radius: var(--r-xl);
+  padding: 5px 10px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.price-box:focus-within {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 2px rgba(197, 160, 89, 0.2);
+}
+
+.price-box .lbl {
+  font-size: 12px;
+  font-weight: 600;
+  color: #8c7a65;
+  flex: none;
+}
+
+.price-box input {
+  width: 88px;
+  border: 0;
+  outline: none;
+  font-size: 14px;
+  text-align: right;
+  color: var(--ink);
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.price-box input::-webkit-outer-spin-button,
+.price-box input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+}
+
+.price-box .unit {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.price-tilde {
+  color: var(--ink-3);
+}
+
+/* 시트 하단 버튼 — 데스크톱에선 숨긴다 (패널이 항상 보이므로 닫을 게 없다) */
+.filters__foot {
+  display: flex;
+  gap: 10px;
+  border-top: 1px solid var(--line-soft);
+  margin-top: 16px;
+  padding-top: 14px;
+}
+
+.btn-apply {
+  flex: 1;
+  min-height: 48px;
+  border-radius: var(--r-2xl);
+  background: var(--dark);
+  color: var(--on-dark);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.btn-apply:active {
+  transform: scale(0.98);
+}
+
+/* 모바일: 바텀시트로 전환 */
+@media (max-width: 1023.5px) {
+  .filters {
+    position: fixed;
+    z-index: 50;
+    inset-inline: 0;
+    bottom: 0;
+    margin: 0;
+    max-height: 82dvh;
+    overflow-y: auto;
+    border-radius: var(--r-3xl) var(--r-3xl) 0 0;
+    border-bottom: 0;
+    background: #fdfbf8;
+    backdrop-filter: none;
+    padding: 18px 16px calc(16px + env(safe-area-inset-bottom));
+    transform: translateY(102%);
+    transition: transform 0.28s cubic-bezier(0.32, 0.72, 0.25, 1);
+    box-shadow: 0 -12px 40px rgba(60, 45, 25, 0.18);
+  }
+
+  .filters.open {
+    transform: translateY(0);
+  }
+}
+
+@media (min-width: 1024px) {
+  .btn-filter,
+  .filters__foot,
+  .backdrop {
+    display: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   매물 카드 그리드
+   원본은 모바일 1열이었는데, 당근·번개 등 이 도메인의 관행이 2열이고
+   스크롤 대비 정보 밀도도 낫다. auto-fill이라 브레이크포인트 자체가 없다.
+--------------------------------------------------------------------------- */
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(164px, 1fr));
+  gap: 13px;
+}
+
+@media (min-width: 640px) {
+  .grid {
+    grid-template-columns: repeat(auto-fill, minmax(225px, 1fr));
+    gap: 24px;
+  }
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--r-2xl);
+  overflow: hidden;
+  box-shadow: var(--shadow-card);
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.3s, box-shadow 0.3s;
+}
+
+.card:active {
+  transform: scale(0.98); /* 터치 피드백 */
+}
+
+@media (hover: hover) {
+  .card:hover {
+    border-color: var(--gold);
+    box-shadow: var(--shadow-card-hover);
+  }
+
+  .card:hover .card__thumb img {
+    transform: scale(1.05);
+  }
+
+  .card:hover .card__title,
+  .card:hover .card__price {
+    color: var(--gold);
+  }
+
+  .card:hover .card__go {
+    background: var(--hover-bg);
+  }
+}
+
+.card__thumb {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  background: var(--thumb-bg);
+  overflow: hidden;
+}
+
+.card__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.5s;
+}
+
+.card__thumb .noimg {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: #c0b4a2;
+}
+
+.badge-brand {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  background: rgba(44, 40, 37, 0.9);
+  backdrop-filter: blur(8px);
+  color: #f4efea;
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  padding: 4px 9px;
+  border-radius: 6px;
+}
+
+.badge-source {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: var(--gold);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 6px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.card__body {
+  padding: 12px 13px 11px;
+  flex: 1;
+}
+
+.card__title {
+  font-size: 14.5px;
+  font-weight: 700;
+  line-height: 1.35;
+  margin: 0;
+  color: var(--ink);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  transition: color 0.2s;
+}
+
+.card__pricing {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  border-top: 1px solid var(--line-soft);
+  margin-top: 11px;
+  padding-top: 9px;
+}
+
+.card__pricing .lbl {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-3);
+  flex: none;
+}
+
+.card__price {
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--ink);
+  transition: color 0.2s;
+}
+
+.card__price.unknown {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-3);
+}
+
+.card__go {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 2px;
+  padding: 9px 13px;
+  background: var(--strip-bg);
+  border-top: 1px solid var(--line-soft);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--gold);
+  transition: background 0.2s;
+}
+
+.card__go svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* 스켈레톤 — 첫 로드 동안 카드 자리 잡기 */
+.skel {
+  border-radius: var(--r-2xl);
+  border: 1px solid var(--line);
+  background: #fff;
+  overflow: hidden;
+}
+
+.skel::before {
+  content: "";
+  display: block;
+  aspect-ratio: 4 / 3;
+  background: var(--thumb-bg);
+}
+
+.skel::after {
+  content: "";
+  display: block;
+  height: 64px;
+  margin: 12px;
+  border-radius: 8px;
+  background: linear-gradient(90deg, #f2ece2 25%, #faf6ef 45%, #f2ece2 65%);
+  background-size: 200% 100%;
+  animation: shimmer 1.3s infinite;
+}
+
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   목록 아래 — 상태 배지 + 더 보기 / 끝 표시, 그리고 빈·오류 상태
+--------------------------------------------------------------------------- */
+
+.pager {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  margin: 40px 0 8px;
+}
+
+.pager__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid #e0d5c5;
+  border-radius: 999px;
+  padding: 8px 19px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.pager__status .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--gold);
+}
+
+.pager__status strong {
+  color: var(--gold);
+  font-weight: 800;
+}
+
+.pager__status strong.dark {
+  color: var(--ink);
+}
+
+.btn-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 50px;
+  padding: 0 30px;
+  border-radius: var(--r-2xl);
+  background: var(--dark);
+  color: var(--on-dark);
+  font-size: 15px;
+  font-weight: 700;
+  box-shadow: 0 4px 10px rgba(40, 30, 15, 0.18);
+  transition: background 0.2s;
+}
+
+.btn-more:hover {
+  background: var(--dark-hover);
+}
+
+.btn-more:active {
+  transform: scale(0.97);
+}
+
+.btn-more:disabled {
+  opacity: 0.75;
+  cursor: default;
+}
+
+.btn-more svg {
+  width: 18px;
+  height: 18px;
+  color: var(--gold-soft);
+}
+
+.btn-more.loading svg {
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    rotate: 1turn;
+  }
+}
+
+.pager__end {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #8c7a65;
+  background: rgba(245, 236, 224, 0.6);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2xl);
+  padding: 10px 19px;
+}
+
+.pager__end svg {
+  width: 15px;
+  height: 15px;
+  color: #059669;
+}
+
+.state {
+  grid-column: 1 / -1;
+  text-align: center;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--r-3xl);
+  padding: 56px 20px;
+}
+
+.state h3 {
+  font-family: var(--font-serif);
+  font-size: 21px;
+  font-weight: 600;
+  color: var(--ink-2);
+  margin: 0 0 8px;
+}
+
+.state p {
+  font-size: 13px;
+  color: #9a8a75;
+  margin: 0 0 18px;
+}
+
+.state .btn-reset {
+  margin-inline: auto;
+}
+
+/* ---------------------------------------------------------------------------
+   푸터
+--------------------------------------------------------------------------- */
+
+.footer {
+  margin-top: 64px;
+  background: var(--dark);
+  color: var(--footer-ink);
+  border-top: 1px solid rgba(197, 160, 89, 0.3);
+  padding: 48px 16px;
+}
+
+.footer__inner {
+  max-width: 80rem;
+  margin-inline: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  text-align: center;
+}
+
+.footer .wordmark {
+  font-size: 26px;
+}
+
+.footer .wordmark .rest {
+  color: #fff;
+}
+
+.footer .wordmark .crown {
+  filter: drop-shadow(0 1px 3px rgba(212, 175, 55, 0.6));
+}
+
+.footer p {
+  margin: 0;
+  font-size: 12px;
+  color: #a09382;
+}
+
+.footer .copy {
+  color: #8c7e6c;
+}
+
+@media (min-width: 768px) {
+  .footer__inner {
+    flex-direction: row;
+    justify-content: space-between;
+    text-align: left;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   데스크톱 확장
+--------------------------------------------------------------------------- */
+
+@media (min-width: 1024px) {
+  .hero {
+    padding-top: 80px;
+  }
+
+  .cats {
+    padding-block: 36px 12px;
+  }
+
+  .cats__grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 24px;
+    overflow: visible;
+    padding: 4px;
+  }
+
+  .cat {
+    min-height: 300px;
+    justify-content: center;
+    padding: 28px 16px;
+  }
+
+  .cat:hover {
+    border-color: rgba(197, 160, 89, 0.7);
+    box-shadow: var(--shadow-card-hover);
+    transform: translateY(-8px);
+    background: #fff;
+  }
+
+  .cat__icon {
+    width: 132px;
+    height: 132px;
+  }
+
+  .cat__icon svg {
+    width: 92px;
+    height: 92px;
+  }
+
+  .cat__icon--line svg {
+    width: 50px;
+    height: 50px;
+  }
+
+  .cat__title {
+    font-size: 24px;
+  }
+
+  .cat__count {
+    font-size: 13px;
+  }
+
+  .listhead {
+    padding-top: 28px;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   가격 슬라이더 — 네이티브 range 두 개를 겹쳐 듀얼 레인지를 만든다.
+   input 자체는 pointer-events를 죽이고 썸에만 살린다 (겹친 두 트랙이
+   서로의 클릭을 뺏지 않게). 썸 26px — 이걸 뺐던 이유가 터치 정밀 조작이었으니
+   썸 크기가 이 컴포넌트의 존립 조건이다.
+--------------------------------------------------------------------------- */
+
+.range {
+  position: relative;
+  height: 30px;
+  width: 100%;
+  max-width: 440px;
+}
+
+.range__track,
+.range__fill {
+  position: absolute;
+  top: 50%;
+  translate: 0 -50%;
+  height: 6px;
+  border-radius: 999px;
+  pointer-events: none;
+}
+
+.range__track {
+  left: 0;
+  right: 0;
+  background: var(--track);
+}
+
+.range__fill {
+  background: linear-gradient(90deg, var(--gold), var(--gold-bright));
+}
+
+.range input[type="range"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 30px;
+  margin: 0;
+  background: none;
+  -webkit-appearance: none;
+  appearance: none;
+  pointer-events: none;
+}
+
+.range input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  pointer-events: auto;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid var(--gold);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+  cursor: grab;
+}
+
+.range input[type="range"]::-moz-range-thumb {
+  pointer-events: auto;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid var(--gold);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+  cursor: grab;
+}
+
+.range input[type="range"]:active::-webkit-slider-thumb {
+  cursor: grabbing;
+  background: #fff9ef;
+}
+
+.range input[type="range"]:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px rgba(197, 160, 89, 0.35);
+}
+
+.range input[type="range"]:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 3px rgba(197, 160, 89, 0.35);
+}
+
+.range__label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--gold);
+  margin: 2px 0 8px;
+}
+
+
+/* ---------------------------------------------------------------------------
+   대문 모드 (/ 진입, 파라미터 없음)
+   로고·카테고리·검색창만 보이고, 상세 필터는 접힌다. 목록은 스크롤로 만난다.
+   같은 DOM 하나를 body 클래스로만 바꾼다 — 페이지가 두 장이 되는 순간
+   헤더·카드·검색이 복제되고, 복제는 반드시 어긋난다.
+--------------------------------------------------------------------------- */
+
+body.mode-home .filters,
+body.mode-home .btn-filter,
+body.mode-home .backdrop {
+  display: none;
+}
+
+body.mode-home .hero {
+  padding-block: 72px 36px; /* 대문답게 숨 쉴 공간 */
+}
+
+
+/* ---------------------------------------------------------------------------
+   푸터 법적 고지
+--------------------------------------------------------------------------- */
+
+.footer__legal {
+  max-width: 80rem;
+  margin: 28px auto 0;
+  padding-top: 22px;
+  border-top: 1px solid rgba(197, 160, 89, 0.18);
+}
+
+.footer__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin-bottom: 14px;
+}
+
+.footer__links a {
+  color: var(--footer-ink);
+  font-size: 12.5px;
+  font-weight: 700;
+  text-decoration: none;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.footer__links a:hover {
+  color: var(--gold-soft);
+}
+
+.footer__legal p {
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: #8c7e6c;
+  margin: 0 0 8px;
+  max-width: 62rem;
+}
+
+/* ---------------------------------------------------------------------------
+   맨 위로 버튼 — 스크롤이 600px을 넘으면 우하단에 뜬다.
+   바텀시트(z 50)·backdrop(z 40)보다 아래라 시트가 열리면 자연히 가려진다.
+--------------------------------------------------------------------------- */
+
+.btn-top {
+  position: fixed;
+  right: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  z-index: 35;
+  width: 46px;
+  height: 46px;
+  border-radius: 999px;
+  background: var(--dark);
+  color: var(--gold-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 14px rgba(40, 30, 15, 0.28);
+  opacity: 0;
+  translate: 0 10px;
+  pointer-events: none;
+  transition: opacity 0.25s, translate 0.25s;
+}
+
+.btn-top.on {
+  opacity: 1;
+  translate: 0 0;
+  pointer-events: auto;
+}
+
+.btn-top:active {
+  transform: scale(0.92);
+}
+
+.btn-top svg {
+  width: 20px;
+  height: 20px;
+}
+
+
+/* ---------------------------------------------------------------------------
+   최상단 헤더 — 좌 카테고리 내비 / 우 로그인·로고
+   정적(스크롤 아웃)이다: 검색 툴바가 이미 스티키라, 둘을 겹쳐 붙이면
+   모바일 뷰포트를 상시 110px 넘게 먹는다. 상시 내비는 카드·TOP 버튼이 맡는다.
+--------------------------------------------------------------------------- */
+
+.topbar {
+  background: rgba(255, 255, 255, 0.75);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.topbar__inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 48px;
+}
+
+.tnav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  min-width: 0; /* 우측 블록에 밀려도 스스로 줄어들게 */
+}
+
+.tnav::-webkit-scrollbar {
+  display: none;
+}
+
+.tnav__item {
+  flex: none;
+  min-height: 40px;
+  padding: 0 11px;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--ink-2);
+  border-radius: var(--r-lg);
+  border-bottom: 2px solid transparent;
+}
+
+.tnav__item:active {
+  transform: scale(0.94);
+}
+
+@media (hover: hover) {
+  .tnav__item:hover {
+    color: var(--ink-strong);
+    background: var(--hover-bg);
+  }
+}
+
+/* 활성 표시는 카드와 같은 클래스(cat--active)를 공유한다 —
+   renderCategoryCards 한 함수가 카드·내비를 같이 갱신한다. */
+.tnav__item.cat--active {
+  color: var(--gold-deep);
+  border-bottom-color: var(--gold);
+}
+
+.topbar__right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: none;
+  position: relative;
+}
+
+.btn-login {
+  min-height: 34px;
+  padding: 0 13px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #7c6e5d;
+  background: #fff;
+  border: 1px solid var(--line-chip);
+  border-radius: var(--r-lg);
+}
+
+.btn-login:active {
+  transform: scale(0.94);
+}
+
+@media (hover: hover) {
+  .btn-login:hover {
+    background: var(--hover-bg);
+    color: var(--ink);
+  }
+}
+
+.login-tip {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  background: var(--dark);
+  color: var(--on-dark);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 11px;
+  border-radius: var(--r-lg);
+  box-shadow: 0 4px 12px rgba(40, 30, 15, 0.25);
+  white-space: nowrap;
+}
+
+.topbar .wordmark {
+  font-size: 21px;
+}
+
+@media (max-width: 480px) {
+  .topbar .wordmark {
+    font-size: 19px;
+  }
+
+  .tnav__item {
+    padding: 0 9px;
+    font-size: 13px;
+  }
+}

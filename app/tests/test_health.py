@@ -88,8 +88,10 @@ async def test_head_revisions_are_readable():
     assert len(heads) == 1, "마이그레이션 브랜치가 갈렸습니다. alembic heads 로 확인하세요."
 
 
-async def test_root_redirects_to_board(client):
+async def test_root_serves_web(client):
+    # 예전 계약(/board 307 리다이렉트)은 웹 화면 동거(StaticFiles mount)로
+    # 대체됐다 — 이제 루트가 곧 서비스 화면이다. 상세는 test_web_static.py.
     response = await client.get("/")
 
-    assert response.status_code == 307
-    assert response.headers["location"] == "/board"
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]

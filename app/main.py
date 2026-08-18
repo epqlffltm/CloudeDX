@@ -48,10 +48,11 @@ import asyncio
 import logging
 import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import FastAPI, status
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.config import ALLOWED_ORIGINS, API_PREFIX, DATABASE_URL, ENABLE_CRAWLER
 from app.db.engine import mask_url, wait_for_db
@@ -165,8 +166,22 @@ app.include_router(crawled_router, prefix=API_PREFIX)
 app.include_router(meta_router, prefix=API_PREFIX)
 app.include_router(products_router, prefix=API_PREFIX)
 
+# ---------------------------------------------------------------------------
+# 웹 화면 서빙. 프론트(web/)를 API와 같은 출처에서 내보낸다.
+#
+# 이 mount 하나로 CORS가 소멸한다 — 브라우저 입장에서 화면과 API가 한 주소라
+# 교차 출처 자체가 발생하지 않는다. ALLOWED_ORIGINS는 프론트를 다른 곳에서
+# 호스팅하는 경우에만 쓰는 선택지가 됐다.
+#
+# 등록 순서가 곧 우선순위다: /api·/board·/docs 같은 등록된 라우트가 먼저
+# 매칭되고, 남는 경로만 이 mount로 떨어진다. 그래서 mount는 반드시 맨 뒤다.
+# html=True는 "/" 요청에 index.html을 돌려준다 — 예전의 /board 리다이렉트를
+# 대체한다. 이제 루트가 곧 서비스 화면이고, 게시판은 /board 직행으로 남는다.
+# ---------------------------------------------------------------------------
+_WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
-@app.get("/", status_code=status.HTTP_307_TEMPORARY_REDIRECT, include_in_schema=False)
-def root():
-    """루트로 들어온 사람은 게시판으로 보낸다. 상태 확인은 /health와 /ready를 쓴다."""
-    return RedirectResponse(url="/board")
+if _WEB_DIR.is_dir():
+    app.mount("/", StaticFiles(directory=_WEB_DIR, html=True), name="web")
+    logger.info("웹 화면 서빙: %s", _WEB_DIR)
+else:
+    logger.info("web/ 디렉토리가 없어 API만 서빙한다")

@@ -1,0 +1,376 @@
+<!doctype html>
+<!-- reluxe/index.html
+     화면의 정적 골격 전부. 바뀌지 않는 것(헤더·카테고리·필터 틀·푸터)은 여기 있고,
+     데이터로 바뀌는 것(칩·카드·건수)만 js/render.js가 채운다.
+     빌드 도구 없음 — 이 파일을 정적 서버로 열면 그대로 동작한다. -->
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Re:Luxe — 중고명품 통합검색</title>
+    <meta name="description" content="당근마켓·중고나라의 중고 명품 가방 매물을 한 화면에서 찾아봅니다." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- 원본이 싣던 6개 글꼴 중 실제로 쓰이는 3개만 남겼다 -->
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,600..800;1,6..96,600&family=Cormorant+Garamond:wght@500;600;700&family=Noto+Sans+KR:wght@400;500;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="css/tokens.css" />
+    <link rel="stylesheet" href="css/app.css" />
+  </head>
+  <body>
+    <!-- 왕관 SVG는 재사용하므로 심볼로 한 번만 정의한다 (원본 GoldenCrown 이식) -->
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <defs>
+        <linearGradient id="crownGold" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#FFF2B2" />
+          <stop offset="25%" stop-color="#FAD02C" />
+          <stop offset="65%" stop-color="#D4AF37" />
+          <stop offset="100%" stop-color="#997008" />
+        </linearGradient>
+        <linearGradient id="crownBase" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stop-color="#FFE57F" />
+          <stop offset="50%" stop-color="#C5A059" />
+          <stop offset="100%" stop-color="#7A5807" />
+        </linearGradient>
+        <radialGradient id="crownRuby" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="#FF3366" />
+          <stop offset="70%" stop-color="#C41E3A" />
+          <stop offset="100%" stop-color="#660011" />
+        </radialGradient>
+        <radialGradient id="crownEmerald" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="#50C878" />
+          <stop offset="100%" stop-color="#0B5345" />
+        </radialGradient>
+        <symbol id="crown" viewBox="0 0 24 24">
+          <path d="M2 18L3.8 8.5L8.5 12.5L12 3.5L15.5 12.5L20.2 8.5L22 18H2Z" fill="url(#crownGold)" stroke="#6E4D00" stroke-width="0.6" stroke-linejoin="round" />
+          <path d="M2 17.5H22V19.5C22 20.3 21.3 21 20.5 21H3.5C2.7 21 2 20.3 2 19.5V17.5Z" fill="url(#crownBase)" stroke="#593E00" stroke-width="0.6" />
+          <circle cx="6" cy="19.2" r="0.9" fill="url(#crownRuby)" />
+          <circle cx="12" cy="19.2" r="1.1" fill="url(#crownRuby)" />
+          <circle cx="18" cy="19.2" r="0.9" fill="url(#crownRuby)" />
+          <circle cx="12" cy="3" r="1.4" fill="url(#crownGold)" stroke="#805A00" stroke-width="0.4" />
+          <circle cx="3.8" cy="7.8" r="1.1" fill="url(#crownGold)" stroke="#805A00" stroke-width="0.4" />
+          <circle cx="20.2" cy="7.8" r="1.1" fill="url(#crownGold)" stroke="#805A00" stroke-width="0.4" />
+          <path d="M12 11L13.5 13.2L12 15.4L10.5 13.2Z" fill="url(#crownRuby)" stroke="#FFE57F" stroke-width="0.3" />
+          <circle cx="8.5" cy="14" r="0.8" fill="url(#crownEmerald)" />
+          <circle cx="15.5" cy="14" r="0.8" fill="url(#crownEmerald)" />
+        </symbol>
+      </defs>
+    </svg>
+
+    <!-- 최상단 헤더. 좌측 카테고리 내비, 우측 로그인·로고.
+         카테고리 버튼의 data-category와 로고의 .home-link는 본문 카드·로고와
+         같은 속성이라, 기존 문서 위임 하나가 클릭을 전부 받아준다 —
+         내비가 늘어도 이벤트 코드는 늘지 않는다. -->
+    <div class="topbar">
+      <div class="topbar__inner wrap">
+        <nav class="tnav" aria-label="카테고리 바로가기">
+          <button type="button" class="tnav__item" data-category="all">전체</button>
+          <button type="button" class="tnav__item" data-category="bag">가방</button>
+          <button type="button" class="tnav__item" data-category="watch">시계</button>
+          <button type="button" class="tnav__item" data-category="jewelry">주얼리</button>
+          <button type="button" class="tnav__item" data-category="apparel">의류</button>
+          <button type="button" class="tnav__item" data-category="shoes">신발</button>
+        </nav>
+        <div class="topbar__right">
+          <!-- 로그인 백엔드는 아직 없다. 기능인 척하지 않고 준비 중임을 말한다 —
+               인증이 붙는 날(fastapi-blog 이식) 이 버튼이 진짜가 된다. -->
+          <button type="button" class="btn-login" id="loginBtn">로그인</button>
+          <span class="login-tip" id="loginTip" role="status" hidden>준비 중입니다</span>
+          <a class="home-link topbar__logo wordmark" href="./" aria-label="Re:Luxe 대문으로">
+            <span class="r-holder">
+              <svg class="crown" aria-hidden="true"><use href="#crown" /></svg>
+              <span class="g-r">R</span>
+            </span>
+            <span class="g-e">e</span>
+            <span class="rest">:Luxe</span>
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!-- 브랜드 헤더 -->
+    <header class="hero">
+      <h1 class="wordmark">
+        <!-- 진짜 링크다: JS가 가로채 소프트 복귀시키고, JS가 죽으면
+             일반 링크로 풀 리로드된다. 새 탭·가운데 클릭도 공짜로 동작한다. -->
+        <a class="home-link" href="./" aria-label="Re:Luxe 대문으로">
+          <span class="r-holder">
+            <svg class="crown" aria-hidden="true"><use href="#crown" /></svg>
+            <span class="g-r">R</span>
+          </span>
+          <span class="g-e">e</span>
+          <span class="rest">:Luxe</span>
+        </a>
+      </h1>
+      <div class="hero__rule" aria-hidden="true"></div>
+      <p class="hero__sub">중고명품 통합검색 사이트</p>
+    </header>
+
+    <!-- 카테고리 선택. 카드가 곧 필터다 — 활성 카드의 매물이 아래 목록에 뜬다.
+         건수는 /api/meta의 categories에서 온다. 아직 수집 전인 카테고리는 0으로
+         정직하게 표시된다. -->
+    <section class="cats wrap" aria-label="카테고리">
+      <div class="cats__grid">
+        <button class="cat" type="button" data-category="bag" aria-pressed="false">
+          <span class="cat__icon">
+            <svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M 36,36 C 36,18 64,18 64,36" />
+              <path d="M 18,36 Q 22,34 82,36 Q 88,38 84,82 Q 80,86 20,86 Q 16,86 16,36 Z" />
+              <path d="M 18,36 Q 50,56 82,36" />
+              <circle cx="50" cy="54" r="5" fill="#D4AF37" stroke="#332D27" stroke-width="1.5" />
+              <path d="M 47,54 L 53,54" />
+              <path d="M 24,80 L 76,80" stroke-dasharray="3 3" opacity="0.4" />
+            </svg>
+          </span>
+          <span class="cat__title">가방</span>
+          <span class="cat__count" data-count="bag">…</span>
+        </button>
+
+        <button class="cat" type="button" data-category="watch" aria-pressed="false">
+          <span class="cat__icon">
+            <svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M 38,8 L 38,26 C 38,28 62,28 62,26 L 62,8 Z" />
+              <path d="M 38,74 L 38,92 C 38,94 62,94 62,92 L 62,74 Z" />
+              <circle cx="50" cy="50" r="26" stroke-width="2.5" />
+              <circle cx="50" cy="50" r="20" opacity="0.6" />
+              <rect x="76" y="46" width="5" height="8" rx="1.5" fill="#D4AF37" stroke="#332D27" />
+              <path d="M 50,50 L 50,38" stroke-width="2.5" />
+              <path d="M 50,50 L 60,54" stroke-width="2" />
+              <circle cx="50" cy="50" r="2.5" fill="#D4AF37" />
+            </svg>
+          </span>
+          <span class="cat__title">시계</span>
+          <span class="cat__count" data-count="watch">…</span>
+        </button>
+
+        <button class="cat" type="button" data-category="jewelry" aria-pressed="false">
+          <span class="cat__icon cat__icon--line">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="15" r="6" />
+              <path d="M9 3h6l2 4L12 10 7 7 9 3z" />
+              <path d="M7 7h10" />
+              <path d="M12 3v7" />
+            </svg>
+            <span class="en">Jewelry</span>
+          </span>
+          <span class="cat__title">주얼리</span>
+          <span class="cat__count" data-count="jewelry">…</span>
+        </button>
+
+        <button class="cat" type="button" data-category="apparel" aria-pressed="false">
+          <span class="cat__icon cat__icon--line">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M20.38 3.46 16 2a4 4 0 0 1-8 0L3.62 3.46a2 2 0 0 0-1.34 2.23l.58 3.47a1 1 0 0 0 .99.84H6v10a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V10h2.15a1 1 0 0 0 .99-.84l.58-3.47a2 2 0 0 0-1.34-2.23z" />
+            </svg>
+            <span class="en">Apparel</span>
+          </span>
+          <span class="cat__title">의류</span>
+          <span class="cat__count" data-count="apparel">…</span>
+        </button>
+
+        <button class="cat" type="button" data-category="shoes" aria-pressed="false">
+          <span class="cat__icon cat__icon--line">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M 19 12.5 V 20" />
+              <path d="M 3 18 C 6 18, 9 17, 12 13 L 15.5 8.5 C 17 6.8, 19.5 7.2, 20.2 9 L 21 12 C 18.5 13.2, 16 15, 14 18 H 3 Z" />
+              <path d="M 12 13 C 14 11, 16.5 10, 18.5 10.5" />
+            </svg>
+            <span class="en">Shoes</span>
+          </span>
+          <span class="cat__title">신발</span>
+          <span class="cat__count" data-count="shoes">…</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- 도구줄: 검색 + 필터 열기 -->
+    <div class="toolbar">
+      <div class="toolbar__inner wrap">
+        <form class="search" id="searchForm" role="search">
+          <!-- 돋보기는 장식이 아니라 실행 버튼이다. 검색은 엔터나 이 버튼으로
+               확정했을 때만 나간다 — 타이핑마다 목록이 출렁이지 않는다. -->
+          <button class="search__go" type="submit" aria-label="검색">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" />
+              <path d="m20 20-3.5-3.5" />
+            </svg>
+          </button>
+          <input id="searchInput" type="search" placeholder="원제목에서 검색 후 Enter" autocomplete="off" enterkeyhint="search" />
+          <button class="search__clear" id="searchClear" type="button" aria-label="검색어 지우기">✕</button>
+        </form>
+        <button class="btn-filter" id="filterOpen" type="button" aria-haspopup="dialog" aria-controls="filters">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+            <path d="M4 6h16M7 12h10M10 18h4" />
+          </svg>
+          <span>필터</span>
+          <span class="btn-filter__badge" id="filterBadge"></span>
+        </button>
+      </div>
+    </div>
+
+    <main class="wrap">
+      <div class="listhead">
+        <h2 id="listTitle">가방</h2>
+        <p class="listhead__meta" id="resultMeta"></p>
+      </div>
+
+      <div class="backdrop" id="backdrop"></div>
+
+      <!-- 필터. 데스크톱에선 이 자리에 항상 보이고, 모바일에선 같은 요소가
+           바텀시트로 떠오른다 — DOM은 하나, 배치만 CSS가 바꾼다. -->
+      <form class="filters" id="filters" aria-label="상세 필터">
+        <div class="filters__head">
+          <span class="filters__title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+              <path d="M4 6h16M7 12h10M10 18h4" />
+            </svg>
+            상세 필터
+          </span>
+          <button class="btn-reset" id="filterReset" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+              <path d="M3 3v5h5" />
+            </svg>
+            초기화
+          </button>
+        </div>
+
+        <fieldset>
+          <legend>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+              <circle cx="12" cy="8" r="5" />
+              <path d="M8.5 12.5 7 21l5-2.4L17 21l-1.5-8.5" />
+            </svg>
+            브랜드
+          </legend>
+          <div class="frow" id="brandChips"></div>
+        </fieldset>
+
+        <fieldset>
+          <legend>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 9 5 3h14l2 6" />
+              <path d="M4 9h16v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z" />
+              <path d="M9 21v-6h6v6" />
+            </svg>
+            플랫폼
+          </legend>
+          <div class="frow" id="sourceChips"></div>
+        </fieldset>
+
+        <fieldset>
+          <legend>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="m7 4-3 3 3 3M4 7h9" />
+              <path d="m17 20 3-3-3-3M20 17h-9" />
+            </svg>
+            정렬
+          </legend>
+          <div class="frow" id="sortChips"></div>
+        </fieldset>
+
+        <fieldset>
+          <legend>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 7v10M9.5 9.5h4a1.8 1.8 0 0 1 0 3.6h-3a1.8 1.8 0 0 0 0 3.6h4.3" />
+            </svg>
+            가격
+          </legend>
+          <!-- 슬라이더는 굵은 조정, 입력칸은 정밀값. 둘은 같은 상태를 본다.
+               스케일은 단계식이다 — 0~3000만원을 선형으로 펴면 실사용 구간(0~500만)이
+               손가락 몇 픽셀 안에 몰린다. -->
+          <div class="range" id="priceRange">
+            <div class="range__track" aria-hidden="true"></div>
+            <div class="range__fill" id="rangeFill" aria-hidden="true"></div>
+            <input type="range" id="rangeMin" min="0" step="1" value="0" aria-label="최저 가격" />
+            <input type="range" id="rangeMax" min="0" step="1" value="0" aria-label="최고 가격" />
+          </div>
+          <div class="range__label" id="rangeLabel">전체</div>
+          <div class="frow">
+          <label class="price-box">
+            <span class="lbl">최저</span>
+            <input id="minPrice" type="number" inputmode="numeric" min="0" step="10" placeholder="0" />
+            <span class="unit">만원</span>
+          </label>
+          <span class="price-tilde">~</span>
+          <label class="price-box">
+            <span class="lbl">최고</span>
+            <input id="maxPrice" type="number" inputmode="numeric" min="0" step="10" placeholder="제한 없음" />
+            <span class="unit">만원</span>
+          </label>
+          </div>
+        </fieldset>
+
+        <div class="filters__foot">
+          <button class="btn-apply" id="filterClose" type="button">매물 보기</button>
+        </div>
+      </form>
+
+      <div class="grid" id="grid" aria-live="polite"></div>
+      <div class="pager" id="pager"></div>
+    </main>
+
+    <!-- 푸터 고지. 사업자등록번호·통신판매업 신고번호 같은 법정 표기는 넣지
+         않는다 — Re:Luxe는 사업자가 아니고, 실존하지 않는 번호를 지어 넣는 것은
+         허위 표시다. 대신 이 서비스의 실체에 맞는 고지(거래 비당사자, 수집 시점
+         한계, 상표, 개인정보 미수집, 노출 중단 창구)를 정직하게 적는다. -->
+    <footer class="footer">
+      <div class="footer__inner">
+        <div>
+          <div class="wordmark">
+            <a class="home-link" href="./" aria-label="Re:Luxe 대문으로">
+              <span class="r-holder">
+                <svg class="crown" aria-hidden="true"><use href="#crown" /></svg>
+                <span class="g-r">R</span>
+              </span>
+              <span class="g-e">e</span>
+              <span class="rest">:Luxe</span>
+            </a>
+          </div>
+          <p>당근마켓 · 중고나라의 중고 명품 매물을 한 화면에서.</p>
+        </div>
+        <p class="copy">© 2026 Re:Luxe</p>
+      </div>
+
+      <div class="footer__legal">
+        <nav class="footer__links" aria-label="관련 링크">
+          <a href="https://github.com/epqlffltm/CloudeDX" target="_blank" rel="noopener noreferrer">GitHub (백엔드)</a>
+          <a href="https://github.com/epqlffltm/CloudeDX/issues" target="_blank" rel="noopener noreferrer">문의 · 매물 노출 중단 요청</a>
+        </nav>
+        <p>
+          Re:Luxe는 당근마켓·중고나라에 공개 게시된 중고 명품 매물 정보를 수집해
+          한 화면에서 보여주는 검색 서비스입니다. Re:Luxe는 통신판매의 당사자도,
+          통신판매중개자도 아닙니다. 매물의 판매·가격·품질·진위 및 거래에 관한
+          모든 의무와 책임은 각 판매자와 해당 플랫폼에 있습니다.
+        </p>
+        <p>
+          표시되는 가격·판매 상태·이미지는 수집 시점 기준이며 실제와 다를 수
+          있습니다. 거래 전 반드시 원문 페이지에서 확인하세요.
+        </p>
+        <p>
+          Re:Luxe는 회원가입·로그인 기능이 없으며 이용자의 개인정보를 수집하지
+          않습니다. 당근마켓, 중고나라 및 화면에 표시되는 각 브랜드명은 해당
+          권리자의 상표이며, Re:Luxe는 이들과 제휴·후원·보증 관계가 없습니다.
+        </p>
+        <p>
+          본 서비스는 학습·포트폴리오 목적의 비상업 프로젝트입니다. 매물 정보의
+          노출 중단을 원하시는 판매자·플랫폼은 위 문의 링크로 요청해 주세요 —
+          확인 즉시 제외합니다.
+        </p>
+      </div>
+    </footer>
+
+    <!-- 맨 위로. 무한 스크롤에서 바닥으로부터의 복귀 수단이다. -->
+    <button class="btn-top" id="topBtn" type="button" aria-label="맨 위로">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 19V5" />
+        <path d="m5 12 7-7 7 7" />
+      </svg>
+    </button>
+
+    <script type="module" src="js/main.js"></script>
+  </body>
+</html>

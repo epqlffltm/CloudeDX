@@ -10,11 +10,14 @@
 
 ```
 크롤러(Playwright) → items 테이블(upsert) → 서빙
+                                              ├─ /       웹 화면 (web/, 정적 서빙)
                                               ├─ /board  게시판 화면 (Jinja2, 시연용)
-                                              └─ /api    JSON API (프론트엔드용)
+                                              └─ /api    JSON API
 ```
 
-세 서빙 경로는 같은 `app/db/repository.py`를 통해 조회한다. 화면과 API가 서로 다른
+웹 화면은 `web/`의 정적 파일을 StaticFiles로 같은 출처에서 내보낸다 —
+그래서 CORS 설정 없이 동작한다(`ALLOWED_ORIGINS`는 화면을 외부에서 호스팅할
+때만 쓰는 선택지다). 게시판과 API는 같은 `app/db/repository.py`를 통해 조회한다. 화면과 API가 서로 다른
 쿼리를 쓰기 시작하면 "API로는 나오는데 화면엔 없는" 상황이 생기기 때문이다.
 
 ## 현재 상태

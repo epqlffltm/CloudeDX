@@ -32,6 +32,8 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY alembic.ini ./
 COPY alembic ./alembic
 COPY app ./app
+# 웹 화면. app/main.py가 /srv/web을 찾아 같은 출처로 서빙한다 — CORS 불필요.
+COPY web ./web
 
 ENV PATH="/srv/.venv/bin:$PATH"
 
