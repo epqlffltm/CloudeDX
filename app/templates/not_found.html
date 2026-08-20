@@ -1,17 +1,14 @@
-{# app/templates/not_found.html #}
-{#
-  존재하지 않는 매물 id로 들어왔을 때의 화면.
-  JSON API(/crawled-items/{id})는 같은 상황에서 404 JSON을 반환한다.
-#}
 {% extends "base.html" %}
-
-{% block title %}매물을 찾을 수 없습니다 · 중고 명품 가방 수집{% endblock %}
-
-{% block standfirst %}404{% endblock %}
-
+{% block title %}매물을 찾을 수 없습니다 · Reverdi{% endblock %}
 {% block content %}
-  <div class="empty">
-    <p>{{ item_id }}번 매물이 없습니다. 삭제됐거나 주소가 잘못됐습니다.</p>
-    <a class="btn btn-quiet" href="/board">목록으로 돌아가기</a>
+<main class="container detail-wrap">
+  <div class="empty" style="max-width:760px;margin:64px auto;">
+    <div class="empty-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+    </div>
+    <h2>매물을 찾을 수 없습니다</h2>
+    <p>요청하신 매물 #{{ item_id }}이 없거나 더 이상 제공되지 않습니다.</p>
+    <a class="filter-submit" href="/board">Reverdi 홈으로</a>
   </div>
+</main>
 {% endblock %}
