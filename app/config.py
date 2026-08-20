@@ -16,6 +16,7 @@ scheduler를 임포트하게 되고, scheduler는 Playwright를 끌고 온다 �
 """
 
 import os
+import secrets
 
 from dotenv import load_dotenv
 
@@ -138,3 +139,33 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").strip().upper() or "INFO"
 # text = 사람이 읽는 형식(로컬), json = 한 줄 JSON(배포).
 # 로그 수집기가 필드 단위로 질의하려면 json이 필요하다.
 LOG_FORMAT = os.getenv("LOG_FORMAT", "text").strip().lower() or "text"
+
+# ---------------------------------------------------------------------------
+# 인증 (시연용)
+# ---------------------------------------------------------------------------
+#
+# 계정이 둘뿐이고 회원가입이 없어서 DB 테이블 대신 설정에 둔다. 자세한 이유는
+# app/auth.py의 모듈 설명을 참고한다.
+#
+# 배포에서는 반드시 .env로 덮어쓴다. 기본값은 로컬 시연 편의를 위한 것이다.
+
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin").strip() or "admin"
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin1234")
+
+CLIENT_USERNAME = os.getenv("CLIENT_USERNAME", "client").strip() or "client"
+CLIENT_PASSWORD = os.getenv("CLIENT_PASSWORD", "client1234")
+
+# 세션 쿠키 서명 키.
+#
+# 지정하지 않으면 프로세스마다 임의로 만든다. 서버를 재시작하면 기존 로그인이
+# 전부 풀리고, 인스턴스를 여러 개 띄우면 서로의 쿠키를 인정하지 않는다.
+# 시연에서는 그래도 되지만, 배포에서는 반드시 고정값을 넣는다.
+#     python -c "import secrets; print(secrets.token_hex(32))"
+SESSION_SECRET = os.getenv("SESSION_SECRET", "").strip() or secrets.token_hex(32)
+
+# 로그인 유지 시간. 기본 12시간.
+SESSION_MAX_AGE_SECONDS = _int_env("SESSION_MAX_AGE_SECONDS", 12 * 60 * 60, minimum=60)
+
+# CSV 업로드 한 번에 받을 최대 바이트. 기본 5MB.
+# 이 선이 없으면 실수로 올린 수백 MB 파일이 그대로 메모리에 올라온다.
+MAX_UPLOAD_BYTES = _int_env("MAX_UPLOAD_BYTES", 5 * 1024 * 1024, minimum=1024)

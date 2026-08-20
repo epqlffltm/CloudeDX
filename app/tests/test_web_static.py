@@ -8,6 +8,8 @@
 API가 전부 404가 되는, 원인 찾기 고약한 장애가 된다.
 """
 
+import re
+
 from app.db import repository
 
 from .test_products import make_item
@@ -25,8 +27,20 @@ async def test_root_serves_frontend(client):
 
 
 async def test_static_assets_served(client):
-    assert (await client.get("/css/app.css")).status_code == 200
-    assert (await client.get("/js/main.js")).status_code == 200
+    """
+    번들 자산이 서빙된다.
+
+    프론트가 Vite 빌드 산출물로 바뀌면서 파일명에 해시가 붙는다
+    (assets/index-XXXXXXXX.js). 파일명을 박아두면 빌드할 때마다 테스트가
+    깨지므로, index.html이 참조하는 경로를 읽어서 그것을 요청한다.
+    """
+    html = (await client.get("/")).text
+    refs = re.findall(r'(?:src|href)="(/assets/[^"]+)"', html)
+
+    assert refs, "index.html이 번들 자산을 참조하지 않는다"
+
+    for ref in refs:
+        assert (await client.get(ref)).status_code == 200, ref
 
 
 async def test_api_not_shadowed_by_mount(client, session):

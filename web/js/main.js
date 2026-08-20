@@ -1,448 +1,487 @@
-﻿// reluxe/js/main.js
+// web/js/main.js
 //
 // 진입점. 흐름은 하나뿐이다:
-//   이벤트 → state 변경 → 서버 조회 → renderList(state)
+//     이벤트 → state 변경 → 서버 조회 → 다시 그리기
 // DOM을 직접 만지는 코드는 render.js에만 있고, 여기는 상태와 배선만 다룬다.
 
-import { fetchListings, fetchMeta, fetchRecoRail } from "./api.js";
+import { fetchListings, fetchMeta, fetchReco } from './api.js';
+import { fetchMe, logout } from './auth.js';
 import {
   DEFAULT_FILTERS,
   PAGE_SIZE,
+  PRICE_CAP,
+  PRICE_PRESETS,
+  PRICE_UNLIMITED,
   SORT_OPTIONS,
-  state,
   readFiltersFromURL,
+  state,
+  toDisplayBrand,
   writeFiltersToURL,
-} from "./state.js";
+} from './state.js';
 import {
   renderCategoryCards,
-  renderRecoRail,
   renderChips,
-  renderFilterBadge,
-  renderFilterInputs,
+  renderFilterTitle,
   renderList,
-  renderMetaLine,
-  renderRange,
-  renderSheetCTA,
-  renderTitle,
-  stepIndexFor,
-  stepValue,
-} from "./render.js";
+  renderPopular,
+  renderPresets,
+  renderPriceInputs,
+  renderPriceStats,
+  renderReco,
+  renderResultHeader,
+  renderSearchInputs,
+  renderTabs,
+} from './render.js';
 
 const $ = (id) => document.getElementById(id);
 
-/* ---------------------------------------------------------------------------
-   서버 조회 — 경합 방어가 핵심이다.
-   빠르게 타이핑하면 요청 여러 개가 공중에 뜨는데, 늦게 출발한 옛 응답이
-   마지막에 도착해 새 결과를 덮는 사고를 AbortController가 막는다.
-   React였다면 useEffect cleanup이 하던 그 일이다.
---------------------------------------------------------------------------- */
-
 /**
- * 화면 모드. "home"은 대문(로고·카테고리·검색창, 필터 없음, 스크롤 로딩)이고
- * "list"는 카테고리·검색으로 들어온 목록 화면이다. 파라미터 없는 주소가 대문이다.
+ * 선택적 요소 배선. 요소가 없으면 경고만 남기고 넘어간다.
+ * 마크업 하나가 빠졌다고 뒤따르는 배선 전부가 죽으면 안 된다.
  */
-function setMode(mode) {
-  state.mode = mode;
-  document.body.classList.toggle("mode-home", mode === "home");
+function on(id, type, handler, options) {
+  const node = $(id);
+
+  if (!node) {
+    console.warn(`[wire] #${id} 요소가 없어 ${type} 배선을 건너뜁니다.`);
+    return null;
+  }
+
+  node.addEventListener(type, handler, options);
+  return node;
 }
 
+/* ---------------------------------------------------------------- 화면 모드 */
+
+function setMode(mode) {
+  state.mode = mode;
+  document.body.classList.toggle('mode-home', mode === 'home');
+  document.body.classList.toggle('mode-list', mode === 'list');
+}
+
+/* ------------------------------------------------------------------ 조회 */
+
+// 빠르게 조작하면 요청 여러 개가 공중에 뜬다. 늦게 출발한 옛 응답이 마지막에
+// 도착해 새 결과를 덮는 사고를 AbortController가 막는다.
 let inflight = null;
 
 async function load({ append = false } = {}) {
   inflight?.abort();
   inflight = new AbortController();
 
-  state.status = append ? "appending" : "loading";
+  state.status = append ? 'appending' : 'loading';
   state.offset = append ? state.offset + PAGE_SIZE : 0;
   if (!append) state.items = [];
+
   renderList(state);
 
   try {
     const data = await fetchListings(state.filters, state.offset, PAGE_SIZE, inflight.signal);
+
     state.items = append ? [...state.items, ...data.items] : data.items;
     state.total = data.total;
     state.hasNext = data.has_next;
-    state.status = "ready";
+    state.status = 'ready';
   } catch (err) {
-    if (err.name === "AbortError") return; // 더 새 요청이 이겼다 — 조용히 물러난다
-    state.status = "error";
+    if (err.name === 'AbortError') return; // 더 새 요청이 이겼다 — 조용히 물러난다
+    state.status = 'error';
     state.errorMessage = err.message;
   }
 
   renderList(state);
-  renderMetaLine(state);
-  renderSheetCTA(state);
+  renderResultHeader(state);
+  renderPriceStats(state.items);
   armScrollLoader();
 }
 
-/** 필터가 바뀌었을 때의 공통 경로: URL 반영 → 배지 → 첫 페이지부터 다시 */
-function applyFilters() {
-  writeFiltersToURL(state.filters);
-  renderFilterBadge(state.filters);
-  renderTitle(state.filters);
-  load();
-}
-
-/** 칩 세 벌을 현재 상태로 다시 그린다. 칩 하나가 바뀌면 전부 다시 — 부분 수정 없음. */
-function rerenderChips() {
-  // 브랜드 선택지는 카테고리를 따라간다 — 시계 화면에서 고야드 칩은 소음이다.
-  const brands =
-    state.meta?.brands_by_category?.[state.filters.category] ?? state.meta?.brands ?? [];
-  renderChips("brandChips", brands, state.filters.brand, { withAll: true });
-  renderChips("sourceChips", state.meta?.sources ?? [], state.filters.source, { withAll: true });
-  renderChips("sortChips", SORT_OPTIONS, state.filters.sort);
-}
-
-function resetFilters() {
-  // 카테고리는 초기화 대상이 아니다 — 시계를 보다가 "필터 초기화"를 눌렀는데
-  // 가방으로 튕기면, 초기화가 아니라 이동이 된다.
-  state.filters = { ...DEFAULT_FILTERS, category: state.filters.category };
-  renderFilterInputs(state.filters);
-  rerenderChips();
-  applyFilters();
-}
-
-/* ---------------------------------------------------------------------------
-   바텀시트 열기/닫기 (모바일 전용 — 데스크톱에선 CSS가 버튼째 숨긴다)
---------------------------------------------------------------------------- */
-
-function openSheet() {
-  $("filters").classList.add("open");
-  $("backdrop").classList.add("on");
-  document.body.classList.add("no-scroll");
-}
-
-function closeSheet() {
-  $("filters").classList.remove("open");
-  $("backdrop").classList.remove("on");
-  document.body.classList.remove("no-scroll");
-}
-
-/* ---------------------------------------------------------------------------
-   이벤트 배선
---------------------------------------------------------------------------- */
-
-function wireEvents() {
-  // 칩은 계속 다시 그려지므로 개별 바인딩 대신 문서 위임 한 번으로 끝낸다
-  document.addEventListener("click", (e) => {
-    const home = e.target.closest(".home-link");
-    if (home) {
-      e.preventDefault(); // 링크의 풀 리로드 대신 소프트 복귀 — JS가 죽으면 링크가 폴백
-      goHome();
-      return;
-    }
-
-    const kw = e.target.closest("[data-kw]");
-    if (kw) {
-      // 칩은 확정 검색과 같은 경로다 — runSearch가 두 검색창 동기화까지 맡는다.
-      $("searchInput").closest(".search").classList.add("has-value");
-      runSearch(kw.dataset.kw);
-      return;
-    }
-
-    const recoBtn = e.target.closest("[data-reco]");
-    if (recoBtn) {
-      const vp = $("recoViewport");
-      const step = 340;
-      vp.scrollBy({ left: recoBtn.dataset.reco === "prev" ? -step : step, behavior: "smooth" });
-      return;
-    }
-
-    const card = e.target.closest("[data-category]");
-    if (card) {
-      setMode("list"); // 대문에서 눌렀으면 목록 화면으로 — 이미 목록이면 무해
-      const next = card.dataset.category;
-      if (next !== state.filters.category) {
-        state.filters.category = next;
-        // 브랜드 선택지가 카테고리마다 달라서, 안 파는 브랜드가 걸려 있으면 푼다
-        const brands = state.meta?.brands_by_category?.[next] ?? [];
-        if (state.filters.brand !== "전체" && !brands.includes(state.filters.brand)) {
-          state.filters.brand = "전체";
-        }
-        renderCategoryCards(state.meta, next);
-        rerenderChips();
-        renderFilterInputs(state.filters); // 미확정 타이핑을 적용값으로 되돌린다
-        applyFilters();
-      }
-      return;
-    }
-
-    const chip = e.target.closest("[data-chip]");
-    if (chip) {
-      const key = { brandChips: "brand", sourceChips: "source", sortChips: "sort" }[
-        chip.dataset.chip
-      ];
-      state.filters[key] = chip.dataset.value;
-      rerenderChips();
-      applyFilters();
-      return;
-    }
-
-    const action = e.target.closest("[data-action]")?.dataset.action;
-    if (action === "more") load({ append: true });
-    if (action === "retry") load();
-    if (action === "reset") resetFilters();
-  });
-
-  // 검색은 확정 실행이다 — 엔터(submit)나 돋보기 버튼으로만 나간다.
-  // 타이핑 자동 검색(디바운스)을 뺀 이유: 의도가 확정되기 전의 요청 낭비와,
-  // 글자마다 목록이 출렁이는 조작감 문제. 서버 search는 원제목 대상이라
-  // 정제 제목만 보이는 화면에서 검색어가 안 보일 수 있다 — 의도된 비대칭이다.
-  const searchInput = $("searchInput");
-  searchInput.addEventListener("input", () => {
-    // 실행은 안 하고 X 버튼 표시만 갱신한다
-    searchInput.closest(".search").classList.toggle("has-value", Boolean(searchInput.value));
-  });
-
-  // 검색 실행 공통 경로 — 툴바(목록)와 히어로(대문) 두 폼이 같은 문을 쓴다.
-  function runSearch(raw) {
-    state.filters.q = raw.trim();
-    if (state.filters.q && state.mode === "home") setMode("list");
-    renderFilterInputs(state.filters); // 두 검색창 동기화
-    applyFilters();
-  }
-
-  $("searchForm").addEventListener("submit", (e) => {
-    e.preventDefault(); // 페이지 새로고침 막기 — 제출이 곧 검색 실행
-    runSearch(searchInput.value);
-    searchInput.blur(); // 모바일 키보드 내리기
-  });
-
-  $("heroSearchForm").addEventListener("submit", (e) => {
-    e.preventDefault();
-    runSearch($("heroSearchInput").value);
-    $("heroSearchInput").blur();
-  });
-
-  $("searchClear").addEventListener("click", () => {
-    searchInput.closest(".search").classList.remove("has-value");
-    runSearch(""); // 해제도 공통 경로 — 두 검색창이 같이 비워진다
-  });
-
-  // 가격 — 타이핑마다가 아니라 확정(blur/Enter) 시점에 적용한다.
-  // "3"을 치는 순간 300만원 필터가 걸리는 화면은 조작감이 아니라 방해다.
-  const readPrice = (input) => {
-    const n = Number(input.value);
-    return input.value !== "" && Number.isFinite(n) && n >= 0 ? n : null;
-  };
-  for (const id of ["minPrice", "maxPrice"]) {
-    $(id).addEventListener("change", () => {
-      state.filters.min = readPrice($("minPrice"));
-      state.filters.max = readPrice($("maxPrice"));
-      // 슬라이더는 근사 위치로 따라온다. 필터값은 입력칸의 정밀값이 정본이다.
-      renderRange(
-        stepIndexFor(state.filters.min, "min"),
-        stepIndexFor(state.filters.max, "max"),
-      );
-      applyFilters();
-    });
-  }
-
-  // 슬라이더 — 드래그 중(input)에는 시각만 갱신하고, 놓는 시점(change)에 적용한다.
-  // 드래그마다 서버를 부르면 요청이 튀고, AbortController가 있어도 낭비는 낭비다.
-  const readRangeIdx = () => {
-    let lo = Number($("rangeMin").value);
-    let hi = Number($("rangeMax").value);
-    if (lo > hi) [lo, hi] = [hi, lo]; // 썸 교차 방지 — 잡은 쪽이 상대를 넘으면 서로 맞바꾼다
-    return [lo, hi];
-  };
-
-  for (const id of ["rangeMin", "rangeMax"]) {
-    $(id).addEventListener("input", () => {
-      const [lo, hi] = readRangeIdx();
-      renderRange(lo, hi);
-      // 입력칸에도 실시간으로 비춘다. 프로그램으로 넣는 값은 change를 안 일으키므로
-      // 여기서 fetch가 나가지는 않는다.
-      $("minPrice").value = stepValue(lo, "min") || "";
-      $("maxPrice").value = stepValue(hi, "max") ?? "";
-    });
-    $(id).addEventListener("change", () => {
-      const [lo, hi] = readRangeIdx();
-      state.filters.min = lo === 0 ? null : stepValue(lo, "min");
-      state.filters.max = stepValue(hi, "max");
-      applyFilters();
-    });
-  }
-
-  $("filterReset").addEventListener("click", resetFilters);
-  $("filterOpen").addEventListener("click", openSheet);
-  $("filterClose").addEventListener("click", closeSheet);
-  $("backdrop").addEventListener("click", closeSheet);
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") closeSheet();
-  });
-
-  const recoVp = $("recoViewport");
-  recoVp.addEventListener("mouseenter", () => (recoPaused = true));
-  recoVp.addEventListener("mouseleave", () => (recoPaused = false));
-
-  // 로그인 — 백엔드가 아직 없다. 가짜 폼 대신 준비 중임을 짧게 알린다.
-  let loginTipTimer;
-  $("loginBtn").addEventListener("click", () => {
-    const tip = $("loginTip");
-    tip.hidden = false;
-    clearTimeout(loginTipTimer);
-    loginTipTimer = setTimeout(() => {
-      tip.hidden = true;
-    }, 2500);
-  });
-
-  // 맨 위로 버튼 — 600px 넘게 내려가면 나타난다. scroll은 고빈도 이벤트라
-  // passive로 달고, 하는 일은 클래스 토글 하나뿐이라 스로틀 없이도 싸다.
-  const topBtn = $("topBtn");
-  document.addEventListener(
-    "scroll",
-    () => topBtn.classList.toggle("on", (globalThis.scrollY ?? 0) > 600),
-    { passive: true },
-  );
-  topBtn.addEventListener("click", () => {
-    globalThis.scrollTo?.({ top: 0, behavior: "smooth" });
-  });
-
-  // 이미지 로드 실패(핫링크 차단·삭제)는 자리만 남기고 '이미지 없음'으로.
-  // error 이벤트는 버블링하지 않으므로 캡처 단계에서 위임한다.
-  document.addEventListener(
-    "error",
-    (e) => {
-      const img = e.target;
-      if (img.tagName === "IMG" && img.closest(".card__thumb")) {
-        img.replaceWith(Object.assign(document.createElement("span"), {
-          className: "noimg",
-          textContent: "이미지 없음",
-        }));
-      }
-    },
-    true,
-  );
-}
-
-/* ---------------------------------------------------------------------------
-   방금 수집된 매물 레일 — 대문 전용. 한 번 로드하면 세션 내 재사용한다.
---------------------------------------------------------------------------- */
-
-let recoLoaded = false;
-
-async function initRecoRail() {
-  if (recoLoaded || state.mode !== "home") return;
-  recoLoaded = true; // 실패해도 재폭격하지 않는다 — 레일은 없어도 되는 장식이다
-
-  try {
-    renderRecoRail(await fetchRecoRail());
-  } catch {
-    /* 레일 실패는 침묵 — 본 목록이 살아 있으면 대문은 성립한다 */
-  }
-}
-
-// 8초마다 카드 두 장 폭만큼 밀고, 끝에 닿으면 처음으로 돌아온다.
-// 마우스가 올라가 있거나 목록 모드면 쉰다.
-let recoPaused = false;
-
-setInterval(() => {
-  if (recoPaused || state.mode !== "home") return;
-  const vp = $("recoViewport");
-  if (!vp || vp.childElementCount === 0) return;
-
-  const step = 340;
-  const atEnd = vp.scrollLeft + vp.clientWidth >= vp.scrollWidth - 8;
-  vp.scrollTo({ left: atEnd ? 0 : vp.scrollLeft + step, behavior: "smooth" });
-}, 8000);
+/* ------------------------------------------------------------ 무한 스크롤 */
 
 /**
- * 대문 복귀. 로고를 눌렀을 때 첫 진입(/)과 같은 상태로 돌아간다 —
- * 필터 전부 기본값, 파라미터 없는 주소, 스크롤 로딩 대기.
+ * 목록 끝(#pager)이 화면에 다가오면 다음 장을 얹는다.
+ *
+ * rootMargin을 400px 준 이유: 사용자가 바닥에 닿은 뒤에 요청이 나가면 로딩
+ * 문구를 보는 시간이 생긴다. 한 화면 못 미쳐 미리 부르면 끊김 없이 이어진다.
+ *
+ * 조회 중(loading/appending)에는 아무것도 하지 않는다. 관찰 콜백은 스크롤 중
+ * 여러 번 오는데, 그때마다 부르면 같은 offset을 중복 요청한다.
  */
-function goHome() {
-  inflight?.abort(); // 날아가던 목록 요청은 이제 무의미하다
-  closeSheet();
-  state.filters = { ...DEFAULT_FILTERS };
-  state.items = [];
-  state.total = 0;
-  state.hasNext = false;
-  state.status = "idle";
-  setMode("home");
-  history.replaceState(null, "", location.pathname);
-  renderCategoryCards(state.meta, state.filters.category);
-  renderTitle(state.filters);
-  renderFilterInputs(state.filters);
-  renderFilterBadge(state.filters);
-  rerenderChips();
-  renderList(state);
-  renderMetaLine(state);
-  globalThis.scrollTo?.({ top: 0, behavior: "smooth" });
-  // Reverdi 홈 복귀 시에도 추천 매물을 즉시 다시 불러온다.
-  load();
-  initRecoRail();
-}
-
-/* ---------------------------------------------------------------------------
-   대문 스크롤 로딩 — 목록 영역(pager)이 뷰포트에 다가오면 다음 페이지를 얹는다.
-   버튼("더 보기")은 목록 모드에 그대로 남는다 — 대문에서만 스크롤이 곧 버튼이다.
---------------------------------------------------------------------------- */
-
 const scrollLoader =
-  "IntersectionObserver" in globalThis
+  'IntersectionObserver' in globalThis
     ? new IntersectionObserver(
         (entries) => {
           if (!entries.some((e) => e.isIntersecting)) return;
-          if (state.status === "idle" && state.items.length === 0) {
-            load(); // 대문의 첫 로드 — 목록 영역이 다가오는 순간
-          } else if (state.status === "ready" && state.hasNext) {
-            load({ append: true });
-          }
+          if (state.status !== 'ready' || !state.hasNext) return;
+          load({ append: true });
         },
-        { rootMargin: "400px" },
+        { rootMargin: '400px' },
       )
     : null;
 
 state.autoLoad = scrollLoader !== null;
 
 /**
- * 옵저버 재장전 — 대문·목록 공통. 로드가 끝난 뒤 sentinel(#pager)이 여전히
- * 화면 안이면 콜백이 즉시 다시 오므로, 화면이 찰 때까지 자연스럽게 이어 붙는다.
- * IntersectionObserver가 없는 환경(구형 브라우저)에서는 대문의 첫 페이지만
- * 바로 부르고, 이후는 렌더가 그려주는 "더 보기" 버튼이 스크롤을 대신한다.
+ * 옵저버 재장전. 로드가 끝난 뒤에도 sentinel이 화면 안에 있으면 콜백이 즉시
+ * 다시 오므로, 화면이 찰 때까지 자연스럽게 이어 붙는다.
  */
 function armScrollLoader() {
-  if (!scrollLoader) {
-    if (state.mode === "home" && state.status === "idle") load();
-    return;
-  }
-  const pager = $("pager");
+  if (!scrollLoader) return;
+
+  const pager = $('pager');
+  if (!pager) return;
+
   scrollLoader.unobserve(pager);
-  if (state.status === "idle" || (state.status === "ready" && state.hasNext)) {
+
+  if (state.status === 'ready' && state.hasNext) {
     scrollLoader.observe(pager);
   }
 }
 
-/* ---------------------------------------------------------------------------
-   시작
---------------------------------------------------------------------------- */
+/** 필터가 바뀌었을 때의 공통 경로: URL 반영 → 패널 다시 그리기 → 첫 페이지부터 */
+function applyFilters() {
+  writeFiltersToURL(state.filters);
+  renderFilterTitle(state.filters.category);
+  renderTabs(state.filters.category);
+  renderPresets(state.filters);
+  renderPriceInputs(state.filters);
+  rerenderChips();
+  load();
+}
+
+/** 칩 세 벌을 현재 상태로 다시 그린다. 하나가 바뀌면 전부 다시 — 부분 수정 없음. */
+function rerenderChips() {
+  // 브랜드 선택지는 카테고리를 따라간다 — 시계 화면에서 고야드 칩은 소음이다.
+  const raw =
+    state.meta?.brands_by_category?.[state.filters.category] ?? state.meta?.brands ?? [];
+
+  renderChips('brandChips', raw.map(toDisplayBrand), state.filters.brand, { withAll: true });
+  renderChips('sourceChips', state.meta?.sources ?? [], state.filters.source, { withAll: true });
+  renderChips('sortChips', SORT_OPTIONS, state.filters.sort);
+}
+
+function resetFilters() {
+  // 카테고리는 초기화 대상이 아니다 — 시계를 보다가 "필터 초기화"를 눌렀는데
+  // 전체로 튕기면 초기화가 아니라 이동이 된다.
+  state.filters = { ...DEFAULT_FILTERS, category: state.filters.category };
+  renderSearchInputs('');
+  applyFilters();
+}
+
+/** 검색 실행 공통 경로 — 대문 히어로와 결과 화면 두 폼이 같은 문을 쓴다. */
+function runSearch(raw) {
+  state.filters.q = String(raw ?? '').trim();
+  if (state.mode === 'home') setMode('list');
+  renderSearchInputs(state.filters.q);
+  renderPopular('heroPopular', state.filters.q);
+  renderPopular('listPopular', state.filters.q);
+  applyFilters();
+}
+
+/** 카테고리 선택. 대문에서 눌렀으면 결과 화면으로 넘어간다. */
+function selectCategory(next) {
+  if (state.mode === 'home') setMode('list');
+  if (next === state.filters.category) return;
+
+  state.filters.category = next;
+
+  // 카테고리마다 브랜드가 달라서, 안 파는 브랜드가 걸려 있으면 푼다
+  const brands = (state.meta?.brands_by_category?.[next] ?? []).map(toDisplayBrand);
+  if (state.filters.brand !== '전체' && !brands.includes(state.filters.brand)) {
+    state.filters.brand = '전체';
+  }
+
+  applyFilters();
+  globalThis.scrollTo?.({ top: 0, behavior: 'smooth' });
+}
+
+/** 대문 복귀. 첫 진입(/)과 같은 상태로 되돌린다. */
+function goHome() {
+  inflight?.abort();
+  state.filters = { ...DEFAULT_FILTERS };
+  state.items = [];
+  state.total = 0;
+  setMode('home');
+  history.replaceState(null, '', location.pathname);
+  renderSearchInputs('');
+  renderPopular('heroPopular', '');
+  renderPopular('listPopular', '');
+  renderCategoryCards(state.meta);
+  globalThis.scrollTo?.({ top: 0, behavior: 'smooth' });
+}
+
+/* ------------------------------------------------------------------ 가격 */
+
+const clampPrice = (v) => Math.max(0, Math.min(v, PRICE_UNLIMITED));
+
+/** 입력칸(만원) → 필터(원). 빈 칸은 "제한 없음"이다. */
+function readPriceInputs() {
+  const raw = (id) => {
+    const v = $(id)?.value;
+    if (v === '' || v == null) return null;
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 0 ? n * 10_000 : null;
+  };
+
+  state.filters.min = clampPrice(raw('minPrice') ?? 0);
+  state.filters.max = clampPrice(raw('maxPrice') ?? PRICE_UNLIMITED);
+
+  // 뒤집힌 입력은 서버가 422로 막는다. 그 전에 여기서 맞바꾼다.
+  if (state.filters.min > state.filters.max) {
+    [state.filters.min, state.filters.max] = [state.filters.max, state.filters.min];
+  }
+}
+
+/** 슬라이더 → 필터. 상한에 닿으면 "제한 없음"으로 해석한다. */
+function readRange() {
+  let lo = Number($('rangeMin')?.value ?? 0);
+  let hi = Number($('rangeMax')?.value ?? PRICE_CAP);
+
+  if (lo > hi) [lo, hi] = [hi, lo]; // 썸 교차 방지
+
+  state.filters.min = lo;
+  state.filters.max = hi >= PRICE_CAP ? PRICE_UNLIMITED : hi;
+}
+
+/* ------------------------------------------------------------------ 배선 */
+
+function wireEvents() {
+  // 칩·탭·카드는 계속 다시 그려지므로 개별 바인딩 대신 문서 위임 한 번으로 끝낸다
+  document.addEventListener('click', (e) => {
+    const home = e.target.closest('.home-link');
+    if (home) {
+      e.preventDefault(); // 풀 리로드 대신 소프트 복귀 — JS가 죽으면 링크가 폴백
+      goHome();
+      return;
+    }
+
+    const kw = e.target.closest('[data-kw]');
+    if (kw) { runSearch(kw.dataset.kw); return; }
+
+    const cat = e.target.closest('[data-category]');
+    if (cat) {
+      closeMega();
+      selectCategory(cat.dataset.category);
+      return;
+    }
+
+    const chip = e.target.closest('[data-chip]');
+    if (chip) {
+      const key = { brandChips: 'brand', sourceChips: 'source', sortChips: 'sort' }[chip.dataset.chip];
+      state.filters[key] = chip.dataset.value;
+      applyFilters();
+      return;
+    }
+
+    const preset = e.target.closest('[data-preset]');
+    if (preset) {
+      const p = PRICE_PRESETS[Number(preset.dataset.preset)];
+      state.filters.min = p.min;
+      state.filters.max = p.max;
+      applyFilters();
+      return;
+    }
+
+    const dot = e.target.closest('[data-recodot]');
+    if (dot) {
+      state.reco.page = Number(dot.dataset.recodot);
+      renderReco(state.reco);
+      return;
+    }
+
+    const nav = e.target.closest('[data-reco]');
+    if (nav) {
+      const pages = Math.max(Math.ceil(state.reco.items.length / state.reco.pageSize), 1);
+      const step = nav.dataset.reco === 'prev' ? -1 : 1;
+      state.reco.page = (state.reco.page + step + pages) % pages;
+      renderReco(state.reco);
+      return;
+    }
+
+    const clear = e.target.closest('[data-clear]');
+    if (clear) { runSearch(''); return; }
+
+    const action = e.target.closest('[data-action]')?.dataset.action;
+    if (action === 'more') load({ append: true });
+    if (action === 'retry') load();
+    if (action === 'reset') resetFilters();
+  });
+
+  // 검색은 확정 실행이다 — 엔터(submit)나 돋보기 버튼으로만 나간다.
+  // 타이핑 자동 검색을 뺀 이유: 의도가 확정되기 전의 요청 낭비와, 글자마다
+  // 목록이 출렁이는 조작감 문제.
+  for (const [formId, inputId] of [['searchForm', 'searchInput'], ['heroSearchForm', 'heroSearchInput']]) {
+    on(formId, 'submit', (e) => {
+      e.preventDefault();
+      const input = $(inputId);
+      runSearch(input?.value ?? '');
+      input?.blur(); // 모바일 키보드 내리기
+    });
+
+    on(inputId, 'input', () => {
+      const input = $(inputId);
+      input?.closest('.search')?.classList.toggle('has-value', Boolean(input.value));
+    });
+  }
+
+  // 가격 입력칸 — 타이핑마다가 아니라 확정(change) 시점에 적용한다.
+  // "3"을 치는 순간 3만원 필터가 걸리는 화면은 조작감이 아니라 방해다.
+  for (const id of ['minPrice', 'maxPrice']) {
+    on(id, 'change', () => {
+      readPriceInputs();
+      applyFilters();
+    });
+  }
+
+  // 슬라이더 — 드래그 중(input)에는 시각만 갱신하고, 놓는 시점(change)에 조회한다.
+  // 드래그마다 서버를 부르면 요청이 튄다.
+  for (const id of ['rangeMin', 'rangeMax']) {
+    on(id, 'input', () => {
+      readRange();
+      renderPriceInputs(state.filters);
+      renderPresets(state.filters);
+    });
+    on(id, 'change', () => {
+      readRange();
+      applyFilters();
+    });
+  }
+
+  on('filterReset', 'click', resetFilters);
+  on('filters', 'submit', (e) => e.preventDefault());
+
+  on('megaToggle', 'click', () => {
+    const menu = $('megaMenu');
+    const open = !menu.classList.contains('open');
+    menu.classList.toggle('open', open);
+    $('megaToggle').setAttribute('aria-expanded', String(open));
+    menu.setAttribute('aria-hidden', String(!open));
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeMega();
+  });
+
+  // 로그인 / 마이페이지. 비로그인이면 로그인 화면으로, 로그인 상태면
+  // 역할에 맞는 페이지로 보낸다. 상태는 renderAccount()가 채워둔다.
+  on('loginBtn', 'click', async () => {
+    if (!me) { location.href = 'login.html'; return; }
+    await logout();
+    me = null;
+    renderAccount();
+  });
+
+  on('myPageBtn', 'click', () => {
+    location.href = me ? (me.role === 'admin' ? 'admin.html' : 'client.html') : 'login.html';
+  });
+
+  // 맨 위로 — scroll은 고빈도 이벤트라 passive로 달고, 하는 일은 클래스 토글뿐이다.
+  const topBtn = $('topBtn');
+  document.addEventListener(
+    'scroll',
+    () => topBtn?.classList.toggle('on', (globalThis.scrollY ?? 0) > 600),
+    { passive: true },
+  );
+  on('topBtn', 'click', () => globalThis.scrollTo?.({ top: 0, behavior: 'smooth' }));
+
+  // 이미지 로드 실패(핫링크 차단·삭제)는 자리만 남기고 '이미지 없음'으로.
+  // error 이벤트는 버블링하지 않으므로 캡처 단계에서 위임한다.
+  document.addEventListener(
+    'error',
+    (e) => {
+      const img = e.target;
+      if (img.tagName === 'IMG' && img.closest('.card__thumb')) {
+        img.replaceWith(
+          Object.assign(document.createElement('span'), {
+            className: 'noimg',
+            textContent: '이미지 없음',
+          }),
+        );
+      }
+    },
+    true,
+  );
+}
+
+/* ------------------------------------------------------------------ 계정 */
+
+// 지금 로그인한 사람. 비로그인은 null. 상단바 표기만 바꾸는 용도다 —
+// 실제 권한 판정은 서버가 한다(app/auth.py의 require_role).
+let me = null;
+
+function renderAccount() {
+  const loginBtn = $('loginBtn');
+  const myPageBtn = $('myPageBtn');
+  const tip = $('loginTip');
+
+  if (!loginBtn || !myPageBtn) return;
+
+  loginBtn.querySelector('span').textContent = me ? '로그아웃' : '로그인';
+  myPageBtn.querySelector('span').textContent = me ? me.display_role : '마이페이지';
+
+  if (tip) {
+    tip.hidden = !me;
+    if (me) tip.textContent = me.username;
+  }
+}
+
+function closeMega() {
+  const menu = $('megaMenu');
+  if (!menu) return;
+  menu.classList.remove('open');
+  $('megaToggle')?.setAttribute('aria-expanded', 'false');
+  menu.setAttribute('aria-hidden', 'true');
+}
+
+/* ------------------------------------------------------------------ 시작 */
 
 async function init() {
   state.filters = readFiltersFromURL();
-  // 파라미터 없는 주소가 대문이다. cat·검색어·필터 무엇이든 있으면 목록 화면.
-  setMode(location.search.length > 1 ? "list" : "home");
-  renderCategoryCards(null, state.filters.category);
-  renderTitle(state.filters);
-  renderFilterInputs(state.filters);
-  renderFilterBadge(state.filters);
-  // meta 도착 전에도 칩 골격은 보여준다 (브랜드·플랫폼은 전체만, 정렬은 완성형)
-  rerenderChips();
+  // 파라미터 없는 주소가 대문이다. cat·검색어·필터 무엇이든 있으면 결과 화면.
+  setMode(location.search.length > 1 ? 'list' : 'home');
+
+  // 초기 렌더는 meta 없이도 되는 골격이다. 여기서 예외가 나도 목록은 떠야 하므로
+  // 감싸둔다 — 예전에 이 구간에서 터져 화면이 통째로 백지가 된 적이 있다.
+  try {
+    renderCategoryCards(null);
+    renderTabs(state.filters.category);
+    renderFilterTitle(state.filters.category);
+    renderPresets(state.filters);
+    renderPriceInputs(state.filters);
+    renderSearchInputs(state.filters.q);
+    renderPopular('heroPopular', state.filters.q);
+    renderPopular('listPopular', state.filters.q);
+    rerenderChips();
+  } catch (err) {
+    console.error('[init] 초기 렌더 실패 — 목록은 계속 진행합니다:', err);
+  }
+
   wireEvents();
 
-  // 대문은 스크롤이 트리거다 — 목록 영역이 다가올 때 첫 로드가 뜬다.
-  // 목록 모드는 기존처럼 즉시 부른다. meta는 어느 쪽이든 병렬 출발.
-    // Reverdi 홈에서도 추천 매물을 즉시 불러온다.
+  // 목록과 meta는 병렬로 출발한다. 목록이 meta를 기다릴 이유가 없다.
   load();
+
   try {
     state.meta = await fetchMeta();
-    renderCategoryCards(state.meta, state.filters.category);
+    renderCategoryCards(state.meta);
     rerenderChips();
-    renderMetaLine(state);
-    renderList(state); // 빈 화면 문구가 meta(콜드스타트 여부)에 걸려 있어 한 번 더
+    renderResultHeader(state);
+    renderList(state); // 빈 화면 문구가 meta(수집 전 여부)에 걸려 있어 한 번 더
   } catch {
-    // meta가 죽어도 목록은 살 수 있다. 칩 선택지와 카드 건수만 없는 채로 동작한다.
-    renderCategoryCards(null, state.filters.category);
+    // meta가 죽어도 목록은 산다. 칩 선택지와 카드 건수만 없는 채로 동작한다.
+    renderCategoryCards(null);
+  }
+
+  try {
+    me = await fetchMe();
+    renderAccount();
+  } catch {
+    /* 로그인 상태를 못 읽어도 검색 화면은 그대로 쓴다 */
+  }
+
+  try {
+    state.reco.items = await fetchReco(50);
+    renderReco(state.reco);
+  } catch {
+    /* 레일 실패는 침묵 — 대문의 나머지는 성립한다 */
   }
 }
 

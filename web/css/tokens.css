@@ -1,20 +1,68 @@
+/* web/css/tokens.css
+ *
+ * 색·글꼴·그림자 토큰. ReLuxeV4(React/Tailwind)의 팔레트를 그대로 옮겼다.
+ * 값이 흩어져 있으면 화면마다 미묘하게 다른 베이지가 생기므로 여기서만 정의한다.
+ */
+
 :root {
+  /* 배경 */
   --bg: #FAF8F5;
-  --paper: #FFFFFF;
-  --ink: #2C2825;
+  --bg-warm: #FAF7F2;
+  --bg-cream: #FAF4EA;
+  --surface: #FFFFFF;
+
+  /* 먹색 계열 (텍스트·활성 칩) */
   --ink-deep: #1A1816;
-  --ink-soft: #3D352B;
-  --muted: #7C6F5E;
-  --muted-2: #8C7E6C;
-  --muted-3: #A89C8C;
+  --ink: #2C2825;
+  --dark-green: #1E3A34;
+
+  /* 금색 계열 (강조) */
   --gold: #C5A059;
   --gold-deep: #8C6D2D;
-  --cream: #F5ECE0;
-  --cream-soft: #FAF4EA;
+  --gold-soft: rgba(197, 160, 89, 0.15);
+
+  /* 본문·보조 텍스트 */
+  --text: #2C2825;
+  --muted: #7A6E5E;
+  --muted-2: #8C7E6C;
+  --muted-3: #A89C8C;
+  --label: #6B5E4F;
+  --chip-text: #7C6E5D;
+
+  /* 경계선 */
   --line: #E8DEC9;
-  --line-strong: #D8CDBC;
-  --dark-green: #1E3A34;
-  --font-brand: 'Bodoni Moda', 'Cinzel Decorative', 'Cinzel', 'Playfair Display', serif;
+  --line-soft: #F0E6DA;
+  --line-chip: #E4D7C5;
+  --line-input: #E0D5C5;
+  --line-stat: #ECE3D5;
+  --line-dashed: #E5DAC8;
+
+  /* 상태색 */
+  --up: #B91C1C;
+  --down: #047857;
+  --down-icon: #059669;
+
+  /* 호버 */
+  --hover-chip: #F5ECE0;
+  --hover-tab: #F7F2EA;
+
+  /* 글꼴 */
+  --font-brand: 'Bodoni Moda', 'Cinzel Decorative', 'Cinzel', serif;
   --font-serif: 'Noto Serif KR', 'Cormorant Garamond', Georgia, serif;
   --font-sans: 'Plus Jakarta Sans', 'Noto Sans KR', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* 그림자 */
+  --shadow-card: 0 10px 30px -10px rgba(180, 155, 120, .12), 0 4px 12px rgba(0, 0, 0, .03);
+  --shadow-card-hover: 0 20px 40px -15px rgba(190, 150, 100, .22), 0 8px 24px rgba(0, 0, 0, .06);
+  --shadow-xs: 0 1px 2px rgba(44, 40, 37, .05);
+  --shadow-sm: 0 2px 8px rgba(44, 40, 37, .05);
+  --shadow-md: 0 4px 12px rgba(44, 40, 37, .10);
+
+  /* 레이아웃 */
+  --wrap: 1680px;
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
 }

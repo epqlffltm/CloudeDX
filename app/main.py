@@ -57,10 +57,13 @@ from fastapi.staticfiles import StaticFiles
 from app.config import ALLOWED_ORIGINS, API_PREFIX, DATABASE_URL, ENABLE_CRAWLER
 from app.db.engine import mask_url, wait_for_db
 from app.logging_config import setup_logging
+from app.routers.admin import router as admin_router
+from app.routers.auth import router as auth_router
 from app.routers.crawled import router as crawled_router
 from app.routers.health import router as health_router
 from app.routers.meta import router as meta_router
 from app.routers.products import router as products_router
+from app.routers.uploads import router as uploads_router
 from app.routers.web import router as web_router
 from app.version import __version__
 
@@ -165,6 +168,9 @@ app.include_router(web_router)
 app.include_router(crawled_router, prefix=API_PREFIX)
 app.include_router(meta_router, prefix=API_PREFIX)
 app.include_router(products_router, prefix=API_PREFIX)
+app.include_router(auth_router, prefix=API_PREFIX)
+app.include_router(admin_router, prefix=API_PREFIX)
+app.include_router(uploads_router, prefix=API_PREFIX)
 
 # ---------------------------------------------------------------------------
 # 웹 화면 서빙. 프론트(web/)를 API와 같은 출처에서 내보낸다.

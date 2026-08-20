@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>시스템 현황 - Reverdi 관리자</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,400..900&family=Noto+Sans+KR:wght@300..700&family=Noto+Serif+KR:wght@400..700&family=Plus+Jakarta+Sans:wght@400..800&display=swap" />
+  <link rel="stylesheet" href="css/tokens.css" />
+  <link rel="stylesheet" href="css/app.css" />
+  <link rel="stylesheet" href="css/account.css" />
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="goldGrad" x1="15%" y1="0%" x2="85%" y2="100%">
+      <stop offset="0%" stop-color="#F7ECC9" /><stop offset="20%" stop-color="#E5CB8E" />
+      <stop offset="45%" stop-color="#D4B776" /><stop offset="70%" stop-color="#BE9D59" />
+      <stop offset="100%" stop-color="#8C6E33" />
+    </linearGradient>
+    <g id="i-crown"><path d="M 16 58 L 14 26 C 24 38, 36 46, 50 14 C 64 46, 76 38, 86 26 L 84 58 Z" fill="url(#goldGrad)" stroke="#8A6D33" stroke-width=".8" stroke-linejoin="round"/><rect x="13" y="58" width="74" height="8.5" rx="1" fill="url(#goldGrad)" stroke="#8A6D33" stroke-width=".8"/><circle cx="50" cy="10.5" r="4.2" fill="none" stroke="url(#goldGrad)" stroke-width="2.2"/><circle cx="14" cy="24" r="3.2" fill="url(#goldGrad)"/><circle cx="86" cy="24" r="3.2" fill="url(#goldGrad)"/></g>
+  </defs>
+</svg>
+
+<header class="topbar">
+  <div class="wrap topbar__inner">
+    <a class="logo logo--sm" href="./" aria-label="Reverdi 홈">
+      <svg class="logo__crown" viewBox="0 0 100 80"><use href="#i-crown"/></svg><span class="logo__mark">Reverdi</span>
+    </a>
+    <div class="topbar__right" id="accountBar"></div>
+  </div>
+</header>
+
+<main class="wrap console">
+  <div class="console__head">
+    <div>
+      <span class="badge-result">관리자</span>
+      <h1 class="console__title">시스템 현황</h1>
+      <p class="console__sub">수집 파이프라인과 적재 상태를 한 화면에서 확인합니다</p>
+    </div>
+    <button class="btn-reset" id="refreshBtn" type="button">새로고침</button>
+  </div>
+
+  <p class="console__error" id="errorBox" role="alert" hidden></p>
+
+  <section class="kpi-grid" id="kpiGrid"></section>
+
+  <section class="panel">
+    <h2 class="panel__title">수집기</h2>
+    <div class="kv" id="crawlerInfo"></div>
+  </section>
+
+  <section class="panel">
+    <h2 class="panel__title">최근 수집 이력</h2>
+    <div class="table-wrap"><table class="table" id="runsTable"></table></div>
+  </section>
+
+  <div class="panel-row">
+    <section class="panel">
+      <h2 class="panel__title">수집처별 매물</h2>
+      <div class="bars" id="bySource"></div>
+    </section>
+    <section class="panel">
+      <h2 class="panel__title">카테고리별 매물</h2>
+      <div class="bars" id="byCategory"></div>
+    </section>
+  </div>
+
+  <div class="panel-row">
+    <section class="panel">
+      <h2 class="panel__title">브랜드별 매물</h2>
+      <div class="bars" id="byBrand"></div>
+    </section>
+    <section class="panel">
+      <h2 class="panel__title">제외 사유</h2>
+      <div class="bars" id="byReject"></div>
+      <h2 class="panel__title" style="margin-top:22px">비활성 사유</h2>
+      <div class="bars" id="byUnavailable"></div>
+    </section>
+  </div>
+</main>
+
+<script type="module" src="js/admin.js"></script>
+</body>
+</html>

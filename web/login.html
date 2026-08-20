@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>로그인 - Reverdi</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,400..900&family=Noto+Sans+KR:wght@300..700&family=Noto+Serif+KR:wght@400..700&family=Plus+Jakarta+Sans:wght@400..800&display=swap" />
+  <link rel="stylesheet" href="css/tokens.css" />
+  <link rel="stylesheet" href="css/app.css" />
+  <link rel="stylesheet" href="css/account.css" />
+</head>
+<body class="auth-body">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="goldGrad" x1="15%" y1="0%" x2="85%" y2="100%">
+      <stop offset="0%" stop-color="#F7ECC9" /><stop offset="20%" stop-color="#E5CB8E" />
+      <stop offset="45%" stop-color="#D4B776" /><stop offset="70%" stop-color="#BE9D59" />
+      <stop offset="100%" stop-color="#8C6E33" />
+    </linearGradient>
+    <g id="i-crown"><path d="M 16 58 L 14 26 C 24 38, 36 46, 50 14 C 64 46, 76 38, 86 26 L 84 58 Z" fill="url(#goldGrad)" stroke="#8A6D33" stroke-width=".8" stroke-linejoin="round"/><rect x="13" y="58" width="74" height="8.5" rx="1" fill="url(#goldGrad)" stroke="#8A6D33" stroke-width=".8"/><circle cx="50" cy="10.5" r="4.2" fill="none" stroke="url(#goldGrad)" stroke-width="2.2"/><circle cx="14" cy="24" r="3.2" fill="url(#goldGrad)"/><circle cx="86" cy="24" r="3.2" fill="url(#goldGrad)"/></g>
+  </defs>
+</svg>
+
+<main class="auth-shell">
+  <div class="auth-card">
+    <a class="logo logo--sm" href="./" aria-label="Reverdi 홈">
+      <svg class="logo__crown" viewBox="0 0 100 80"><use href="#i-crown"/></svg><span class="logo__mark">Reverdi</span>
+    </a>
+
+    <h1 class="auth-title">파트너 로그인</h1>
+    <p class="auth-sub">관리자 · 기업고객 전용 페이지입니다</p>
+
+    <form class="auth-form" id="loginForm">
+      <label class="field">
+        <span class="field__label">아이디</span>
+        <input id="username" name="username" type="text" autocomplete="username"
+               autocapitalize="off" spellcheck="false" required />
+      </label>
+
+      <label class="field">
+        <span class="field__label">비밀번호</span>
+        <input id="password" name="password" type="password" autocomplete="current-password" required />
+      </label>
+
+      <p class="auth-error" id="loginError" role="alert" hidden></p>
+
+      <button class="auth-submit" id="loginSubmit" type="submit">로그인</button>
+    </form>
+
+    <div class="auth-demo">
+      <p class="auth-demo__title">시연 계정</p>
+      <button type="button" class="auth-demo__row" data-fill="admin">
+        <strong>관리자</strong><code>admin / admin1234</code>
+        <span>수집 현황·매물 분포 대시보드</span>
+      </button>
+      <button type="button" class="auth-demo__row" data-fill="client">
+        <strong>기업고객</strong><code>client / client1234</code>
+        <span>CSV로 매물 일괄 등록</span>
+      </button>
+    </div>
+
+    <a class="auth-back" href="./">← 검색 화면으로 돌아가기</a>
+  </div>
+</main>
+
+<script type="module" src="js/login.js"></script>
+</body>
+</html>

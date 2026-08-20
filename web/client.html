@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>매물 등록 - Reverdi 기업고객</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,400..900&family=Noto+Sans+KR:wght@300..700&family=Noto+Serif+KR:wght@400..700&family=Plus+Jakarta+Sans:wght@400..800&display=swap" />
+  <link rel="stylesheet" href="css/tokens.css" />
+  <link rel="stylesheet" href="css/app.css" />
+  <link rel="stylesheet" href="css/account.css" />
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="goldGrad" x1="15%" y1="0%" x2="85%" y2="100%">
+      <stop offset="0%" stop-color="#F7ECC9" /><stop offset="20%" stop-color="#E5CB8E" />
+      <stop offset="45%" stop-color="#D4B776" /><stop offset="70%" stop-color="#BE9D59" />
+      <stop offset="100%" stop-color="#8C6E33" />
+    </linearGradient>
+    <g id="i-crown"><path d="M 16 58 L 14 26 C 24 38, 36 46, 50 14 C 64 46, 76 38, 86 26 L 84 58 Z" fill="url(#goldGrad)" stroke="#8A6D33" stroke-width=".8" stroke-linejoin="round"/><rect x="13" y="58" width="74" height="8.5" rx="1" fill="url(#goldGrad)" stroke="#8A6D33" stroke-width=".8"/><circle cx="50" cy="10.5" r="4.2" fill="none" stroke="url(#goldGrad)" stroke-width="2.2"/><circle cx="14" cy="24" r="3.2" fill="url(#goldGrad)"/><circle cx="86" cy="24" r="3.2" fill="url(#goldGrad)"/></g>
+  </defs>
+</svg>
+
+<header class="topbar">
+  <div class="wrap topbar__inner">
+    <a class="logo logo--sm" href="./" aria-label="Reverdi 홈">
+      <svg class="logo__crown" viewBox="0 0 100 80"><use href="#i-crown"/></svg><span class="logo__mark">Reverdi</span>
+    </a>
+    <div class="topbar__right" id="accountBar"></div>
+  </div>
+</header>
+
+<main class="wrap console">
+  <div class="console__head">
+    <div>
+      <span class="badge-result">기업고객</span>
+      <h1 class="console__title">매물 일괄 등록</h1>
+      <p class="console__sub">CSV 파일을 올리면 검색 목록에 바로 반영됩니다</p>
+    </div>
+    <a class="btn-reset" href="./">검색 화면 보기</a>
+  </div>
+
+  <section class="panel">
+    <h2 class="panel__title">CSV 파일</h2>
+
+    <div class="drop" id="drop">
+      <input type="file" id="fileInput" accept=".csv,text/csv" hidden />
+      <p class="drop__title">파일을 여기에 끌어다 놓으세요</p>
+      <p class="drop__sub">또는</p>
+      <button class="btn-dark" id="pickBtn" type="button">파일 선택</button>
+      <p class="drop__file" id="fileName" hidden></p>
+    </div>
+
+    <div class="drop__actions">
+      <button class="auth-submit" id="uploadBtn" type="button" disabled>업로드</button>
+      <button class="btn-reset" id="sampleBtn" type="button">예시 CSV 내려받기</button>
+    </div>
+
+    <p class="console__error" id="errorBox" role="alert" hidden></p>
+  </section>
+
+  <section class="panel" id="resultPanel" hidden>
+    <h2 class="panel__title">처리 결과</h2>
+    <div class="kpi-grid kpi-grid--tight" id="resultKpi"></div>
+    <div id="resultErrors"></div>
+    <a class="btn-dark" id="viewLink" href="./?source=%EC%A7%81%EC%A0%91%EB%93%B1%EB%A1%9D" style="margin-top:16px;display:inline-block">등록된 매물 보러가기</a>
+  </section>
+
+  <section class="panel">
+    <h2 class="panel__title">파일 형식</h2>
+    <p class="panel__note">
+      첫 줄은 헤더입니다. <b>title, price, url</b> 세 개는 반드시 있어야 하고,
+      brand · image_url · region 은 선택입니다.
+      한글 헤더(제목 · 가격 · 링크 · 브랜드 · 이미지 · 지역)도 그대로 인식합니다.
+    </p>
+
+    <div class="table-wrap">
+      <table class="table">
+        <thead><tr><th>컬럼</th><th>필수</th><th>설명</th><th>예시</th></tr></thead>
+        <tbody>
+          <tr><td><code>title</code></td><td>필수</td><td>상품명. 브랜드와 카테고리를 여기서 판정합니다</td><td>샤넬 클래식 미디움 캐비어</td></tr>
+          <tr><td><code>price</code></td><td>필수</td><td>가격. 980만원 / 9,800,000 / 9800000 모두 인식</td><td>980만원</td></tr>
+          <tr><td><code>url</code></td><td>필수</td><td>원본 상품 링크. 중복 판정 기준입니다</td><td>https://example.com/1</td></tr>
+          <tr><td><code>brand</code></td><td>선택</td><td>비워도 제목에서 판정합니다</td><td>샤넬</td></tr>
+          <tr><td><code>image_url</code></td><td>선택</td><td>썸네일 주소</td><td>https://example.com/1.jpg</td></tr>
+          <tr><td><code>region</code></td><td>선택</td><td>지역</td><td>서울 강남구</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="panel__note">
+      같은 <code>url</code>을 다시 올리면 새 매물이 생기지 않고 기존 매물의 가격·상태가 갱신됩니다.
+      파일은 UTF-8 또는 CP949(엑셀 기본)로 저장하세요. 한 번에 5,000행까지 처리합니다.
+    </p>
+  </section>
+</main>
+
+<script type="module" src="js/client.js"></script>
+</body>
+</html>
