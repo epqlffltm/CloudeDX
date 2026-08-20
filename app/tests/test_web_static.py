@@ -14,12 +14,14 @@ from .test_products import make_item
 
 
 async def test_root_serves_frontend(client):
-    """루트가 게시판 리다이렉트가 아니라 서비스 화면(index.html)이다."""
+    """루트가 게시판 리다이렉트가 아니라 Reverdi 서비스 화면(index.html)이다."""
     res = await client.get("/")
 
     assert res.status_code == 200
     assert "text/html" in res.headers["content-type"]
-    assert "Re:Luxe" in res.text
+    assert "Reverdi" in res.text
+    assert "Re:Luxe" not in res.text
+    assert ":Luxe" not in res.text
 
 
 async def test_static_assets_served(client):
