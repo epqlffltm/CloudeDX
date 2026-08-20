@@ -1,76 +1,61 @@
-{# app/templates/detail.html #}
-{#
-  매물 상세 화면.
-
-  상품 설명 본문은 아직 없다. 현재 크롤러는 검색 결과의 카드 목록만 훑기 때문에,
-  본문을 채우려면 개별 매물 페이지를 한 번 더 방문하는 2단계 수집이 필요하다.
-  그때까지 이 화면은 수집한 항목을 장부처럼 보여주고 원글로 안내하는 역할만 한다.
-#}
 {% extends "base.html" %}
-
 {% set item = view.item %}
 
-{% block title %}{{ item.title }} · 중고 명품 가방 수집{% endblock %}
-
-{% block standfirst %}{{ item.source }} · {{ item.brand }}{% endblock %}
+{% block title %}{{ item.title }} · Reverdi{% endblock %}
 
 {% block content %}
-  <a class="back" href="/board">← 목록으로</a>
+<main class="container detail-wrap">
+  <a class="detail-back" href="/board?view=all">
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5m6 6-6-6 6-6"/></svg>
+    매물 목록으로 돌아가기
+  </a>
 
-  <article>
-    <h2 class="detail-title">{{ item.title }}</h2>
-    <p class="detail-price">{{ view.price_text }}</p>
-    {% if item.is_sold %}<p class="detail-sold">판매완료</p>{% endif %}
-
-    <div class="detail-body">
-      <div>
-        {% if item.image_url %}
-          <img class="detail-image" src="{{ item.image_url }}" alt="{{ item.title }}" referrerpolicy="no-referrer">
-        {% else %}
-          <div class="detail-image" style="aspect-ratio: 1;"></div>
-        {% endif %}
-      </div>
-
-      <dl class="ledger">
-        <dt>등록</dt>
-        <dd class="num">
-          {{ view.posted_at.strftime("%Y-%m-%d %H:%M") }} ({{ view.posted_text }})
-          {% if view.is_estimated %}
-            <br><span class="detail-sold">사이트가 등록 시각을 표기하지 않아 수집 시각으로 대체</span>
-          {% elif item.time_text %}
-            <br><span class="detail-sold">원문 표기: {{ item.time_text }}</span>
-          {% endif %}
-        </dd>
-
-        <dt>수집처</dt>
-        <dd>{{ item.source }}</dd>
-
-        <dt>브랜드</dt>
-        <dd>{{ item.brand }}</dd>
-
-        <dt>지역</dt>
-        <dd>{{ item.region or "정보 없음" }}</dd>
-
-        <dt>상태</dt>
-        <dd>{{ "판매완료" if item.is_sold else "판매중" }}</dd>
-
-        <dt>마지막 확인</dt>
-        <dd class="num">{{ item.last_seen_at.strftime("%Y-%m-%d %H:%M") }} ({{ view.last_seen_text }})</dd>
-
-        <dt>원글</dt>
-        <dd><a class="origin" href="{{ item.url }}" target="_blank" rel="noopener noreferrer">{{ item.url }}</a></dd>
-      </dl>
+  <article class="detail-grid">
+    <div class="detail-photo-card">
+      {% if item.image_url %}
+        <img class="detail-photo" src="{{ item.image_url }}" alt="{{ item.title }}" referrerpolicy="no-referrer">
+      {% else %}
+        <div class="detail-photo product-placeholder" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8h12l1 13H5L6 8Z"/><path d="M9 8a3 3 0 0 1 6 0"/></svg>
+        </div>
+      {% endif %}
     </div>
 
-    <div class="notice">
-      <h2>상품 설명은 아직 수집하지 않습니다</h2>
-      <p>
-        지금은 검색 결과 목록에서 얻을 수 있는 항목만 저장합니다.
-        판매자가 쓴 설명과 추가 사진은 원글에서 확인하세요.
-      </p>
-      <a class="cta" href="{{ item.url }}" target="_blank" rel="noopener noreferrer">
+    <div class="detail-info">
+      <div class="detail-tags">
+        <span class="detail-tag">{{ item.brand }}</span>
+        <span class="detail-tag source">{{ item.source }}</span>
+        {% if item.region %}<span class="detail-tag">{{ item.region }}</span>{% endif %}
+      </div>
+
+      <h1 class="detail-heading">{{ item.title }}</h1>
+      <div class="detail-price">{{ view.price_text }}</div>
+      <div class="detail-status {% if item.is_sold %}sold{% endif %}">{{ '판매완료' if item.is_sold else '판매중' }}</div>
+
+      <dl class="detail-ledger">
+        <dt>등록</dt>
+        <dd>
+          {{ view.posted_at.strftime("%Y-%m-%d %H:%M") }} · {{ view.posted_text }}
+          {% if view.is_estimated %}<br><span class="detail-status">사이트 등록 시각 미표기로 수집 시각 기준</span>{% elif item.time_text %}<br><span class="detail-status">원문 표기: {{ item.time_text }}</span>{% endif %}
+        </dd>
+
+        <dt>브랜드</dt><dd>{{ item.brand }}</dd>
+        <dt>플랫폼</dt><dd>{{ item.source }}</dd>
+        <dt>지역</dt><dd>{{ item.region or '정보 없음' }}</dd>
+        <dt>상태</dt><dd>{{ '판매완료' if item.is_sold else '판매중' }}</dd>
+        <dt>마지막 확인</dt><dd>{{ item.last_seen_at.strftime("%Y-%m-%d %H:%M") }} · {{ view.last_seen_text }}</dd>
+        <dt>원글</dt><dd><a class="origin-link" href="{{ item.url }}" target="_blank" rel="noopener noreferrer">판매 플랫폼에서 보기 ↗</a></dd>
+      </dl>
+
+      <div class="detail-notice">
+        Reverdi는 여러 중고 플랫폼의 검색 결과를 한곳에서 비교하도록 연결합니다. 판매자가 작성한 상세 설명과 추가 사진은 원본 매물 페이지에서 확인하세요.
+      </div>
+
+      <a class="detail-cta" href="{{ item.url }}" target="_blank" rel="noopener noreferrer">
         {{ item.source }}에서 원글 보기
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
       </a>
     </div>
   </article>
+</main>
 {% endblock %}
