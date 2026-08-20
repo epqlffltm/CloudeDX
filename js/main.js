@@ -1,4 +1,4 @@
-﻿// reluxe/js/main.js
+// reluxe/js/main.js
 //
 // 진입점. 흐름은 하나뿐이다:
 //   이벤트 → state 변경 → 서버 조회 → renderList(state)
@@ -134,9 +134,13 @@ function wireEvents() {
 
     const kw = e.target.closest("[data-kw]");
     if (kw) {
-      // 칩은 확정 검색과 같은 경로다 — runSearch가 두 검색창 동기화까지 맡는다.
+      // 칩은 확정 검색과 같은 경로다 — 입력창까지 동기화해 상태가 갈라지지 않게.
+      const q = kw.dataset.kw;
+      $("searchInput").value = q;
       $("searchInput").closest(".search").classList.add("has-value");
-      runSearch(kw.dataset.kw);
+      state.filters.q = q;
+      if (state.mode === "home") setMode("list");
+      applyFilters();
       return;
     }
 
@@ -194,29 +198,19 @@ function wireEvents() {
     searchInput.closest(".search").classList.toggle("has-value", Boolean(searchInput.value));
   });
 
-  // 검색 실행 공통 경로 — 툴바(목록)와 히어로(대문) 두 폼이 같은 문을 쓴다.
-  function runSearch(raw) {
-    state.filters.q = raw.trim();
-    if (state.filters.q && state.mode === "home") setMode("list");
-    renderFilterInputs(state.filters); // 두 검색창 동기화
-    applyFilters();
-  }
-
   $("searchForm").addEventListener("submit", (e) => {
     e.preventDefault(); // 페이지 새로고침 막기 — 제출이 곧 검색 실행
-    runSearch(searchInput.value);
+    state.filters.q = searchInput.value.trim();
+    if (state.filters.q && state.mode === "home") setMode("list");
+    applyFilters();
     searchInput.blur(); // 모바일 키보드 내리기
   });
 
-  $("heroSearchForm").addEventListener("submit", (e) => {
-    e.preventDefault();
-    runSearch($("heroSearchInput").value);
-    $("heroSearchInput").blur();
-  });
-
   $("searchClear").addEventListener("click", () => {
+    searchInput.value = "";
     searchInput.closest(".search").classList.remove("has-value");
-    runSearch(""); // 해제도 공통 경로 — 두 검색창이 같이 비워진다
+    state.filters.q = "";
+    applyFilters();
   });
 
   // 가격 — 타이핑마다가 아니라 확정(blur/Enter) 시점에 적용한다.
@@ -369,8 +363,7 @@ function goHome() {
   renderList(state);
   renderMetaLine(state);
   globalThis.scrollTo?.({ top: 0, behavior: "smooth" });
-  // Reverdi 홈 복귀 시에도 추천 매물을 즉시 다시 불러온다.
-  load();
+  armScrollLoader();
   initRecoRail();
 }
 
@@ -432,8 +425,14 @@ async function init() {
 
   // 대문은 스크롤이 트리거다 — 목록 영역이 다가올 때 첫 로드가 뜬다.
   // 목록 모드는 기존처럼 즉시 부른다. meta는 어느 쪽이든 병렬 출발.
-    // Reverdi 홈에서도 추천 매물을 즉시 불러온다.
-  load();
+  if (state.mode === "home") {
+    state.status = "idle";
+    renderList(state);
+    armScrollLoader();
+    initRecoRail();
+  } else {
+    load();
+  }
   try {
     state.meta = await fetchMeta();
     renderCategoryCards(state.meta, state.filters.category);

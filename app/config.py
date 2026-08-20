@@ -96,6 +96,10 @@ CRAWL_RETRY_MINUTES = _int_env("CRAWL_RETRY_MINUTES", 5, minimum=1)
 # 스케줄 실행에서는 브랜드 수만큼 곱해지니 CLI 기본값(5)보다 페이지 수를 줄인다.
 JOONGNA_PAGES_PER_BRAND = _int_env("JOONGNA_PAGES_PER_BRAND", 3, minimum=1)
 
+# 번개장터 검색 잡당 API 페이지 수. 세 수집처 중 유일하게 브라우저가 없어
+# 페이지당 비용이 제일 싸다 — 그래도 상대 서버 예절은 같다.
+BUNJANG_PAGES_PER_JOB = _int_env("BUNJANG_PAGES_PER_JOB", 3, minimum=1)
+
 # 'running'으로 남은 수집 기록을 죽은 것으로 볼 때까지의 시간(분).
 # 크롤러가 SIGKILL이나 전원 차단으로 죽으면 종료 시각을 못 남긴다. 그 기록을 그대로
 # 믿으면 /api/meta가 영원히 "수집 중"이라고 답한다. 한 라운드가 정상적으로 걸리는

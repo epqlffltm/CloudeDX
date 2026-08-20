@@ -12,4 +12,6 @@ DAANGN = "당근마켓"
 JOONGNA = "중고나라"
 
 # 화면의 수집처 필터 순서. 동네 시세(당근) -> 전국 최저가(중고나라) 순.
-SOURCES: tuple[str, ...] = (DAANGN, JOONGNA)
+BUNJANG = "번개장터"
+
+SOURCES: tuple[str, ...] = (DAANGN, JOONGNA, BUNJANG)

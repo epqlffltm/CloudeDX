@@ -21,7 +21,9 @@ DB upsert까지 막아서는 안 되기 때문이다. JSON이 필요하면 수�
 
 import logging
 
-from app.config import JOONGNA_PAGES_PER_BRAND
+from app.config import BUNJANG_PAGES_PER_JOB, JOONGNA_PAGES_PER_BRAND
+from app.crawler.bunjang.config import BunjangCrawlerConfig
+from app.crawler.bunjang.crawler import BunjangCrawler
 from app.crawler.daangn.config import DaangnCrawlerConfig
 from app.crawler.daangn.crawler import DaangnCrawler
 from app.crawler.joongna.config import JoongnaCrawlerConfig
@@ -31,7 +33,7 @@ from app.crawler.source_runner import collect_jobs
 from app.db.repository import sweep_missing, upsert_items
 from app.domain.collection import CrawlScope, SearchJob
 from app.domain.search_plan import SEARCH_PLAN
-from app.domain.sources import DAANGN, JOONGNA
+from app.domain.sources import BUNJANG, DAANGN, JOONGNA
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +130,22 @@ async def crawl_joongna_once() -> tuple[int, dict[str, dict]]:
 
 # 한 라운드에서 순서대로 실행할 작업. 사이트를 추가하려면 함수 하나를 만들어
 # 여기에 넣으면 되고, 실행 규칙(주기·재시도·기록)은 손댈 필요가 없다.
+async def crawl_bunjang_once() -> tuple[int, dict[str, dict]]:
+    async def crawl_job(job: SearchJob):
+        crawler = BunjangCrawler(
+            BunjangCrawlerConfig(
+                brand=job.brand,
+                keyword_suffix=job.suffix,
+                max_pages=BUNJANG_PAGES_PER_JOB,
+            )
+        )
+        return await crawler.crawl()
+
+    return await _collect_and_store(source_name=BUNJANG, crawl_job=crawl_job)
+
+
 CRAWL_JOBS: tuple[CrawlJob, ...] = (
     crawl_daangn_once,
     crawl_joongna_once,
+    crawl_bunjang_once,
 )

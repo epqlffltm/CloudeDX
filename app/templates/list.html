@@ -1,130 +1,310 @@
-{# app/templates/list.html #}
-{#
-  매물 목록 화면.
-
-  필터는 평범한 GET form이다. 자바스크립트 없이도 동작하고, 필터를 건 상태의 주소가
-  그대로 공유 가능한 링크가 된다. 페이지 이동 링크도 현재 쿼리스트링을 유지한 채
-  offset만 바꾸므로, 3페이지에서 검색어가 풀리는 일이 없다.
-
-  제목은 상세 화면으로, 'ORIGIN'은 원글로 간다. 목록에서 바로 원본을 열고 싶은 경우와
-  우리 쪽 상세를 보고 싶은 경우가 다르기 때문에 둘 다 둔다.
-#}
 {% extends "base.html" %}
+{% from "_reverdi_logo.html" import reverdi_logo %}
 
-{% block title %}매물 목록 · 중고 명품 가방 수집{% endblock %}
+{% block title %}Reverdi - 중고명품 통합검색{% endblock %}
 
-{% block standfirst %}
-  당근마켓 · 중고나라 {% if last_crawled_text %}— 마지막 수집 {{ last_crawled_text }}{% endif %}
-{% endblock %}
+{% set force_results = request.query_params.get('view') == 'all' %}
+{% set home_mode = (not force_results and not filters.search and not filters.source and not filters.brand and not filters.category and filters.min_price is none and filters.max_price is none and filters.is_sold is none and not filters.include_inactive and not filters.include_unusable and filters.order_by == 'latest' and filters.offset == 0) %}
+
+{% macro search_icon() -%}
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+{%- endmacro %}
+
+{% macro external_icon() -%}
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
+{%- endmacro %}
+
+{% macro product_card(v) -%}
+<article class="product-card{% if v.item.is_sold %} is-sold{% endif %}">
+  <a href="/board/{{ v.item.id }}" aria-label="{{ v.item.title }} 상세 보기">
+    <div class="product-media">
+      {% if v.item.image_url %}
+        <img src="{{ v.item.image_url }}" alt="{{ v.item.title }}" loading="lazy" referrerpolicy="no-referrer">
+      {% else %}
+        <div class="product-placeholder" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8h12l1 13H5L6 8Z"/><path d="M9 8a3 3 0 0 1 6 0"/></svg>
+        </div>
+      {% endif %}
+      <span class="product-brand">{{ v.item.brand }}</span>
+      <span class="product-source">{{ v.item.source }}</span>
+    </div>
+    <div class="product-info">
+      <h3 class="product-title">{{ v.item.title }}</h3>
+      <div class="product-pricebox">
+        <div class="product-meta">
+          <span>{{ '판매완료' if v.item.is_sold else (v.posted_text ~ ' 등록') }}</span>
+          {% if v.item.region %}<span>{{ v.item.region }}</span>{% endif %}
+        </div>
+        <div class="product-bottom">
+          <div>
+            <span class="product-price-label">판매가</span>
+            <div class="product-price">{{ v.price_text }}</div>
+          </div>
+          <span class="product-open">{{ external_icon() }}</span>
+        </div>
+      </div>
+    </div>
+  </a>
+</article>
+{%- endmacro %}
 
 {% block content %}
-  <form class="filters" method="get" action="/board">
-    <div class="field">
-      <label for="f-source">수집처</label>
-      <select id="f-source" name="source">
-        <option value="">전체</option>
-        {% for s in sources %}
-          <option value="{{ s }}" {% if filters.source == s %}selected{% endif %}>{{ s }}</option>
-        {% endfor %}
-      </select>
+{% if home_mode %}
+  <header class="hero">
+    <div class="hero-glow"></div>
+    <div class="hero-logo">{{ reverdi_logo('responsive', 'light', '/board') }}</div>
+
+    <p class="hero-title">중고명품 통합검색 사이트</p>
+    <p class="hero-subtitle">국내 주요 플랫폼의 매물을 검색하여 운명을 찾아보세요</p>
+
+    <div class="hero-search-wrap">
+      <form class="search-form" method="get" action="/board">
+        <div class="search-icon">{{ search_icon() }}</div>
+        <input class="search-input" type="text" name="search" autocomplete="off"
+               placeholder="브랜드명, 모델명, 상품명을 검색해보세요 (예: 샤넬 클래식, 롤렉스 서브마리너)">
+        <button class="search-submit" type="submit">통합검색</button>
+      </form>
+
+      <div class="search-meta">
+        <div class="keyword-row">
+          <span class="keyword-label">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3-1.6 4.3L6 9l4.4 1.7L12 15l1.6-4.3L18 9l-4.4-1.7L12 3Z"/><path d="m5 14-.8 2.2L2 17l2.2.8L5 20l.8-2.2L8 17l-2.2-.8L5 14ZM19 13l-.8 2.2-2.2.8 2.2.8L19 19l.8-2.2L22 16l-2.2-.8L19 13Z"/></svg>
+            인기 검색어:
+          </span>
+          <a class="keyword-chip" href="/board?search={{ '샤넬 22백'|urlencode }}">샤넬 22백</a>
+          <a class="keyword-chip" href="/board?search={{ '롤렉스 서브마리너'|urlencode }}">롤렉스 서브마리너</a>
+          <a class="keyword-chip" href="/board?search={{ '에르메스 버킨'|urlencode }}">에르메스 버킨</a>
+          <a class="keyword-chip" href="/board?search={{ '디올 레이디백'|urlencode }}">디올 레이디백</a>
+          <a class="keyword-chip" href="/board?search={{ '까르띠에 러브링'|urlencode }}">까르띠에 러브링</a>
+          <a class="keyword-chip" href="/board?search={{ '루이비통 온더고'|urlencode }}">루이비통 온더고</a>
+        </div>
+        <a class="view-all" href="/board?view=all">
+          <span>전체매물 보러가기</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <section class="container section" aria-labelledby="category-title">
+    <div class="section-head">
+      <div>
+        <h2 class="section-title" id="category-title">카테고리 선택</h2>
+        <p class="section-copy">원하는 명품 카테고리를 클릭하여 매물을 검색하세요</p>
+      </div>
     </div>
 
-    <div class="field">
-      <label for="f-brand">브랜드</label>
-      <select id="f-brand" name="brand">
-        <option value="">전체</option>
-        {% for b in brands %}
-          <option value="{{ b }}" {% if filters.brand == b %}selected{% endif %}>{{ b }}</option>
-        {% endfor %}
-      </select>
-    </div>
-
-    <div class="field">
-      <label for="f-search">제목 검색</label>
-      <input id="f-search" type="search" name="search" value="{{ filters.search or '' }}" placeholder="예: 클래식 플랩">
-    </div>
-
-    <div class="field">
-      <label for="f-min">최저가</label>
-      <input id="f-min" type="number" name="min_price" min="0" step="10000"
-             value="{{ filters.min_price if filters.min_price is not none else '' }}">
-    </div>
-
-    <div class="field">
-      <label for="f-max">최고가</label>
-      <input id="f-max" type="number" name="max_price" min="0" step="10000"
-             value="{{ filters.max_price if filters.max_price is not none else '' }}">
-    </div>
-
-    <label class="check">
-      <input type="checkbox" name="is_sold" value="false" {% if filters.is_sold is false %}checked{% endif %}>
-      판매완료 숨기기
-    </label>
-
-    <button class="btn" type="submit">필터 적용</button>
-    <a class="btn btn-quiet" href="/board">초기화</a>
-  </form>
-
-  <p class="count">{{ total }}건{% if filters.search %} · "{{ filters.search }}" 검색 결과{% endif %}</p>
-
-  {% if views %}
-    <ul class="rows">
-      {% for v in views %}
-        <li class="row {% if v.item.is_sold %}sold{% endif %}">
-          <div class="thumb-cell">
-            {% if v.item.image_url %}
-              <img class="thumb" src="{{ v.item.image_url }}" alt="" loading="lazy" referrerpolicy="no-referrer">
-            {% else %}
-              <span class="thumb"></span>
-            {% endif %}
+    <div class="category-grid">
+      <a class="category-card" href="/board?view=all&category=bag">
+        <div class="category-inner">
+          <div class="category-iconbox">
+            <svg viewBox="0 0 100 100" aria-hidden="true"><path d="M36 36C36 18 64 18 64 36"/><path d="M18 36Q22 34 82 36Q88 38 84 82Q80 86 20 86Q16 86 16 36Z"/><path d="M18 36Q50 56 82 36"/><circle cx="50" cy="54" r="5" fill="#D4AF37" stroke="#332D27" stroke-width="1.5"/><path d="M47 54h6M24 80h52" stroke-dasharray="3 3" opacity=".55"/></svg>
           </div>
+          <h3 class="category-name">가방</h3>
+          <span class="category-count">{{ total|int }}개 통합 매물</span>
+        </div>
+      </a>
 
-          <div class="title-cell">
-            <a class="row-title" href="/board/{{ v.item.id }}">{{ v.item.title }}</a>
-            <p class="row-meta">
-              <span class="tag">{{ v.item.source }}</span>
-              <span class="tag">{{ v.item.brand }}</span>
-              {% if v.item.region %}{{ v.item.region }} · {% endif %}
-              {% if v.item.is_sold %}판매완료 · {% endif %}
-              <a class="origin" href="{{ v.item.url }}" target="_blank" rel="noopener noreferrer">원글 ↗</a>
-            </p>
+      <a class="category-card" href="/board?view=all&category=watch">
+        <div class="category-inner">
+          <div class="category-iconbox">
+            <svg viewBox="0 0 100 100" aria-hidden="true"><path d="M38 8v18c0 2 24 2 24 0V8Z"/><path d="M38 74v18c0 2 24 2 24 0V74Z"/><circle cx="50" cy="50" r="26"/><circle cx="50" cy="50" r="20" opacity=".6"/><rect x="76" y="46" width="5" height="8" rx="1.5" fill="#D4AF37" stroke="#332D27"/><path d="M50 50V38M50 50l10 4"/><circle cx="50" cy="50" r="2.5" fill="#D4AF37" stroke="none"/></svg>
           </div>
+          <h3 class="category-name">시계</h3>
+          <span class="category-count">통합 매물 검색</span>
+        </div>
+      </a>
 
-          {# 등록 후 경과 막대. posted_at이 없으면 수집 시각으로 대체하고 흐리게 표시한다 #}
-          <div class="stale {% if v.is_estimated %}est{% endif %}">
-            <span class="stale-track">
-              <span class="stale-fill" style="width: {{ '%.0f' | format(v.stale_ratio) }}%"></span>
-            </span>
-            <span class="stale-label"
-                  title="{{ v.posted_at.strftime('%Y-%m-%d %H:%M') }}{% if v.is_estimated %} (수집 시각 기준 추정){% endif %}">
-              {{ v.posted_text }}{% if v.is_estimated %} 수집{% else %} 등록{% endif %}
-            </span>
+      <a class="category-card" href="/board?view=all&category=jewelry">
+        <div class="category-inner">
+          <div class="category-iconbox is-muted">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="15" r="6"/><path d="M9 3h6l2 4-5 3-5-3 2-4zM7 7h10M12 3v7"/></svg>
           </div>
+          <h3 class="category-name">주얼리</h3>
+          <div class="category-preparing">preparing<small>(준비중)</small></div>
+        </div>
+      </a>
 
-          <p class="price">{{ v.price_text }}</p>
-        </li>
-      {% endfor %}
-    </ul>
+      <a class="category-card" href="/board?view=all&category=apparel">
+        <div class="category-inner">
+          <div class="category-iconbox is-muted">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.38 3.46 16 2a4 4 0 0 1-8 0L3.62 3.46a2 2 0 0 0-1.34 2.23l.58 3.47a1 1 0 0 0 .99.84H6v10a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V10h2.15a1 1 0 0 0 .99-.84l.58-3.47a2 2 0 0 0-1.34-2.23z"/></svg>
+          </div>
+          <h3 class="category-name">의류</h3>
+          <div class="category-preparing">preparing<small>(준비중)</small></div>
+        </div>
+      </a>
 
-    <nav class="pager">
-      {% if has_prev %}
-        <a href="{{ prev_url }}">← 이전</a>
-      {% else %}
-        <span class="disabled">← 이전</span>
-      {% endif %}
+      <a class="category-card" href="/board?view=all&category=shoes">
+        <div class="category-inner">
+          <div class="category-iconbox is-muted">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12.5V20"/><path d="M3 18c3 0 6-1 9-5l3.5-4.5C17 6.8 19.5 7.2 20.2 9L21 12c-2.5 1.2-5 3-7 6H3Z"/><path d="M12 13c2-2 4.5-3 6.5-2.5"/></svg>
+          </div>
+          <h3 class="category-name">신발</h3>
+          <div class="category-preparing">preparing<small>(준비중)</small></div>
+        </div>
+      </a>
+    </div>
+  </section>
 
-      <span class="pager-state">{{ current_page }} / {{ total_pages }}</span>
+  <section class="container products-section" aria-labelledby="recommended-title">
+    <div class="section-head" style="padding:0;margin-bottom:28px;">
+      <div>
+        <span class="editor-badge">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3-1.6 4.3L6 9l4.4 1.7L12 15l1.6-4.3L18 9l-4.4-1.7L12 3Z"/><path d="m5 14-.8 2.2L2 17l2.2.8L5 20l.8-2.2L8 17l-2.2-.8L5 14Z"/></svg>
+          Reverdi 에디터 픽
+        </span>
+        <h2 class="section-title" id="recommended-title" style="margin-top:10px;">추천물품</h2>
+        <p class="section-copy">Reverdi가 추천하는 명품 매물</p>
+      </div>
+      <a class="view-all" href="/board?view=all">전체 매물
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg>
+      </a>
+    </div>
 
-      {% if has_next %}
-        <a href="{{ next_url }}">다음 →</a>
-      {% else %}
-        <span class="disabled">다음 →</span>
-      {% endif %}
+    {% if views %}
+      <div class="product-grid">
+        {% for v in views[:10] %}{{ product_card(v) }}{% endfor %}
+      </div>
+    {% else %}
+      <div class="empty">
+        <div class="empty-icon">{{ search_icon() }}</div>
+        <h2>추천할 매물이 아직 없습니다</h2>
+        <p>수집이 완료되면 Reverdi 스타일의 추천 매물이 여기에 표시됩니다.</p>
+      </div>
+    {% endif %}
+  </section>
+
+{% else %}
+  <section class="results-hero">
+    <div class="container">
+      <a class="back-home" href="/board">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5m6 6-6-6 6-6"/></svg>
+        홈으로 돌아가기
+      </a>
+
+      <div class="results-search">
+        <form class="search-form" method="get" action="/board">
+          <input type="hidden" name="view" value="all">
+          <div class="search-icon">{{ search_icon() }}</div>
+          <input class="search-input" type="text" name="search" value="{{ filters.search or '' }}" autocomplete="off"
+                 placeholder="브랜드명, 모델명, 상품명을 검색해보세요...">
+          <button class="search-submit" type="submit">검색</button>
+        </form>
+        <div class="results-keywords">
+          <span>추천:</span>
+          <a class="keyword-chip" href="/board?view=all&search={{ '샤넬 22백'|urlencode }}">샤넬 22백</a>
+          <a class="keyword-chip" href="/board?view=all&search={{ '롤렉스 서브마리너'|urlencode }}">롤렉스 서브마리너</a>
+          <a class="keyword-chip" href="/board?view=all&search={{ '에르메스 버킨'|urlencode }}">에르메스 버킨</a>
+          <a class="keyword-chip" href="/board?view=all&search={{ '디올 레이디백'|urlencode }}">디올 레이디백</a>
+          <a class="keyword-chip" href="/board?view=all&search={{ '까르띠에 러브링'|urlencode }}">까르띠에 러브링</a>
+          <a class="keyword-chip" href="/board?view=all&search={{ '루이비통 온더고'|urlencode }}">루이비통 온더고</a>
+        </div>
+      </div>
+
+      <div class="results-summary">
+        <div>
+          <div class="results-kicker">
+            <span class="results-badge">통합 검색 결과</span>
+            <span class="results-platforms">당근마켓 · 중고나라 및 수집 플랫폼</span>
+          </div>
+          <h1 class="results-title">
+            {% if filters.search %}<span class="query">'{{ filters.search }}'</span> 검색 결과{% else %}전체 등록 매물{% endif %}
+            <span class="results-count">총 <strong>{{ total }}</strong>개 매물</span>
+          </h1>
+        </div>
+        {% if last_crawled_text %}<div class="last-crawled">마지막 수집 {{ last_crawled_text }}</div>{% endif %}
+      </div>
+    </div>
+  </section>
+
+  <main class="container results-main">
+    <nav class="category-tabs" aria-label="카테고리 필터">
+      <a class="tab {% if not filters.category %}is-active{% endif %}" href="/board?view=all{% if filters.search %}&search={{ filters.search|urlencode }}{% endif %}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3-1.6 4.3L6 9l4.4 1.7L12 15l1.6-4.3L18 9l-4.4-1.7L12 3Z"/></svg>전체 카테고리
+      </a>
+      <a class="tab {% if filters.category == 'bag' %}is-active{% endif %}" href="/board?view=all&category=bag{% if filters.search %}&search={{ filters.search|urlencode }}{% endif %}">가방 (Bags)</a>
+      <a class="tab {% if filters.category == 'watch' %}is-active{% endif %}" href="/board?view=all&category=watch{% if filters.search %}&search={{ filters.search|urlencode }}{% endif %}">시계 (Watches)</a>
+      <a class="tab {% if filters.category == 'jewelry' %}is-active{% endif %}" href="/board?view=all&category=jewelry{% if filters.search %}&search={{ filters.search|urlencode }}{% endif %}">주얼리 (Jewelry)</a>
+      <a class="tab {% if filters.category == 'apparel' %}is-active{% endif %}" href="/board?view=all&category=apparel{% if filters.search %}&search={{ filters.search|urlencode }}{% endif %}">의류 (Apparel)</a>
+      <a class="tab {% if filters.category == 'shoes' %}is-active{% endif %}" href="/board?view=all&category=shoes{% if filters.search %}&search={{ filters.search|urlencode }}{% endif %}">신발 (Shoes)</a>
     </nav>
-  {% else %}
-    <div class="empty">
-      <p>조건에 맞는 매물이 없습니다.</p>
-      <a class="btn btn-quiet" href="/board">필터 지우고 전체 보기</a>
-    </div>
-  {% endif %}
+
+    <form class="filter-panel" method="get" action="/board">
+      <input type="hidden" name="view" value="all">
+      {% if filters.search %}<input type="hidden" name="search" value="{{ filters.search }}">{% endif %}
+      {% if filters.category %}<input type="hidden" name="category" value="{{ filters.category }}">{% endif %}
+
+      <div class="filter-head">
+        <h2 class="filter-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>
+          상세 필터 검색
+        </h2>
+        <a class="reset-link" href="/board?view=all{% if filters.search %}&search={{ filters.search|urlencode }}{% endif %}{% if filters.category %}&category={{ filters.category }}{% endif %}">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+          필터 초기화
+        </a>
+      </div>
+
+      <div class="filter-grid">
+        <div class="field">
+          <label for="filter-brand">브랜드</label>
+          <select id="filter-brand" name="brand">
+            <option value="">전체</option>
+            {% for b in brands %}<option value="{{ b }}" {% if filters.brand == b %}selected{% endif %}>{{ b }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label for="filter-source">거래 플랫폼</label>
+          <select id="filter-source" name="source">
+            <option value="">전체</option>
+            {% for s in sources %}<option value="{{ s }}" {% if filters.source == s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label for="filter-sort">정렬 방식</label>
+          <select id="filter-sort" name="order_by">
+            <option value="latest" {% if filters.order_by == 'latest' %}selected{% endif %}>최신순</option>
+            <option value="price_asc" {% if filters.order_by == 'price_asc' %}selected{% endif %}>최저가순</option>
+            <option value="price_desc" {% if filters.order_by == 'price_desc' %}selected{% endif %}>최고가순</option>
+            <option value="oldest" {% if filters.order_by == 'oldest' %}selected{% endif %}>오래된순</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="filter-min">최저 가격 (원)</label>
+          <input id="filter-min" type="number" name="min_price" min="0" step="10000" value="{{ filters.min_price if filters.min_price is not none else '' }}" placeholder="0">
+        </div>
+        <div class="field">
+          <label for="filter-max">최고 가격 (원)</label>
+          <input id="filter-max" type="number" name="max_price" min="0" step="10000" value="{{ filters.max_price if filters.max_price is not none else '' }}" placeholder="무제한">
+        </div>
+      </div>
+
+      <div class="filter-checks">
+        <label class="filter-check"><input type="checkbox" name="include_inactive" value="true" {% if filters.include_inactive %}checked{% endif %}> 판매완료·비활성 매물 포함</label>
+        <label class="filter-check"><input type="checkbox" name="include_unusable" value="true" {% if filters.include_unusable %}checked{% endif %}> 정제 제외 매물 포함</label>
+      </div>
+      <div class="filter-actions"><button class="filter-submit" type="submit">필터 적용</button></div>
+    </form>
+
+    {% if views %}
+      <div class="product-grid">
+        {% for v in views %}{{ product_card(v) }}{% endfor %}
+      </div>
+
+      <nav class="pager" aria-label="페이지 이동">
+        {% if has_prev %}<a href="{{ prev_url }}">← 이전</a>{% else %}<span class="disabled">← 이전</span>{% endif %}
+        <span class="state">{{ current_page }} / {{ total_pages }}</span>
+        {% if has_next %}<a href="{{ next_url }}">다음 →</a>{% else %}<span class="disabled">다음 →</span>{% endif %}
+      </nav>
+    {% else %}
+      <div class="empty">
+        <div class="empty-icon">{{ search_icon() }}</div>
+        <h2>{% if filters.search %}'{{ filters.search }}' 조건에 맞는 매물이 없습니다{% else %}조건에 맞는 매물이 없습니다{% endif %}</h2>
+        <p>선택하신 브랜드·플랫폼·가격 필터를 변경하거나 초기화 후 다시 검색해보세요.</p>
+        <a class="filter-submit" href="/board?view=all">필터 초기화하기</a>
+      </div>
+    {% endif %}
+  </main>
+{% endif %}
 {% endblock %}

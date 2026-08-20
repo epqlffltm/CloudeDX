@@ -147,7 +147,7 @@ async def test_meta_returns_filter_options(client, session):
     """
     body = (await client.get("/api/meta")).json()
 
-    assert body["sources"] == ["당근마켓", "중고나라"]
+    assert body["sources"] == ["당근마켓", "중고나라", "번개장터"]
     # 카테고리 확장으로 수집 대상이 18종이 됐다. 목록을 통째로 박제하면
     # 브랜드를 추가할 때마다 테스트가 깨지므로, 계약의 본질(기존 4종 포함 +
     # 카테고리별 목록과의 정합)만 검사한다.

@@ -98,20 +98,16 @@ ok("카테고리 카드 건수 — 시계 2", $('[data-count="watch"]').textCont
 
 // --- 2) 대문에서 검색 → 목록 화면 전환, 제목이 검색어 -------------------------
 const si = $("#searchInput");
-const hi = $("#heroSearchInput");
-hi.value = "롤렉스";
-hi.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+si.value = "롤렉스";
+si.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
 await sleep(500);
 ok(
   "타이핑만으로는 검색이 나가지 않는다",
   $$("#grid .card").length === 44 && body.classList.contains("mode-home"),
 );
-ok("통합검색 = 실행 버튼(type submit)", $(".hsearch__go")?.type === "submit");
-ok("인기 검색어 라벨 (V4 원문)", $(".hotkw__label").textContent.includes("인기 검색어"));
+ok("돋보기 = 실행 버튼(type submit)", $(".search__go")?.type === "submit");
 
-$("#heroSearchForm").dispatchEvent(
-  new dom.window.Event("submit", { bubbles: true, cancelable: true }),
-); // 대문 검색은 히어로 통합검색이 실행한다
+submitSearch(); // 엔터(제출) 시점에만 실행
 await until(() => $$("#grid .card").length === 1);
 ok("대문 검색(엔터) — 목록 모드 전환", !body.classList.contains("mode-home"));
 ok("제목이 검색어로 교체", $("#listTitle").textContent === "'롤렉스'");
@@ -121,7 +117,6 @@ $("#searchClear") && click($("#searchClear"));
 await until(() => $$("#grid .card").length === 24);
 ok("검색 해제 — 제목이 카테고리명(전체) 복귀", $("#listTitle").textContent === "전체");
 ok("검색 해제 후에도 목록 모드 유지", !body.classList.contains("mode-home"));
-ok("두 검색창 동기화 (진실은 하나)", si.value === "" && hi.value === "");
 
 // 전체 스코프 0건 검색 — "수집 전" 오표시 버그의 회귀 방지
 si.value = "존재하지않는검색어제발";
@@ -333,16 +328,7 @@ ok("레일 카드도 진짜 링크",
 click($$(".kwchip")[1]); // "롤렉스 서브마리너"
 await until(() => !body.classList.contains("mode-home"));
 ok("칩 클릭 — 목록 전환 + 제목이 검색어", $("#listTitle").textContent === "'롤렉스 서브마리너'");
-ok("칩 클릭 — 두 검색창 모두 동기화",
-   $("#searchInput").value === "롤렉스 서브마리너" && $("#heroSearchInput").value === "롤렉스 서브마리너");
-
-
-// --- 14) 전체매물 보러가기 (V4 이식) ------------------------------------------------
-click($$(".home-link")[0]); // 대문 복귀
-await until(() => body.classList.contains("mode-home") && $$("#grid .card").length === 44);
-click($(".hsearch__all"));
-await until(() => !body.classList.contains("mode-home"));
-ok("전체매물 보러가기 — 목록 모드 전환(전체)", $("#listTitle").textContent === "전체");
+ok("칩 클릭 — 입력창 동기화", $("#searchInput").value === "롤렉스 서브마리너");
 
 console.log(`\n결과: ${pass} PASS / ${fail} FAIL`);
 process.exit(fail ? 1 : 0);

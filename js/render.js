@@ -314,8 +314,6 @@ export function renderFilterInputs(filters) {
   renderRange(stepIndexFor(filters.min, "min"), stepIndexFor(filters.max, "max"));
   const input = el("searchInput");
   input.value = filters.q;
-  // 대문의 통합 검색창도 같은 상태를 비춘다 — 검색창이 둘이어도 진실은 하나다
-  el("heroSearchInput").value = filters.q;
   input.closest(".search").classList.toggle("has-value", Boolean(filters.q));
 }
 

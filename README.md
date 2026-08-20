@@ -9,7 +9,7 @@
 파이프라인은 하나다:
 
 ```
-크롤러(Playwright) → items 테이블(upsert) → 서빙
+크롤러(당근·중나 Playwright / 번장 API) → items 테이블(upsert) → 서빙
                                               ├─ /       웹 화면 (web/, 정적 서빙)
                                               ├─ /board  게시판 화면 (Jinja2, 시연용)
                                               └─ /api    JSON API
@@ -920,7 +920,8 @@ false). 컬럼이 NOT NULL(기본 `bag`)로 이미 배포돼 있어 센티널을
 
 검색 계획은 `app/domain/search_plan.py`가 정본이다 — 카테고리마다 유효 브랜드가
 달라서("롤렉스 가방"을 검색할 이유가 없다) 브랜드×서픽스 잡 목록으로 관리한다.
-**주의: 소스당 32잡, 기존의 8배 볼륨이다.** `CRAWL_INTERVAL_MINUTES` 30 → 60
+**주의: 소스당 32잡 × 3소스 = 라운드당 96잡이다.** 단 번개장터는
+브라우저 없는 API 호출이라 잡당 비용이 다른 두 소스의 수십분의 일이다. `CRAWL_INTERVAL_MINUTES` 30 → 60
 상향을 권장한다.
 
 #### 정렬 (`order_by`)
