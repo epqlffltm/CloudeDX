@@ -37,7 +37,7 @@
 | | |
 |---|---|
 | 실행 단위 | 백엔드(564MB) · 크롤러(3.59GB) · nginx 세 이미지 |
-| 구성 | 개발 4개 서비스 · 배포 5개 서비스(백엔드 3대 + nginx) |
+| 구성 | 개발 단일 compose · 배포 계층별 compose 3종(웹 / 크롤러 / 마이그레이션) |
 | 스키마 | Alembic 마이그레이션 |
 | 테스트 | 실제 Postgres 위에서 실행 (`uv run pytest`) |
 | CI | GitHub Actions — lint · test · 이미지 빌드 |
@@ -51,7 +51,7 @@ docker compose up -d --build
 
 게시판 http://localhost:8000/board · 문서 http://localhost:8000/docs
 
-배포용 구성(백엔드 3대 + nginx)은 별도 파일로 둔다:
+AWS 없이 배포 구성 전체를 한 대에서 확인하려면:
 
 ```
 copy .env.prod.example .env.prod
@@ -59,7 +59,10 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 ```
 
 이쪽은 http://localhost 로 접근한다 — 8000 포트는 외부에 열리지 않고 nginx 만
-80 을 연다. 자세한 차이는 아래 "배포 구성" 절에 있다.
+80 을 연다.
+
+실제 배포는 서버 역할이 갈리므로 compose 를 셋으로 나눈다(웹 / 크롤러 /
+마이그레이션). 자세한 것은 아래 "배포 구성"과 "인프라 인계" 절에 있다.
 
 로컬에서 코드를 고치며 개발하는 방법은 아래 "실행" 절을 참고한다.
 
@@ -367,47 +370,101 @@ curl http://localhost:8000/api/meta
 docker compose -f docker-compose.yml up -d
 ```
 
-### 배포 구성 — `docker-compose.prod.yml`
+### 배포 구성 — 계층별로 나눈 compose
 
-배포용은 별도 파일이다. `-f` 로 명시하지 않으면 도커가 `docker-compose.yml` 과
-`docker-compose.override.yml` 을 자동으로 합치는데, override 에는 소스 마운트와
-`--reload` 가 들어 있어 배포에 섞이면 안 된다.
+서버 역할이 갈리므로 compose 도 셋으로 나눈다. `-f` 로 파일을 명시하지 않으면 도커가
+`docker-compose.yml` 과 `docker-compose.override.yml` 을 자동으로 합치는데, override
+에는 소스 마운트와 `--reload` 가 들어 있어 배포에 섞이면 안 된다.
 
-```
-docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
-```
-
-| 서비스 | 개발 | 배포 |
+| 파일 | 어디서 | 무엇이 |
 |---|---|---|
-| `nginx` | 없음 | 80 노출, 유일한 외부 진입점 |
-| `backend` | 1대, 8000 노출 | **3대**, `expose` 만 (호스트 노출 없음) |
-| `db` | 5432 노출 | 노출 없음 |
-| `crawler` | 1대 | 1대 (수평 확장 대상이 아님) |
+| `docker-compose.web.yml` | 웹서버 3대(AZ당 1대) | nginx + 백엔드 1대 |
+| `docker-compose.crawler.yml` | 크롤링 인스턴스 1대 | 크롤러만 |
+| `docker-compose.migrate.yml` | 운영 서버 | 배포 스크립트가 1회 호출 |
+| `docker-compose.prod.yml` | 로컬 | 전체를 한 대에서 확인 |
 
-**백엔드를 3대로 늘리면서 드러난 문제가 둘 있었다.**
-
-첫째, `deploy.replicas` 와 `ports` 매핑은 공존할 수 없다. 세 대가 같은 호스트 포트를
-잡으려 들어 두 번째부터 바인딩에 실패한다. `expose` 로 바꾸면 호스트에는 열리지 않고
-같은 도커 네트워크의 다른 컨테이너에게만 포트가 보인다. 결과적으로 외부에 열리는
-포트는 nginx 의 80 하나뿐이고, EC2 보안그룹에서 80 만 열면 백엔드와 DB 는 구조적으로
-접근 불가가 된다.
-
-둘째, `SESSION_SECRET` 이 비어 있으면 `config.py` 가 프로세스마다 임의 키를 만든다.
-1대일 때는 재시작 시 로그인이 풀리는 정도지만, 3대가 각자 다른 키로 쿠키를 서명하면
-요청이 어느 컨테이너로 가느냐에 따라 로그인이 붙었다 풀렸다 한다. 증상만 보면 인증
-코드를 의심하게 되는데 원인은 설정 쪽이다. 그래서 배포 구성에서는 이 값에 기본값을
-주지 않고 `:?` 로 **미설정 시 기동 자체를 거부**한다.
+DB 는 어느 파일에도 없다. 별도 인스턴스(주/대기 스트리밍 복제)에 있고 `DATABASE_URL`
+로만 붙는다.
 
 ```
-$ docker compose -f docker-compose.prod.yml --env-file .env.prod.example config
-error while interpolating x-db-env.DATABASE_URL:
-  required variable POSTGRES_PASSWORD is missing a value
+docker compose -f docker-compose.web.yml     --env-file .env.web     up -d
+docker compose -f docker-compose.crawler.yml --env-file .env.crawler up -d
+docker compose -f docker-compose.migrate.yml --env-file .env.migrate run --rm migrate
 ```
 
-`:-` 로 기본값을 주면 `.env.prod` 를 빠뜨렸을 때 개발용 비밀번호로 조용히 떠버린다.
-그런 실수는 뜨는 순간이 아니라 한참 뒤에 발견된다.
+각 파일에 `name:` 을 못 박아 뒀다. 지정하지 않으면 compose 프로젝트명이 디렉토리명에서
+자동으로 붙는데, 그러면 서버에서 디렉토리를 옮겼을 때 볼륨이 새로 만들어지면서 데이터가
+사라진 것처럼 보인다.
+
+#### 백엔드는 서버당 1대다
+
+로컬 검증용 `docker-compose.prod.yml` 은 한 호스트에 백엔드 3대를 띄우지만, 실제
+배포는 3개 AZ 에 EC2 1대씩이고 분산은 ALB 가 한다. 서버 안에서 또 3대를 띄우면
+t3.small(2GB) 에서 메모리가 빠듯하고, ALB 분산 위에 nginx 분산이 겹쳐 어느 쪽이
+문제인지 가리기 어려워진다.
+
+`deploy.replicas` 를 쓸 때 알아둘 것: **`ports` 매핑과 공존할 수 없다.** 세 대가 같은
+호스트 포트를 잡으려 들어 두 번째부터 바인딩에 실패한다. `expose` 로 바꾸면 호스트에
+열리지 않고 같은 도커 네트워크의 다른 컨테이너에게만 포트가 보인다. 결과적으로 외부에
+열리는 포트는 nginx 의 80 하나뿐이다.
+
+#### 마이그레이션을 웹 compose 에서 뺀 이유
+
+1. **동시 실행.** 웹서버 3대에 같은 compose 를 배포하면 세 대가 각자
+   `alembic upgrade head` 를 돌린다. Alembic 이 락을 잡긴 하지만 경합이 생기고,
+   밀린 쪽이 실패하면 그 서버만 뜨지 않는 애매한 상태가 된다.
+2. **배포 순서.** 스키마 변경이 있는 배포는 "마이그레이션 → 앱 순차 교체" 순서여야
+   한다. 웹 compose 안에 있으면 1번 서버가 새 코드로 뜨면서 마이그레이션이 함께 도는데,
+   그 시점에 2·3번 서버는 아직 옛 코드로 새 스키마를 만난다.
+3. **실패 처리.** 배포 스크립트에서 `run --rm` 으로 돌리면 종료 코드가 셸에 전달되어
+   실패가 곧 배포 중단이 된다.
+4. **ASG.** 웹서버는 자동 대체 기동 대상이다. 새 인스턴스가 뜰 때마다 마이그레이션이
+   도는 것은 의도한 동작이 아니다.
+
+#### DB 주소를 조립하지 않는다
+
+로컬 구성은 `POSTGRES_*` 로 접속 문자열을 조립하지만, 배포에서는 `DATABASE_URL` 을
+통째로 받는다.
+
+```
+DATABASE_URL=postgresql+asyncpg://cloudedx:<비밀번호>@db.reluxe.internal:5432/cloudedx
+```
+
+`db.reluxe.internal` 은 Route 53 프라이빗 호스팅 영역의 이름이다. 주 DB 장애로 대기
+DB 를 승격하면 그 레코드만 바꾸면 되고, 웹서버 3대와 크롤러의 설정은 건드리지 않는다.
+호스트가 바뀌는 게 아니라 "어디를 가리키는지"를 DNS 에 위임하는 것이다.
+
+전환이 실제로 먹으려면 앱이 죽은 커넥션을 붙잡고 있으면 안 된다. `engine.py` 의
+`pool_pre_ping=True` 가 체크아웃할 때마다 살아있는지 확인하고, 죽었으면 새로 맺으면서
+그 시점에 DNS 를 다시 조회한다. **애플리케이션 코드 변경 없이 전환이 동작한다.**
+
+#### 세션 키는 3대가 같아야 한다
+
+ALB 스티키 세션을 쓰지 않는다. 로그인 상태가 서버에 저장되지 않고 HMAC 으로 서명한
+쿠키에만 담기기 때문이다. 다만 그것은 **3대가 같은 키로 서명한다**는 전제 위에서만
+성립한다.
+
+`SESSION_SECRET` 이 비어 있으면 `config.py` 가 프로세스마다 임의 키를 만든다. 그러면
+ALB 가 요청을 다른 서버로 보낼 때마다 쿠키 검증이 실패해 로그인이 붙었다 풀렸다 한다.
+증상은 앱 버그처럼 보이지만 원인은 배포 설정이고, 3대로 흩어져 있으면 재현조차 어렵다.
+
+그래서 배포 구성에서는 이 값에 기본값을 주지 않고 `:?` 로 **미설정 시 기동 자체를
+거부**한다.
+
+```
+$ docker compose -f docker-compose.web.yml --env-file .env.web.example config
+error while interpolating services.backend.environment.SESSION_SECRET:
+  required variable SESSION_SECRET is missing a value:
+  SESSION_SECRET 을 .env.web 에 설정하세요 — 3대 모두 같은 값
+```
+
+`:-` 로 기본값을 주면 `.env` 를 빠뜨렸을 때 개발용 값으로 조용히 떠버린다. 그런 실수는
+뜨는 순간이 아니라 한참 뒤에 발견된다.
 
 ### nginx — upstream 블록을 쓰지 않는 이유
+
+로컬 검증 구성(`docker-compose.prod.yml`)에서 백엔드 3대 앞에 설 때의 이야기다. 실제
+배포에서는 서버당 백엔드가 1대지만, 컨테이너가 재시작하면 IP 가 바뀌는 문제는 같다.
 
 ```nginx
 resolver 127.0.0.11 valid=10s ipv6=off;
@@ -417,18 +474,15 @@ proxy_pass $upstream;
 ```
 
 흔한 방식은 `upstream` 블록에 서버를 나열하는 것이다. 그런데 nginx 는 그 호스트명을
-**기동할 때 한 번만** 해석하고 그 IP 를 계속 쓴다. `replicas` 로 띄운 컨테이너는
-재시작이 잦고 그때마다 IP 가 바뀌므로, nginx 는 사라진 IP 로 계속 보내다 502 를 뱉는다.
+**기동할 때 한 번만** 해석하고 그 IP 를 계속 쓴다. 컨테이너가 재시작해 IP 가 바뀌면
+nginx 는 사라진 IP 로 계속 보내다 502 를 뱉는다.
 
 `proxy_pass` 에 변수를 쓰면 요청마다 DNS 를 다시 묻는다. `127.0.0.11` 은 도커 내장
-DNS 이고, `backend` 를 물으면 3대의 IP 를 돌아가며 돌려준다 — 분배를 도커 DNS 가
-담당하는 셈이다.
+DNS 이고, 여러 대가 있으면 IP 를 돌아가며 돌려준다 — 분배를 도커 DNS 가 담당하는
+셈이다. 트레이드오프로 `least_conn` 같은 분배 알고리즘과 keepalive 커넥션 풀을 못 쓴다.
 
-트레이드오프로 `least_conn` 같은 분배 알고리즘과 keepalive 커넥션 풀을 못 쓴다.
-이 규모에서는 죽은 컨테이너를 물지 않는 쪽이 더 중요해서 이 방식을 택했다.
-
-분배가 실제로 도는지는 액세스 로그로 확인한다. 기본 포맷에는 `$upstream_addr` 가
-없어서 어디로 갔는지 알 수 없으므로 포맷을 따로 정의했다:
+분배가 실제로 도는지는 액세스 로그로 확인한다. 기본 포맷에는 `$upstream_addr` 가 없어
+어디로 갔는지 알 수 없으므로 포맷을 따로 정의했다:
 
 ```
 172.28.0.1 -> 172.28.0.5:8000 "GET /health HTTP/1.1" 200 0.001s
@@ -441,22 +495,41 @@ DNS 이고, `backend` 를 물으면 3대의 IP 를 돌아가며 돌려준다 —
 http 안에서 include 되므로 `server` 바깥이 곧 http 컨텍스트다.
 
 **설정은 바인드 마운트하지 않고 이미지에 굽는다**(`nginx/Dockerfile`). Windows 에서
-단일 파일 마운트가 실패하면 도커가 그 경로에 빈 디렉토리를 만들어 두는데, 호스트
-파일을 고쳐도 컨테이너 안에서는 계속 디렉토리로 보인다. 컨테이너를 지우고 다시 만들어도
-남아 있어 원인을 찾기 어렵다. 배포에서 이미지 하나만 옮기면 되고 설정에도 코드와 같은
-버전이 붙는다는 이점도 있다.
+단일 파일 마운트가 실패하면 도커가 그 경로에 빈 디렉토리를 만들어 두는데, 호스트 파일을
+고쳐도 컨테이너 안에서는 계속 디렉토리로 보인다. 컨테이너를 지우고 다시 만들어도 남아
+있어 원인을 찾기 어렵다. 배포에서 이미지 하나만 옮기면 되고 설정에도 코드와 같은 버전이
+붙는다는 이점도 있다.
+
+보안 헤더도 여기서 붙인다 — 응답 경로가 하나로 모이므로 라우터마다 빠뜨릴 일이 없고,
+정책이 바뀌어도 애플리케이션 코드를 건드리지 않는다. `always` 를 붙이는 이유는 이
+지시어가 기본적으로 2xx·3xx 응답에만 적용되기 때문이다. 오류 페이지야말로 클릭재킹이나
+MIME 스니핑의 표적이 되기 쉽다.
 
 ### 프록시 뒤의 클라이언트 IP
 
 `X-Forwarded-For` 는 누구나 붙일 수 있는 헤더다. 아무나 믿으면 클라이언트가 자기 IP 를
-위조할 수 있어 접속 로그가 오염되고 IP 기반 제한도 무의미해진다. 그래서 uvicorn 의
-`--forwarded-allow-ips` 에 신뢰할 대역을 지정해야 하는데, 도커가 네트워크 대역을 알아서
-잡게 두면 매번 달라져서 그 값을 쓸 수가 없다. 배포 구성에서 서브넷을 `172.28.0.0/16`
-으로 고정한 것은 이 때문이다.
+위조할 수 있어 접속 로그가 오염되고 IP 기반 제한도 무의미해진다.
+
+배포에서는 체인이 두 단계다:
+
+```
+클라이언트 → ALB → nginx → uvicorn
+```
+
+ALB 가 `X-Forwarded-For` 에 클라이언트 IP 를 넣고, nginx 가 거기에 ALB 의 사설 IP 를
+이어 붙인다. uvicorn 이 원래 클라이언트를 찾으려면 중간 홉을 건너뛰어야 하므로 도커
+대역과 VPC 대역을 **둘 다** 신뢰해야 한다.
+
+```
+FORWARDED_ALLOW_IPS=172.28.0.0/16,10.0.0.0/16
+```
+
+도커가 네트워크 대역을 알아서 잡게 두면 172.17~172.31 중 어디가 될지 몰라 이 값을 쓸
+수 없다. 배포 구성에서 서브넷을 고정한 것은 이 때문이다.
 
 `Dockerfile` 의 `CMD` 는 셸 형식으로 써서 `FORWARDED_ALLOW_IPS` 를 읽는다. exec
-형식(JSON 배열)에서는 `$VAR` 가 치환되지 않고 문자 그대로 전달된다. 기본값은 로컬
-개발 편의를 위해 `*` 로 두고, 배포에서 compose 가 덮어쓴다.
+형식(JSON 배열)에서는 `$VAR` 가 치환되지 않고 문자 그대로 전달된다. 기본값은 로컬 개발
+편의를 위해 `*` 로 두고, 배포에서 compose 가 덮어쓴다.
 
 ## 수집 예절
 
@@ -1393,7 +1466,7 @@ uv run pytest
 
 ```
 lint  ─┐
-       ├─> build (backend, crawler 병렬)
+       ├─> build (backend, crawler, web 병렬) ─> ECR 푸시 (main 에서만)
 test  ─┘
 ```
 
@@ -1401,9 +1474,39 @@ test  ─┘
 |---|---|
 | `lint` | `ruff check .` (크롤러 코드까지 검사하므로 `--extra crawler`로 설치) |
 | `test` | Postgres 서비스 컨테이너 → `alembic upgrade head` → `alembic check` → `pytest` |
-| `build` | 이미지 두 개 빌드, 백엔드는 실제로 실행해 임포트 확인 |
+| `build` | 이미지 세 개 빌드 · 백엔드는 실행해 임포트 확인 · nginx 는 `nginx -t` |
 
-설계상 노린 것 셋:
+### ECR 푸시
+
+main 브랜치 푸시에서만 올린다. PR 에서는 빌드와 스모크 테스트까지만 하고 레지스트리는
+건드리지 않는다 — 포크에서 온 PR 은 OIDC 토큰을 받을 수 없기도 하다.
+
+**인증은 OIDC 로 한다.** 장기 액세스 키를 Secrets 에 넣으면 유출됐을 때 회수 전까지
+계속 유효하고, 로테이션을 사람이 기억해야 한다. OIDC 는 실행마다 단기 자격증명을
+발급받으므로 저장소에 영구 비밀이 남지 않는다.
+
+**태그는 커밋 해시 7자리와 `main` 을 함께 붙인다.** 해시 태그가 있으면 서버에 떠 있는
+이미지가 어느 커밋인지 알 수 있고 롤백이 태그 교체로 끝난다. `main` 만 쓰면 "지금 뭐가
+떠 있는지"를 알 수 없어 되돌릴 지점이 없다.
+
+빌드 요약에 이미지 주소가 출력된다. Actions 실행 결과에서 복사해 서버의
+`.env.web` / `.env.crawler` 에 붙이면 된다.
+
+필요한 설정(인프라 담당):
+
+| 항목 | 값 |
+|---|---|
+| ECR 리포지토리 | `reluxe-web` · `reluxe-backend` · `reluxe-crawler` |
+| OIDC 공급자 | `token.actions.githubusercontent.com` |
+| IAM 역할 조건 | `repo:epqlffltm/CloudeDX:ref:refs/heads/main` |
+| 저장소 Secret | `AWS_ROLE_ARN` |
+
+**nginx 도 빌드 대상이다.** 설정을 이미지에 굽기 때문에, CI 에서 만들지 않으면 배포된
+설정이 저장소와 조용히 어긋난다. `nginx -t` 문법 검사도 함께 돌린다 — `log_format` 을
+`server` 블록 안에 두는 것 같은 실수는 배포 후에야 `[emerg]` 로 발견되고, 그때는
+컨테이너가 재시작 루프를 돈다.
+
+### 설계상 노린 것 셋
 
 **test 잡은 `--extra crawler` 없이 설치한다.** 백엔드 이미지와 같은 구성이라, 백엔드
 코드가 실수로 크롤러 모듈을 최상단에서 임포트하면 CI가 잡아낸다. 위 "임포트 사슬을
@@ -1554,197 +1657,233 @@ netstat -ano | findstr :5432
 ## 인프라 인계
 
 AWS 배포(EC2 프로비저닝 · 네트워크 · 보안그룹 · 부하 테스트)를 맡은 담당자를 위한 절이다.
-이 저장소는 **"이미지와 compose 파일만 있으면 뜨는 상태"**까지를 넘긴다. 아래 순서대로
-하면 서버가 올라간다.
+이 저장소는 **"이미지와 compose 파일만 있으면 뜨는 상태"**까지를 넘긴다.
 
-### 넘기는 것
+### 서버 역할과 파일
 
-| 항목 | 위치 | 비고 |
-|---|---|---|
-| 배포용 compose | `docker-compose.prod.yml` | 백엔드 3대 + nginx |
-| nginx 설정 | `nginx/` | 설정이 이미지에 구워져 있다 |
-| 환경변수 템플릿 | `.env.prod.example` | 값이 빈 상태. 서버에서 채운다 |
-| 이미지 3종 | `cloudedx-backend` · `cloudedx-crawler` · `cloudedx-nginx` | 아래 "이미지 전달" 참고 |
+| 서버 | compose | env | 대수 |
+|---|---|---|---|
+| 웹서버 | `docker-compose.web.yml` | `.env.web` | 3 (AZ당 1) |
+| 크롤링 | `docker-compose.crawler.yml` | `.env.crawler` | 1 |
+| 운영 | `docker-compose.migrate.yml` | `.env.migrate` | 배포 시 1회 |
+| DB | (없음) | — | 주 1 · 대기 1 |
 
-`.env.prod`(실제 값이 든 파일)는 저장소에 없다. `.gitignore` 에 막혀 있고, 서버에서
-직접 만든다.
+DB 는 이 저장소가 다루지 않는다. 앱은 `DATABASE_URL` 로만 붙는다.
+
+`.env.*`(실제 값이 든 파일)는 저장소에 없다. `.gitignore` 에 막혀 있고 서버에서 직접
+만든다. 템플릿(`.env.*.example`)만 커밋돼 있다.
 
 ### 인스턴스 요구사항
 
-**t3.micro(1GB)는 안 된다.** 크롤러가 Chromium 을 띄우면서 `shm_size: 1gb` 를 잡기
-때문에 그것만으로 메모리가 찬다. 여기에 백엔드 3대 + Postgres + nginx 가 붙는다.
+**웹서버 — t3.small(2GB) 이상**
 
 | 구성요소 | 대략 |
 |---|---|
-| 크롤러(Chromium + shm) | ~1.2GB |
-| 백엔드 ×3 | ~450MB |
-| Postgres | ~200MB |
+| 백엔드 1대 | ~150MB |
 | nginx | ~20MB |
 
-**t3.small(2GB) 이상**을 권한다. 여유를 두려면 t3.medium.
+**크롤링 — t3.medium(4GB)**
 
-디스크는 기본 8GB 로도 뜨지만, 크롤러가 30분마다 도는 서비스라 로그가 쌓인다.
-compose 에 로그 로테이션(`max-size: 10m`, `max-file: 3`)을 걸어두었으므로 컨테이너
-로그로 디스크가 차지는 않는다. 다만 이미지 세 개(백엔드 564MB + 크롤러 3.59GB +
-nginx)만으로 4GB 를 넘으므로 **20GB 이상**을 잡는 편이 안전하다.
+크롤러가 Chromium 을 띄우면서 `shm_size: 1gb` 를 잡는다. 컨테이너 기본 `/dev/shm` 이
+64MB 뿐이라 그대로 두면 페이지를 열다 죽는다. `--disable-dev-shm-usage` 로 우회할 수도
+있지만 디스크를 대신 쓰게 되어 느려진다.
+
+디스크는 이미지 세 개(백엔드 564MB + 크롤러 3.59GB + nginx)만으로 4GB 를 넘으므로
+**20GB 이상**을 잡는다. 컨테이너 로그는 compose 에 로테이션(`max-size: 10m`,
+`max-file: 3`)이 걸려 있어 쌓이지 않는다.
 
 ### 보안그룹
 
-인바운드는 **80** 과 **22** 만 열면 된다.
+설계도의 SG 구성과 이 저장소의 compose 는 이렇게 맞물린다.
 
-백엔드(8000)와 Postgres(5432)는 compose 에서 `expose` 만 하고 호스트 포트를 열지
-않는다. 즉 보안그룹에서 실수로 열어두더라도 그 포트에서 듣는 프로세스가 호스트에
-없다 — 방어가 두 겹이다.
+| SG | 인바운드 | compose 쪽 대응 |
+|---|---|---|
+| 웹 | 80 (ALB SG 에서만) | nginx 만 `ports: 80:80` |
+| 크롤링 | 없음 | 크롤러는 HTTP 를 열지 않는다 |
+| DB | 5432 (웹·배치·DB SG) | 앱이 `DATABASE_URL` 로 나간다 |
+
+백엔드(8000)는 `expose` 만 하므로 호스트에 열리지 않는다. 보안그룹에서 실수로
+열어두더라도 그 포트에서 듣는 프로세스가 호스트에 없다 — 방어가 두 겹이다.
+
+SSH 22 는 열지 않는다(SSM Session Manager). 컨테이너는 non-root(uid 10001)로 실행되며
+Dockerfile 에 이미 적용돼 있다.
 
 ### 이미지 전달
 
-CI 가 아직 레지스트리에 올리지 않으므로 현재는 수동이다.
+CI 가 main 푸시마다 ECR 로 올린다. 태그는 커밋 해시 7자리와 `main` 두 가지다.
 
 ```bash
-# 개발 PC에서
-docker compose -f docker-compose.prod.yml --env-file .env.prod build
-docker save cloudedx-backend:latest cloudedx-crawler:latest cloudedx-nginx:latest \
-  | gzip > cloudedx-images.tar.gz
-scp cloudedx-images.tar.gz ec2-user@<IP>:~/
-
 # 서버에서
-gunzip -c cloudedx-images.tar.gz | docker load
+docker compose -f docker-compose.web.yml --env-file .env.web pull
+docker compose -f docker-compose.web.yml --env-file .env.web up -d
 ```
 
-크롤러 이미지가 3.59GB(압축 후 ~1.2GB)라 업로드에 시간이 걸린다.
-
-GHCR 푸시를 CI 에 붙이면 이 단계가 사라진다. 그때는 `.env.prod` 의 이미지 변수만
-바꾸고 `docker compose pull` 하면 된다:
+`.env.web` 의 이미지 변수를 해시 태그로 고정하면 어느 커밋이 떠 있는지 알 수 있고,
+롤백은 태그를 옛 해시로 바꾸고 다시 `pull` 하면 끝난다.
 
 ```
-BACKEND_IMAGE=ghcr.io/epqlffltm/cloudedx-backend:main
-CRAWLER_IMAGE=ghcr.io/epqlffltm/cloudedx-crawler:main
-NGINX_IMAGE=ghcr.io/epqlffltm/cloudedx-nginx:main
+WEB_IMAGE=<계정>.dkr.ecr.ap-northeast-2.amazonaws.com/reluxe-web:a1b2c3d
+BACKEND_IMAGE=<계정>.dkr.ecr.ap-northeast-2.amazonaws.com/reluxe-backend:a1b2c3d
 ```
+
+CI 가 아직 연결되지 않았다면(아래 "필요한 AWS 설정" 참고) 수동으로 옮긴다:
+
+```bash
+docker save reluxe-backend:latest reluxe-web:latest | gzip > images.tar.gz
+scp images.tar.gz <서버>:~/          # SSM 을 쓴다면 포트 포워딩 경유
+gunzip -c images.tar.gz | docker load
+```
+
+크롤러 이미지가 3.59GB(압축 후 ~1.2GB)라 시간이 걸린다.
+
+### 필요한 AWS 설정
+
+CI 가 ECR 로 올리려면 이것들이 있어야 한다.
+
+1. **ECR 리포지토리 3개** — `reluxe-web` · `reluxe-backend` · `reluxe-crawler`
+   (수명주기 정책 최근 10개 유지)
+2. **GitHub OIDC 자격증명 공급자** — `token.actions.githubusercontent.com`
+3. **IAM 역할** — 위 공급자를 신뢰하고 조건에
+   `repo:epqlffltm/CloudeDX:ref:refs/heads/main` 제한. 권한은 ECR push
+4. 역할 ARN 을 저장소 Settings → Secrets 에 **`AWS_ROLE_ARN`** 으로 등록
+
+4번이 없으면 CI 의 `build` 잡이 ECR 인증 단계에서 실패한다. `lint` 와 `test` 는
+그대로 통과한다.
 
 ### 서버에서 할 일
 
+**웹서버 3대 (각각 동일)**
+
 ```bash
-# 1. 파일 배치 — 저장소를 통째로 받거나, 아래 세 가지만 있으면 된다
-#    docker-compose.prod.yml / nginx/ / .env.prod.example
-git clone https://github.com/epqlffltm/CloudeDX.git && cd CloudeDX
-
-# 2. 환경변수 작성
-cp .env.prod.example .env.prod
-
-#    시크릿 두 개를 생성해 .env.prod 에 채운다
-openssl rand -base64 24          # POSTGRES_PASSWORD
-openssl rand -hex 32             # SESSION_SECRET
-
-# 3. 구성 검증 — 실행하지 않고 최종 YAML 만 출력한다
-docker compose -f docker-compose.prod.yml --env-file .env.prod config
-
-# 4. 기동
-docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
-docker compose -f docker-compose.prod.yml --env-file .env.prod ps
+cp .env.web.example .env.web
+# DATABASE_URL, SESSION_SECRET, 이미지 주소를 채운다
+docker compose -f docker-compose.web.yml --env-file .env.web up -d
 ```
 
-`SESSION_SECRET` 은 **반드시 채워야 한다.** 비워두면 백엔드 3대가 각자 다른 키로
-세션 쿠키를 서명해서, 요청이 어느 컨테이너로 가느냐에 따라 로그인이 붙었다 풀렸다
-한다. 그래서 미설정 시 아예 기동을 거부하도록 해 두었다(3번 단계에서 걸린다).
+`SESSION_SECRET` 은 **3대가 같은 값**이어야 한다. 하나만 다르면 그 서버로 간 요청에서만
+로그인이 풀려, 재현이 안 되는 버그처럼 보인다. 생성:
+
+```bash
+openssl rand -hex 32
+```
+
+**크롤링 인스턴스**
+
+```bash
+cp .env.crawler.example .env.crawler
+docker compose -f docker-compose.crawler.yml --env-file .env.crawler up -d
+```
+
+**운영 서버 (배포 스크립트)**
+
+```bash
+# 1. 스키마를 먼저 올린다. 실패하면 여기서 멈춘다.
+docker compose -f docker-compose.migrate.yml --env-file .env.migrate run --rm migrate
+
+# 2. 웹서버를 한 대씩 교체한다.
+#    ALB 등록 취소 지연 30초를 감안해 대기를 둔다.
+```
 
 ### 기동 확인
 
+각 웹서버에서:
+
 ```bash
-curl http://localhost/nginx-health     # ok      — nginx 자체
-curl http://localhost/ready            # 200     — DB·스키마까지 확인
-curl http://localhost/api/meta         # 수집 상태
+curl http://localhost/nginx-health     # ok    — nginx 자체
+curl http://localhost/ready            # 200   — DB·스키마까지
 ```
 
 `ps` 의 기대 상태:
 
 | 컨테이너 | 상태 | 포트 |
 |---|---|---|
-| `nginx-1` | Up | `0.0.0.0:80->80/tcp` |
-| `backend-1/2/3` | Up (healthy) | `8000/tcp` — **화살표 없음** |
-| `db-1` | Up (healthy) | `5432/tcp` — **화살표 없음** |
-| `migrate-1` | Exited (0) | — |
-| `crawler-1` | Up | — |
+| `nginx` | Up | `0.0.0.0:80->80/tcp` |
+| `backend` | Up (healthy) | `8000/tcp` — **화살표 없음** |
 
-backend 와 db 의 포트에 `->` 가 없어야 정상이다. 있으면 호스트에 노출된 것이다.
+포트에 `->` 가 없어야 정상이다. 있으면 호스트에 노출된 것이다.
 
-3대에 분배되는지는 nginx 로그로 본다:
+ALB 헬스체크 대상은 `/ready` 로 잡는다(설계도대로 10초 간격, 2회 실패 시 제외).
+`/health` 가 아닌 이유는 아래 "상태 확인" 절에 있다 — 요약하면 `/health` 는 프로세스가
+살아있는지만 보고 DB 가 죽어도 200 을 준다. 그것을 헬스체크로 쓰면 DB 장애 시 모든
+인스턴스가 정상으로 보이면서 오류만 뱉는다.
+
+파이프라인이 도는지:
 
 ```bash
-for i in $(seq 15); do curl -s http://localhost/health > /dev/null; done
-docker compose -f docker-compose.prod.yml --env-file .env.prod logs nginx --tail 20
+curl http://localhost/api/meta         # last_crawled_at 이 갱신되는가
 ```
-
-```
-172.28.0.1 -> 172.28.0.5:8000 "GET /health HTTP/1.1" 200 0.001s
-172.28.0.1 -> 172.28.0.3:8000 "GET /health HTTP/1.1" 200 0.001s
-172.28.0.1 -> 172.28.0.6:8000 "GET /health HTTP/1.1" 200 0.001s
-```
-
-화살표 오른쪽 IP 가 세 종류로 나오면 분배가 도는 것이다. 완전히 균등하지는 않은데,
-nginx 가 DNS 응답을 10초간 캐시하기 때문이다(`resolver ... valid=10s`). 짧은 시간에
-몰아친 요청은 같은 캐시를 쓴다.
 
 ### 흔히 걸리는 것
 
 **`InvalidPasswordError: password authentication failed`**
-`POSTGRES_PASSWORD` 를 바꿨는데 볼륨이 남아 있는 경우다. 이 값들은 볼륨이 비어 있을
-때(최초 기동)만 반영되므로, DB 에는 옛 비밀번호가 그대로다. 데이터를 버려도 되면:
-
-```bash
-docker compose -f docker-compose.prod.yml --env-file .env.prod down -v
-```
+DB 비밀번호를 바꿨는데 데이터 볼륨이 남아 있는 경우다. `POSTGRES_*` 는 볼륨이 비어
+있을 때만 반영되므로 DB 에는 옛 비밀번호가 그대로다.
 
 **`required variable ... is missing a value`**
-`.env.prod` 에 시크릿이 비어 있다. 의도된 동작이다 — 설정 누락 상태로 뜨지 않는다.
+`.env` 에 시크릿이 비어 있다. 의도된 동작이다 — 설정 누락 상태로 뜨지 않는다.
 `--env-file` 경로가 맞는지도 확인한다.
 
-**크롤러가 페이지를 열다 죽는다**
-메모리 부족이다. 인스턴스 크기를 올린다.
+**로그인이 새로고침할 때마다 풀린다**
+웹서버 3대의 `SESSION_SECRET` 이 서로 다르다. 세 대에서 값을 비교한다:
 
-**`migrate` 가 Exited (1)**
-DB 접속 실패이거나 마이그레이션 오류다. `logs migrate` 를 본다. 이 서비스가 실패하면
-백엔드와 크롤러가 아예 뜨지 않는데(`service_completed_successfully`), 스키마가 준비되기
-전에 트래픽을 받아 500 을 뱉는 것보다 낫다는 판단이다.
+```bash
+docker compose -f docker-compose.web.yml --env-file .env.web exec backend \
+  printenv SESSION_SECRET
+```
+
+**크롤러가 재시작을 반복한다**
+DB 에 못 붙는 경우가 대부분이다. 같은 compose 안에 있을 때는 `depends_on` 으로 순서가
+보장됐지만 인스턴스가 갈리면서 그 보장이 사라졌다. `restart: unless-stopped` 가 DB 가
+준비될 때까지 다시 띄우므로 결국 붙는다. 몇 분 넘게 반복하면 보안그룹이나 Route 53
+레코드를 확인한다.
+
+**화면은 뜨는데 데이터가 안 늘어난다**
+크롤링 인스턴스가 멈춘 것이다. 사용자 화면은 DB 에 있던 데이터를 계속 서빙하므로 며칠
+지나서야 발견된다. `/api/meta` 의 마지막 수집 시각으로 감시하고, 2시간 이상 갱신되지
+않으면 경보를 낸다.
 
 ### 운영
 
 ```bash
-# 로그
-docker compose -f docker-compose.prod.yml --env-file .env.prod logs -f backend
-docker compose -f docker-compose.prod.yml --env-file .env.prod logs -f crawler
+# 로그 (요청 단위 기록은 nginx 가 정본이다 — uvicorn 액세스 로그는 꺼져 있다)
+docker compose -f docker-compose.web.yml --env-file .env.web logs -f nginx
+docker compose -f docker-compose.crawler.yml --env-file .env.crawler logs -f crawler
 
-# 백엔드만 재시작 (무중단 아님 — 3대가 동시에 내려간다)
-docker compose -f docker-compose.prod.yml --env-file .env.prod restart backend
-
-# 백엔드 대수 조정
-docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --scale backend=5
-
-# DB 접속 (호스트 포트가 없으므로 컨테이너 안에서)
-docker compose -f docker-compose.prod.yml --env-file .env.prod exec db \
-  psql -U cloudedx -d cloudedx
+# DB 접속 (호스트 포트가 없으므로 DB 인스턴스에서 컨테이너 안으로)
+docker compose exec db psql -U cloudedx -d cloudedx
 ```
+
+### 앱이 내보내는 지표
+
+설계도의 "앱 지표(직접 발행)"에 해당하는 것은 `/api/meta` 다.
+
+| 항목 | 쓰임 |
+|---|---|
+| 마지막 수집 시각 | 2시간 이상 갱신 없으면 "주의" |
+| 수집 상태(`crawl_runs`) | 실행 중 · 성공 · 실패 · 중단 판정 |
+| 파싱 실패율 | 사이트 구조 변경 감지 |
+
+`/ready` 는 DB 접속과 Alembic 리비전 일치를 함께 확인하므로, 이것이 200 이면
+"이 인스턴스는 지금 요청을 받아도 된다"는 뜻이다.
 
 ### TLS
 
 현재 nginx 는 80 만 연다. 종단 위치는 인프라 구성에 달렸다.
 
 - **ALB 에서 종단** — nginx 설정을 건드릴 필요가 없다. 다만 `X-Forwarded-For` 체인이
-  한 단계 길어지므로 `.env.prod` 의 `FORWARDED_ALLOW_IPS` 에 VPC 대역을 추가한다:
-  `FORWARDED_ALLOW_IPS=172.28.0.0/16,10.0.0.0/16`
-- **nginx 에서 종단** — certbot 으로 인증서를 받고 `nginx/nginx.conf` 에 443 server
-  블록을 추가한 뒤 이미지를 다시 빌드한다. 설정이 이미지에 구워져 있어 서버에서
-  파일만 고치는 방식은 통하지 않는다.
+  한 단계 길어지므로 `.env.web` 의 `FORWARDED_ALLOW_IPS` 에 VPC 대역을 포함한다.
+  기본값 `172.28.0.0/16,10.0.0.0/16` 의 뒤쪽을 실제 VPC 대역으로 바꾼다.
+- **nginx 에서 종단** — 인증서를 받고 `nginx/nginx.conf` 에 443 server 블록을 추가한 뒤
+  **이미지를 다시 빌드**한다. 설정이 이미지에 구워져 있어 서버에서 파일만 고치는 방식은
+  통하지 않는다.
 
-### 남은 것 (저장소 쪽)
+### 확인이 필요한 값
 
-- **레지스트리 푸시**: CI 가 이미지를 빌드만 하고 버린다. GHCR 에 올리는 단계를 붙이면
-  위의 수동 전달이 사라진다.
-
-**해결된 것** — 비밀 관리: `DATABASE_URL` 을 compose 에 평문으로 두던 것을
-`POSTGRES_*` 조립으로 바꾸고, 배포 구성에서는 `:?` 로 미설정 시 기동을 거부하게 했다.
-`.env.prod` 는 `.gitignore` 의 `.env.*` 규칙에 걸려 커밋되지 않으며,
-`.env.prod.example`(값이 빈 템플릿)만 `!` 예외로 통과한다.
+| 항목 | 지금 | 확정 필요 |
+|---|---|---|
+| VPC 대역 | `10.0.0.0/16` (설계도 예시) | 실제 값 |
+| Route 53 이름 | `db.reluxe.internal` | 실제 값 |
+| ECR 계정 ID | — | 이미지 주소에 들어감 |
 
 ## 스택
 
