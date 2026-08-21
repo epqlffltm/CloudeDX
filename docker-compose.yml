@@ -1,10 +1,33 @@
+# docker-compose.yml
+#
+# 로컬 개발/시연용 구성. 배포용은 docker-compose.prod.yml 을 따로 둔다.
+#
+# 모든 값에 기본값이 있어 .env 없이도 `docker compose up -d` 로 뜬다.
+# 값을 바꾸고 싶으면 .env.example 을 복사해 .env 를 만들고 채운다.
+
+# ---------------------------------------------------------------------------
+# DB 접속 문자열을 한 곳에서만 조립한다.
+#
+# 예전에는 같은 문자열이 migrate/backend/crawler 세 곳에 복붙돼 있었다.
+# 비밀번호를 바꾸려면 세 곳을 모두 고쳐야 했고, 하나를 빠뜨리면 그 서비스만
+# 조용히 연결에 실패한다 — 다른 두 곳은 멀쩡히 뜨기 때문에 원인을 찾기 어렵다.
+#
+# 컨테이너끼리는 서비스 이름으로 통신한다. 호스트의 DB_PORT와 무관하게
+# 컨테이너 내부 포트인 5432를 그대로 쓴다.
+# ---------------------------------------------------------------------------
+x-db-env: &db-env
+  DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-cloudedx}:${POSTGRES_PASSWORD:-cloudedx}@db:5432/${POSTGRES_DB:-cloudedx}
+
 services:
   db:
     image: postgres:16
     environment:
-      POSTGRES_USER: cloudedx
-      POSTGRES_PASSWORD: cloudedx
-      POSTGRES_DB: cloudedx
+      # 이 세 값은 볼륨이 비어 있을 때(최초 기동)만 읽힌다. 이미 초기화된 뒤에
+      # 바꾸면 컨테이너는 새 비밀번호로 접속을 시도하지만 DB에는 옛 비밀번호가
+      # 남아 있어 인증에 실패한다. 바꾸려면 볼륨째 지운다: docker compose down -v
+      POSTGRES_USER: ${POSTGRES_USER:-cloudedx}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cloudedx}
+      POSTGRES_DB: ${POSTGRES_DB:-cloudedx}
     ports:
       # 호스트 포트만 .env의 DB_PORT로 바꿀 수 있게 뺀다. 다른 프로젝트가 5432를
       # 쓰고 있으면 .env에 DB_PORT=5433을 넣으면 된다. 컨테이너 내부는 항상 5432.
@@ -14,7 +37,9 @@ services:
     volumes:
       - cloudedx_pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U cloudedx"]
+      # 사용자명이 POSTGRES_USER와 어긋나면 healthcheck가 영영 통과하지 못하고,
+      # depends_on에 걸린 나머지 서비스가 전부 기동하지 않는다. 같은 변수를 쓴다.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cloudedx}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -31,10 +56,7 @@ services:
       context: .
       dockerfile: dockerfile.backend
     command: ["alembic", "upgrade", "head"]
-    environment:
-      # 컨테이너끼리는 서비스 이름으로 통신한다. 호스트의 DB_PORT와 무관하게
-      # 컨테이너 내부 포트인 5432를 그대로 쓴다.
-      DATABASE_URL: postgresql+asyncpg://cloudedx:cloudedx@db:5432/cloudedx
+    environment: *db-env
     depends_on:
       db:
         condition: service_healthy
@@ -45,11 +67,31 @@ services:
       context: .
       dockerfile: dockerfile.backend
     environment:
-      DATABASE_URL: postgresql+asyncpg://cloudedx:cloudedx@db:5432/cloudedx
+      # <<: 는 앵커의 키를 이 맵에 펼쳐 넣는다. migrate처럼 DB 설정만 쓰는 곳은
+      # `environment: *db-env` 로 통째로 참조하고, 여기처럼 다른 값을 덧붙여야
+      # 하는 곳은 <<: 로 병합한다.
+      <<: *db-env
+
       # 크롤러는 별도 컨테이너가 담당한다. 여기서 켜면 두 곳에서 동시에 긁게 되고,
       # 애초에 이 이미지에는 Playwright가 없어서 시작하지도 못한다.
       ENABLE_CRAWLER: "false"
+
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+      # -----------------------------------------------------------------------
+      # 세션 쿠키 서명 키를 고정한다.
+      #
+      # config.py는 이 값이 비어 있으면 secrets.token_hex(32)로 프로세스마다 새로
+      # 만든다. 단일 컨테이너에서는 재시작할 때 로그인이 풀리는 정도로 끝나지만,
+      # backend를 여러 대로 늘리면 각 컨테이너가 서로 다른 키로 서명하게 된다.
+      # 리버스 프록시가 요청을 분배할 때마다 다른 컨테이너로 가므로, 로그인이
+      # 붙었다 풀렸다를 반복한다. 원인을 모르면 인증 코드를 의심하게 되는데
+      # 실제 원인은 여기다.
+      #
+      # 계정(admin/client)과 마찬가지로 시연 편의를 위한 고정값이다.
+      # -----------------------------------------------------------------------
+      SESSION_SECRET: ${SESSION_SECRET:-cloudedx-demo-session-key-do-not-use-in-production}
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     depends_on:
@@ -76,11 +118,14 @@ services:
       context: .
       dockerfile: dockerfile.crawler
     environment:
-      DATABASE_URL: postgresql+asyncpg://cloudedx:cloudedx@db:5432/cloudedx
+      <<: *db-env
       CRAWL_INTERVAL_MINUTES: ${CRAWL_INTERVAL_MINUTES:-30}
       CRAWL_RETRY_MINUTES: ${CRAWL_RETRY_MINUTES:-5}
       CRAWL_RUN_TIMEOUT_MINUTES: ${CRAWL_RUN_TIMEOUT_MINUTES:-60}
       JOONGNA_PAGES_PER_BRAND: ${JOONGNA_PAGES_PER_BRAND:-3}
+      BUNJANG_PAGES_PER_JOB: ${BUNJANG_PAGES_PER_JOB:-3}
+      MISSING_THRESHOLD: ${MISSING_THRESHOLD:-3}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
       db:
         condition: service_healthy
