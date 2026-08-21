@@ -1,6 +1,7 @@
 # .github/workflows/ci.yml
 #
-# 푸시와 PR마다 lint -> test -> 이미지 빌드를 돌린다.
+# 푸시와 PR마다 lint -> test -> 이미지 빌드를 돌리고,
+# main 브랜치에 한해 ECR로 올린다.
 #
 # 세 잡을 나눈 이유: lint는 금방 끝나므로 먼저 실패하면 나머지를 기다릴 필요가 없고,
 # 이미지 빌드는 몇 분 걸리는 데다 테스트가 통과하지 않은 코드를 굽는 건 낭비다.
@@ -16,6 +17,18 @@ on:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+# ---------------------------------------------------------------------------
+# ECR 설정.
+#
+# 리포지토리 이름과 계정 정보는 여기서 한 번만 정한다. 계정 ID와 역할 ARN은
+# 저장소 Variables/Secrets 에 넣는다 — 아래 "필요한 설정" 참고.
+# ---------------------------------------------------------------------------
+env:
+  AWS_REGION: ap-northeast-2
+  ECR_WEB: reluxe-web
+  ECR_BACKEND: reluxe-backend
+  ECR_CRAWLER: reluxe-crawler
 
 jobs:
   lint:
@@ -86,34 +99,125 @@ jobs:
     runs-on: ubuntu-latest
     needs: [lint, test]
 
+    # -----------------------------------------------------------------------
+    # OIDC로 AWS에 인증한다.
+    #
+    # 장기 액세스 키를 Secrets에 넣는 방식은 키가 유출되면 회수 전까지 계속
+    # 유효하고, 로테이션을 사람이 기억해야 한다. OIDC는 실행마다 단기 자격증명을
+    # 발급받으므로 저장소에 영구 비밀이 남지 않는다.
+    #
+    # id-token: write 가 없으면 토큰 발급 자체가 안 된다. contents: read 를
+    # 함께 명시하는 이유는, permissions 를 한 번이라도 쓰면 나머지가 전부
+    # 기본값 none 이 되기 때문이다 — checkout 이 실패한다.
+    # -----------------------------------------------------------------------
+    permissions:
+      id-token: write
+      contents: read
+
     strategy:
       # 하나가 실패해도 다른 이미지 빌드 결과는 보고 싶다.
       fail-fast: false
       matrix:
         include:
           - name: backend
+            context: .
             dockerfile: dockerfile.backend
+            repo_var: ECR_BACKEND
           - name: crawler
+            context: .
             dockerfile: dockerfile.crawler
+            repo_var: ECR_CRAWLER
+          # nginx 설정을 이미지에 굽기 때문에 이쪽도 CI에서 만든다.
+          # 설정이 바뀌면 이미지를 다시 구워야 반영되므로, 빌드 대상에서 빠지면
+          # 배포된 nginx 설정이 저장소와 조용히 어긋난다.
+          - name: web
+            context: ./nginx
+            dockerfile: ./nginx/Dockerfile
+            repo_var: ECR_WEB
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: docker/setup-buildx-action@v3
 
+      # -------------------------------------------------------------------
+      # 먼저 로컬로 빌드해 스모크 테스트를 돌린다.
+      #
+      # push 와 load 는 같이 쓸 수 없어서, 빌드는 항상 load 로 하고 푸시는
+      # 아래에서 docker push 로 따로 한다. 캐시가 있으므로 두 번 굽지 않는다.
+      # 이렇게 하면 PR 에서도 스모크 테스트가 동일하게 돈다.
+      # -------------------------------------------------------------------
       - name: ${{ matrix.name }} 이미지 빌드
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
-          # 레지스트리에 올리지 않는다. 지금은 "빌드가 깨지지 않는가"만 확인한다.
           push: false
           load: true
-          tags: cloudedx-${{ matrix.name }}:ci
+          tags: reluxe-${{ matrix.name }}:ci
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
 
       - name: 백엔드가 Playwright 없이 임포트되는지 확인
         if: matrix.name == 'backend'
         # DB가 없으므로 서버를 띄우지는 않고 임포트만 확인한다.
-        run: docker run --rm cloudedx-backend:ci python -c "import app.main; print('ok')"
+        run: docker run --rm reluxe-backend:ci python -c "import app.main; print('ok')"
+
+      - name: nginx 설정 문법 확인
+        if: matrix.name == 'web'
+        # 설정이 이미지에 구워져 있으므로 마운트 없이 검사할 수 있다.
+        # 배포 후에야 [emerg] 로 발견되는 실수를 여기서 잡는다.
+        run: docker run --rm reluxe-web:ci nginx -t
+
+      # -------------------------------------------------------------------
+      # 여기서부터는 main 브랜치 푸시에서만 돈다.
+      #
+      # PR 에서는 빌드와 스모크 테스트까지만 하고 레지스트리는 건드리지 않는다.
+      # 포크에서 온 PR 은 OIDC 토큰을 받을 수 없기도 하다.
+      # -------------------------------------------------------------------
+      - name: AWS 인증 (OIDC)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: ECR 로그인
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: ECR 푸시
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          REPO: ${{ env[matrix.repo_var] }}
+        run: |
+          set -euo pipefail
+
+          # 태그를 커밋 해시로 둔다. 서버에 떠 있는 이미지를 보면 어느 커밋인지
+          # 바로 알 수 있고, 롤백이 태그 교체로 끝난다. latest 만 쓰면 "지금 뭐가
+          # 떠 있는지"를 알 수 없어 문제 생겼을 때 되돌릴 지점이 없다.
+          SHA_TAG="${GITHUB_SHA::7}"
+
+          docker tag "reluxe-${{ matrix.name }}:ci" "$REGISTRY/$REPO:$SHA_TAG"
+          docker push "$REGISTRY/$REPO:$SHA_TAG"
+
+          # main 태그도 함께 옮긴다. "최신 main" 을 가리키는 이동 태그로,
+          # 배포 스크립트가 특정 커밋을 지정하지 않을 때의 기본값이 된다.
+          docker tag "reluxe-${{ matrix.name }}:ci" "$REGISTRY/$REPO:main"
+          docker push "$REGISTRY/$REPO:main"
+
+          echo "푸시 완료: $REPO:$SHA_TAG"
+
+      - name: 배포용 이미지 주소 출력
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          REPO: ${{ env[matrix.repo_var] }}
+        # 서버의 .env.web / .env.crawler 에 그대로 붙여넣을 수 있는 형태로 남긴다.
+        run: |
+          echo "### ${{ matrix.name }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "$REGISTRY/$REPO:${GITHUB_SHA::7}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
