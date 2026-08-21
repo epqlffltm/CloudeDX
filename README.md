@@ -1,10 +1,22 @@
-# CloudeDX — 중고 명품 가방(여성) 수집 게시판
+# CloudeDX — 중고 명품 통합검색 (브랜드명 Reverdi)
 
-당근마켓 · 중고나라에서 중고 명품 가방(여성용) 매물을 주기적으로 수집해 PostgreSQL에
-쌓고, 그 결과를 게시판 화면과 REST API로 보여주는 FastAPI 프로젝트. 브랜드는 구찌 ·
-에르메스 · 샤넬 · 루이비통 네 개를 대상으로 한다. 매물을 모델 단위 "상품"으로 묶지
-않고 **매물 그대로** 보여준다 — 그 결정의 경위는 아래 "가격 이력 — 도입했다가 제거함"과
-"매물 API" 절에 있다.
+> CloudDX Academy 팀 프로젝트
+> 담당: 백엔드 · 크롤러 · 프론트엔드 · 컨테이너 구성 (AWS 인프라는 별도 담당)
+>
+> **AWS 배포를 맡았다면 [인프라 인계](#인프라-인계) 절부터 읽으면 된다.**
+> 그 절 하나로 서버에서 필요한 작업이 끝나도록 써 두었다.
+
+흩어져 있는 중고 거래처의 명품 매물을 한 곳에서 찾아보게 하는 서비스. 당근마켓 ·
+중고나라 · 번개장터에서 매물을 주기적으로 수집해 PostgreSQL에 쌓고, 브랜드 · 가격 ·
+판매처를 가로질러 비교할 수 있게 웹 화면과 REST API로 내보낸다.
+
+거래처마다 검색 방식과 노출 정책이 달라 사용자가 세 사이트를 오가며 같은 조건을 다시
+입력해야 하는데, 그 과정을 한 번으로 줄이는 것이 목적이다. 현재 수집 대상은 여성용
+명품 가방이고 브랜드는 구찌 · 에르메스 · 샤넬 · 루이비통 네 개다 — 수집기와 스키마는
+카테고리에 묶여 있지 않아 대상 확장은 브랜드 목록과 파서 추가로 처리된다.
+
+매물을 모델 단위 "상품"으로 묶지 않고 **매물 그대로** 보여준다 — 그 결정의 경위는
+아래 "가격 이력 — 도입했다가 제거함"과 "매물 API" 절에 있다.
 
 파이프라인은 하나다:
 
@@ -24,12 +36,13 @@
 
 | | |
 |---|---|
-| 실행 단위 | 백엔드(564MB) · 크롤러(3.59GB) 두 이미지, compose 4개 서비스 |
+| 실행 단위 | 백엔드(564MB) · 크롤러(3.59GB) · nginx 세 이미지 |
+| 구성 | 개발 4개 서비스 · 배포 5개 서비스(백엔드 3대 + nginx) |
 | 스키마 | Alembic 마이그레이션 |
 | 테스트 | 실제 Postgres 위에서 실행 (`uv run pytest`) |
 | CI | GitHub Actions — lint · test · 이미지 빌드 |
 
-한 번에 띄우려면:
+개발용으로 한 번에 띄우려면:
 
 ```
 copy .env.example .env
@@ -37,6 +50,16 @@ docker compose up -d --build
 ```
 
 게시판 http://localhost:8000/board · 문서 http://localhost:8000/docs
+
+배포용 구성(백엔드 3대 + nginx)은 별도 파일로 둔다:
+
+```
+copy .env.prod.example .env.prod
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+```
+
+이쪽은 http://localhost 로 접근한다 — 8000 포트는 외부에 열리지 않고 nginx 만
+80 을 연다. 자세한 차이는 아래 "배포 구성" 절에 있다.
 
 로컬에서 코드를 고치며 개발하는 방법은 아래 "실행" 절을 참고한다.
 
@@ -344,6 +367,97 @@ curl http://localhost:8000/api/meta
 docker compose -f docker-compose.yml up -d
 ```
 
+### 배포 구성 — `docker-compose.prod.yml`
+
+배포용은 별도 파일이다. `-f` 로 명시하지 않으면 도커가 `docker-compose.yml` 과
+`docker-compose.override.yml` 을 자동으로 합치는데, override 에는 소스 마운트와
+`--reload` 가 들어 있어 배포에 섞이면 안 된다.
+
+```
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+```
+
+| 서비스 | 개발 | 배포 |
+|---|---|---|
+| `nginx` | 없음 | 80 노출, 유일한 외부 진입점 |
+| `backend` | 1대, 8000 노출 | **3대**, `expose` 만 (호스트 노출 없음) |
+| `db` | 5432 노출 | 노출 없음 |
+| `crawler` | 1대 | 1대 (수평 확장 대상이 아님) |
+
+**백엔드를 3대로 늘리면서 드러난 문제가 둘 있었다.**
+
+첫째, `deploy.replicas` 와 `ports` 매핑은 공존할 수 없다. 세 대가 같은 호스트 포트를
+잡으려 들어 두 번째부터 바인딩에 실패한다. `expose` 로 바꾸면 호스트에는 열리지 않고
+같은 도커 네트워크의 다른 컨테이너에게만 포트가 보인다. 결과적으로 외부에 열리는
+포트는 nginx 의 80 하나뿐이고, EC2 보안그룹에서 80 만 열면 백엔드와 DB 는 구조적으로
+접근 불가가 된다.
+
+둘째, `SESSION_SECRET` 이 비어 있으면 `config.py` 가 프로세스마다 임의 키를 만든다.
+1대일 때는 재시작 시 로그인이 풀리는 정도지만, 3대가 각자 다른 키로 쿠키를 서명하면
+요청이 어느 컨테이너로 가느냐에 따라 로그인이 붙었다 풀렸다 한다. 증상만 보면 인증
+코드를 의심하게 되는데 원인은 설정 쪽이다. 그래서 배포 구성에서는 이 값에 기본값을
+주지 않고 `:?` 로 **미설정 시 기동 자체를 거부**한다.
+
+```
+$ docker compose -f docker-compose.prod.yml --env-file .env.prod.example config
+error while interpolating x-db-env.DATABASE_URL:
+  required variable POSTGRES_PASSWORD is missing a value
+```
+
+`:-` 로 기본값을 주면 `.env.prod` 를 빠뜨렸을 때 개발용 비밀번호로 조용히 떠버린다.
+그런 실수는 뜨는 순간이 아니라 한참 뒤에 발견된다.
+
+### nginx — upstream 블록을 쓰지 않는 이유
+
+```nginx
+resolver 127.0.0.11 valid=10s ipv6=off;
+...
+set $upstream http://backend:8000;
+proxy_pass $upstream;
+```
+
+흔한 방식은 `upstream` 블록에 서버를 나열하는 것이다. 그런데 nginx 는 그 호스트명을
+**기동할 때 한 번만** 해석하고 그 IP 를 계속 쓴다. `replicas` 로 띄운 컨테이너는
+재시작이 잦고 그때마다 IP 가 바뀌므로, nginx 는 사라진 IP 로 계속 보내다 502 를 뱉는다.
+
+`proxy_pass` 에 변수를 쓰면 요청마다 DNS 를 다시 묻는다. `127.0.0.11` 은 도커 내장
+DNS 이고, `backend` 를 물으면 3대의 IP 를 돌아가며 돌려준다 — 분배를 도커 DNS 가
+담당하는 셈이다.
+
+트레이드오프로 `least_conn` 같은 분배 알고리즘과 keepalive 커넥션 풀을 못 쓴다.
+이 규모에서는 죽은 컨테이너를 물지 않는 쪽이 더 중요해서 이 방식을 택했다.
+
+분배가 실제로 도는지는 액세스 로그로 확인한다. 기본 포맷에는 `$upstream_addr` 가
+없어서 어디로 갔는지 알 수 없으므로 포맷을 따로 정의했다:
+
+```
+172.28.0.1 -> 172.28.0.5:8000 "GET /health HTTP/1.1" 200 0.001s
+172.28.0.1 -> 172.28.0.3:8000 "GET /health HTTP/1.1" 200 0.001s
+172.28.0.1 -> 172.28.0.6:8000 "GET /health HTTP/1.1" 200 0.001s
+```
+
+`log_format` 은 http 컨텍스트 지시어라 `server` 블록 안에 두면 기동에 실패한다
+(`[emerg] "log_format" directive is not allowed here`). 이 파일은 `conf.d/` 로 들어가
+http 안에서 include 되므로 `server` 바깥이 곧 http 컨텍스트다.
+
+**설정은 바인드 마운트하지 않고 이미지에 굽는다**(`nginx/Dockerfile`). Windows 에서
+단일 파일 마운트가 실패하면 도커가 그 경로에 빈 디렉토리를 만들어 두는데, 호스트
+파일을 고쳐도 컨테이너 안에서는 계속 디렉토리로 보인다. 컨테이너를 지우고 다시 만들어도
+남아 있어 원인을 찾기 어렵다. 배포에서 이미지 하나만 옮기면 되고 설정에도 코드와 같은
+버전이 붙는다는 이점도 있다.
+
+### 프록시 뒤의 클라이언트 IP
+
+`X-Forwarded-For` 는 누구나 붙일 수 있는 헤더다. 아무나 믿으면 클라이언트가 자기 IP 를
+위조할 수 있어 접속 로그가 오염되고 IP 기반 제한도 무의미해진다. 그래서 uvicorn 의
+`--forwarded-allow-ips` 에 신뢰할 대역을 지정해야 하는데, 도커가 네트워크 대역을 알아서
+잡게 두면 매번 달라져서 그 값을 쓸 수가 없다. 배포 구성에서 서브넷을 `172.28.0.0/16`
+으로 고정한 것은 이 때문이다.
+
+`Dockerfile` 의 `CMD` 는 셸 형식으로 써서 `FORWARDED_ALLOW_IPS` 를 읽는다. exec
+형식(JSON 배열)에서는 `$VAR` 가 치환되지 않고 문자 그대로 전달된다. 기본값은 로컬
+개발 편의를 위해 `*` 로 두고, 배포에서 compose 가 덮어쓴다.
+
 ## 수집 예절
 
 수집 대상 사이트에 대한 태도를 코드에 반영해 뒀다.
@@ -418,24 +532,60 @@ CloudeDX/0.1 (+https://github.com/epqlffltm/CloudeDX)
 | `MISSING_THRESHOLD` | `3` | 몇 번 연속 미발견이면 비활성 처리할지 |
 | `BACKEND_PORT` | `8000` | 백엔드 컨테이너를 호스트에 노출할 포트 |
 | `TEST_DATABASE_URL` | `...@127.0.0.1:5432/cloudedx_test` | 테스트 전용 DB. 개발용과 분리해야 안전하다 |
+| `BUNJANG_PAGES_PER_JOB` | `3` | 번개장터 검색 잡당 API 페이지 수 |
 | `ALLOWED_ORIGINS` | (비어 있음) | CORS 허용 출처. 쉼표로 구분. 비우면 미들웨어를 붙이지 않는다 |
 | `LOG_LEVEL` | `INFO` | DEBUG / INFO / WARNING / ERROR |
 | `LOG_FORMAT` | `text` | `json`이면 한 줄 JSON. 컨테이너 이미지는 `json`이 기본 |
+| `POSTGRES_USER` | `cloudedx` | compose 가 db 초기화와 접속 문자열 조립에 함께 쓴다 |
+| `POSTGRES_PASSWORD` | `cloudedx` | 위와 같음. 배포에서는 필수 |
+| `POSTGRES_DB` | `cloudedx` | 위와 같음 |
+| `SESSION_SECRET` | (시연용 고정값) | 세션 쿠키 서명 키. 배포에서는 필수 |
+| `SESSION_MAX_AGE_SECONDS` | `43200` | 로그인 유지 시간(초). 기본 12시간 |
+| `MAX_UPLOAD_BYTES` | `5242880` | CSV 업로드 최대 바이트. nginx 의 `client_max_body_size` 와 맞춰야 한다 |
+| `FORWARDED_ALLOW_IPS` | `*` (배포 `172.28.0.0/16`) | `X-Forwarded-For` 를 믿어줄 프록시 대역 |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | `admin` / `admin1234` | 시연용 고정 계정 |
+| `CLIENT_USERNAME` / `CLIENT_PASSWORD` | `client` / `client1234` | 시연용 고정 계정 |
+
+`POSTGRES_*` 세 값은 **볼륨이 비어 있을 때(최초 기동)만** 반영된다. 이미 초기화된 뒤에
+바꾸면 앱은 새 비밀번호로 접속하는데 DB 에는 옛 비밀번호가 남아 있어
+`InvalidPasswordError` 가 난다. 바꾸려면 볼륨째 지운다: `docker compose down -v`.
 
 숫자 설정은 1 미만이면 경고를 남기고 기본값으로 되돌린다. `CRAWL_INTERVAL_MINUTES=0`이면
 크롤러가 쉬지 않고 사이트를 두드리고, `JOONGNA_PAGES_PER_BRAND=0`이면 "수집은 도는데
 아무것도 안 쌓이는" 상태가 되는데 둘 다 며칠 뒤에야 알아챈다. 다만 오타 하나로 컨테이너가
 부팅에 실패하는 것도 곤란해서 예외를 올리지는 않는다.
 
-compose로 띄울 때 `DATABASE_URL`은 `.env` 값이 아니라 compose가 주입하는
-`postgresql+asyncpg://cloudedx:cloudedx@db:5432/cloudedx`가 쓰인다. 컨테이너끼리는
-서비스 이름으로 통신하고, 호스트의 `DB_PORT` 매핑은 psql이나 DBeaver로 밖에서
-들여다보기 위한 것이다.
+compose로 띄울 때 `DATABASE_URL`은 `.env` 값이 아니라 compose가 `POSTGRES_*` 로
+조립한 주소가 쓰인다. 컨테이너끼리는 서비스 이름으로 통신하고(`@db:5432`), 호스트의
+`DB_PORT` 매핑은 psql이나 DBeaver로 밖에서 들여다보기 위한 것이다.
 
-`.env` 로딩은 `main.py` 최상단의 `load_dotenv()`가 담당하며, **`app.*` 임포트보다 먼저**
-실행돼야 한다. `app.db.engine`이 모듈을 읽어들이는 시점에 `os.getenv`로 `DATABASE_URL`을
-확정하기 때문에, 순서가 뒤바뀌면 `.env`를 읽어도 이미 늦어 기본값이 박힌다. 그래서 해당
-임포트에는 `# noqa: E402`가 붙어 있다 — 린터가 정렬한다고 위로 올리면 안 된다.
+조립은 YAML 앵커로 한 곳에서만 한다:
+
+```yaml
+x-db-env: &db-env
+  DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-cloudedx}:...@db:5432/...
+
+services:
+  migrate:
+    environment: *db-env          # 통째로 참조
+  backend:
+    environment:
+      <<: *db-env                 # 병합 후 다른 값을 덧붙임
+```
+
+예전에는 같은 접속 문자열이 `migrate`·`backend`·`crawler` 세 곳에 복붙돼 있었다.
+비밀번호를 바꾸려면 세 곳을 모두 고쳐야 했고, 하나를 빠뜨리면 **그 서비스만** 조용히
+연결에 실패한다 — 나머지 둘은 멀쩡히 뜨기 때문에 원인을 찾기 어렵다. `db` 의
+healthcheck 에 쓰는 사용자명도 같은 변수를 참조한다. 여기가 어긋나면 healthcheck 가
+영영 통과하지 못하고 `depends_on` 에 걸린 서비스가 전부 기동하지 않는다.
+
+`.env` 로딩은 **`app/config.py`** 가 담당한다. 이 모듈이 `load_dotenv()` 를 호출하는
+유일한 곳이고 `app.*` 중 가장 먼저 임포트되므로, 다른 모듈은 "임포트 순서를 지켜야
+`.env` 가 읽힌다"는 제약에서 자유롭다.
+
+예전에는 `main.py` 최상단에서 `load_dotenv()` 를 부르고 그 아래 임포트마다
+`# noqa: E402` 를 붙여야 했다. 린터가 정렬하면 조용히 깨지는 구조였다 — 순서가
+뒤바뀌면 `.env` 를 읽어도 이미 늦어 기본값이 박힌다.
 
 `DATABASE_URL`에 `localhost` 대신 `127.0.0.1`을 쓰는 이유: Windows + Docker Desktop
 조합에서 `localhost`가 IPv6(`::1`)로 먼저 풀리는데 포트 포워딩은 IPv4만 열려 있어
@@ -1384,16 +1534,217 @@ netstat -ano | findstr :5432
 - CI가 이미지 빌드까지만 확인한다. compose 전체를 띄워 `/ready`가 200을 주는지까지
   보면 "문서대로 하면 돌아간다"가 보장되지만, 실행 시간이 늘어난다.
 
-## 배포 전 남은 것
+## 시연용으로 단순화한 부분
 
-지금 상태로 컨테이너는 굴러가지만 실제 배포에는 몇 가지가 더 필요하다.
+포트폴리오 겸 시연용 프로젝트라 의도적으로 단순하게 둔 곳이 있다. 몰라서가 아니라
+범위를 줄인 것이므로, 실서비스라면 어떻게 했을지를 함께 적어둔다.
 
-- **레지스트리 푸시**: CI가 이미지를 빌드만 하고 버린다. ECR에 올리는 단계를 붙여야 한다.
-- **비밀 관리**: `DATABASE_URL`을 compose 파일에 평문으로 두고 있다. 배포에서는
-  Secrets Manager나 SSM 파라미터로 주입해야 한다.
-- **크롤러 실행 방식**: 상시 컨테이너 대신 EventBridge 스케줄 태스크로 띄우면 유휴
-  시간에 브라우저를 안 올려 비용이 크게 준다. 진입점은 준비돼 있다 —
-  태스크 명령을 `python -m app.crawler --once` 로 두면 된다.
+| 지금 | 실서비스라면 |
+|---|---|
+| 계정 2개(`admin`/`client`)를 환경변수에 고정 | 사용자 테이블 + 해시 저장(PBKDF2·bcrypt), 회원가입/비밀번호 변경 |
+| `SESSION_SECRET` 에 시연용 고정 기본값 | 시크릿 매니저에서 주입, 주기적 로테이션 |
+| 세션 = HMAC 서명 쿠키, 서버 측 저장 없음 | Redis 세션 스토어 또는 JWT + 토큰 버저닝(즉시 무효화 가능) |
+| 단일 Postgres 컨테이너 | RDS(Multi-AZ), 백업·PITR |
+| 크롤러 상시 컨테이너 | EventBridge 스케줄 태스크 — 유휴 시간에 브라우저를 안 올려 비용이 크게 준다. 진입점은 이미 있다: `python -m app.crawler --once` |
+| 이미지를 로컬에서 빌드해 서버로 옮김 | CI 에서 레지스트리(GHCR·ECR)에 푸시하고 서버는 pull 만 |
+
+계정을 DB 로 옮기지 않은 이유는 회원가입이 없고 계정이 둘뿐이라서다. 자세한 판단
+근거는 `app/auth.py` 모듈 설명에 있다.
+
+## 인프라 인계
+
+AWS 배포(EC2 프로비저닝 · 네트워크 · 보안그룹 · 부하 테스트)를 맡은 담당자를 위한 절이다.
+이 저장소는 **"이미지와 compose 파일만 있으면 뜨는 상태"**까지를 넘긴다. 아래 순서대로
+하면 서버가 올라간다.
+
+### 넘기는 것
+
+| 항목 | 위치 | 비고 |
+|---|---|---|
+| 배포용 compose | `docker-compose.prod.yml` | 백엔드 3대 + nginx |
+| nginx 설정 | `nginx/` | 설정이 이미지에 구워져 있다 |
+| 환경변수 템플릿 | `.env.prod.example` | 값이 빈 상태. 서버에서 채운다 |
+| 이미지 3종 | `cloudedx-backend` · `cloudedx-crawler` · `cloudedx-nginx` | 아래 "이미지 전달" 참고 |
+
+`.env.prod`(실제 값이 든 파일)는 저장소에 없다. `.gitignore` 에 막혀 있고, 서버에서
+직접 만든다.
+
+### 인스턴스 요구사항
+
+**t3.micro(1GB)는 안 된다.** 크롤러가 Chromium 을 띄우면서 `shm_size: 1gb` 를 잡기
+때문에 그것만으로 메모리가 찬다. 여기에 백엔드 3대 + Postgres + nginx 가 붙는다.
+
+| 구성요소 | 대략 |
+|---|---|
+| 크롤러(Chromium + shm) | ~1.2GB |
+| 백엔드 ×3 | ~450MB |
+| Postgres | ~200MB |
+| nginx | ~20MB |
+
+**t3.small(2GB) 이상**을 권한다. 여유를 두려면 t3.medium.
+
+디스크는 기본 8GB 로도 뜨지만, 크롤러가 30분마다 도는 서비스라 로그가 쌓인다.
+compose 에 로그 로테이션(`max-size: 10m`, `max-file: 3`)을 걸어두었으므로 컨테이너
+로그로 디스크가 차지는 않는다. 다만 이미지 세 개(백엔드 564MB + 크롤러 3.59GB +
+nginx)만으로 4GB 를 넘으므로 **20GB 이상**을 잡는 편이 안전하다.
+
+### 보안그룹
+
+인바운드는 **80** 과 **22** 만 열면 된다.
+
+백엔드(8000)와 Postgres(5432)는 compose 에서 `expose` 만 하고 호스트 포트를 열지
+않는다. 즉 보안그룹에서 실수로 열어두더라도 그 포트에서 듣는 프로세스가 호스트에
+없다 — 방어가 두 겹이다.
+
+### 이미지 전달
+
+CI 가 아직 레지스트리에 올리지 않으므로 현재는 수동이다.
+
+```bash
+# 개발 PC에서
+docker compose -f docker-compose.prod.yml --env-file .env.prod build
+docker save cloudedx-backend:latest cloudedx-crawler:latest cloudedx-nginx:latest \
+  | gzip > cloudedx-images.tar.gz
+scp cloudedx-images.tar.gz ec2-user@<IP>:~/
+
+# 서버에서
+gunzip -c cloudedx-images.tar.gz | docker load
+```
+
+크롤러 이미지가 3.59GB(압축 후 ~1.2GB)라 업로드에 시간이 걸린다.
+
+GHCR 푸시를 CI 에 붙이면 이 단계가 사라진다. 그때는 `.env.prod` 의 이미지 변수만
+바꾸고 `docker compose pull` 하면 된다:
+
+```
+BACKEND_IMAGE=ghcr.io/epqlffltm/cloudedx-backend:main
+CRAWLER_IMAGE=ghcr.io/epqlffltm/cloudedx-crawler:main
+NGINX_IMAGE=ghcr.io/epqlffltm/cloudedx-nginx:main
+```
+
+### 서버에서 할 일
+
+```bash
+# 1. 파일 배치 — 저장소를 통째로 받거나, 아래 세 가지만 있으면 된다
+#    docker-compose.prod.yml / nginx/ / .env.prod.example
+git clone https://github.com/epqlffltm/CloudeDX.git && cd CloudeDX
+
+# 2. 환경변수 작성
+cp .env.prod.example .env.prod
+
+#    시크릿 두 개를 생성해 .env.prod 에 채운다
+openssl rand -base64 24          # POSTGRES_PASSWORD
+openssl rand -hex 32             # SESSION_SECRET
+
+# 3. 구성 검증 — 실행하지 않고 최종 YAML 만 출력한다
+docker compose -f docker-compose.prod.yml --env-file .env.prod config
+
+# 4. 기동
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+docker compose -f docker-compose.prod.yml --env-file .env.prod ps
+```
+
+`SESSION_SECRET` 은 **반드시 채워야 한다.** 비워두면 백엔드 3대가 각자 다른 키로
+세션 쿠키를 서명해서, 요청이 어느 컨테이너로 가느냐에 따라 로그인이 붙었다 풀렸다
+한다. 그래서 미설정 시 아예 기동을 거부하도록 해 두었다(3번 단계에서 걸린다).
+
+### 기동 확인
+
+```bash
+curl http://localhost/nginx-health     # ok      — nginx 자체
+curl http://localhost/ready            # 200     — DB·스키마까지 확인
+curl http://localhost/api/meta         # 수집 상태
+```
+
+`ps` 의 기대 상태:
+
+| 컨테이너 | 상태 | 포트 |
+|---|---|---|
+| `nginx-1` | Up | `0.0.0.0:80->80/tcp` |
+| `backend-1/2/3` | Up (healthy) | `8000/tcp` — **화살표 없음** |
+| `db-1` | Up (healthy) | `5432/tcp` — **화살표 없음** |
+| `migrate-1` | Exited (0) | — |
+| `crawler-1` | Up | — |
+
+backend 와 db 의 포트에 `->` 가 없어야 정상이다. 있으면 호스트에 노출된 것이다.
+
+3대에 분배되는지는 nginx 로그로 본다:
+
+```bash
+for i in $(seq 15); do curl -s http://localhost/health > /dev/null; done
+docker compose -f docker-compose.prod.yml --env-file .env.prod logs nginx --tail 20
+```
+
+```
+172.28.0.1 -> 172.28.0.5:8000 "GET /health HTTP/1.1" 200 0.001s
+172.28.0.1 -> 172.28.0.3:8000 "GET /health HTTP/1.1" 200 0.001s
+172.28.0.1 -> 172.28.0.6:8000 "GET /health HTTP/1.1" 200 0.001s
+```
+
+화살표 오른쪽 IP 가 세 종류로 나오면 분배가 도는 것이다. 완전히 균등하지는 않은데,
+nginx 가 DNS 응답을 10초간 캐시하기 때문이다(`resolver ... valid=10s`). 짧은 시간에
+몰아친 요청은 같은 캐시를 쓴다.
+
+### 흔히 걸리는 것
+
+**`InvalidPasswordError: password authentication failed`**
+`POSTGRES_PASSWORD` 를 바꿨는데 볼륨이 남아 있는 경우다. 이 값들은 볼륨이 비어 있을
+때(최초 기동)만 반영되므로, DB 에는 옛 비밀번호가 그대로다. 데이터를 버려도 되면:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.prod down -v
+```
+
+**`required variable ... is missing a value`**
+`.env.prod` 에 시크릿이 비어 있다. 의도된 동작이다 — 설정 누락 상태로 뜨지 않는다.
+`--env-file` 경로가 맞는지도 확인한다.
+
+**크롤러가 페이지를 열다 죽는다**
+메모리 부족이다. 인스턴스 크기를 올린다.
+
+**`migrate` 가 Exited (1)**
+DB 접속 실패이거나 마이그레이션 오류다. `logs migrate` 를 본다. 이 서비스가 실패하면
+백엔드와 크롤러가 아예 뜨지 않는데(`service_completed_successfully`), 스키마가 준비되기
+전에 트래픽을 받아 500 을 뱉는 것보다 낫다는 판단이다.
+
+### 운영
+
+```bash
+# 로그
+docker compose -f docker-compose.prod.yml --env-file .env.prod logs -f backend
+docker compose -f docker-compose.prod.yml --env-file .env.prod logs -f crawler
+
+# 백엔드만 재시작 (무중단 아님 — 3대가 동시에 내려간다)
+docker compose -f docker-compose.prod.yml --env-file .env.prod restart backend
+
+# 백엔드 대수 조정
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --scale backend=5
+
+# DB 접속 (호스트 포트가 없으므로 컨테이너 안에서)
+docker compose -f docker-compose.prod.yml --env-file .env.prod exec db \
+  psql -U cloudedx -d cloudedx
+```
+
+### TLS
+
+현재 nginx 는 80 만 연다. 종단 위치는 인프라 구성에 달렸다.
+
+- **ALB 에서 종단** — nginx 설정을 건드릴 필요가 없다. 다만 `X-Forwarded-For` 체인이
+  한 단계 길어지므로 `.env.prod` 의 `FORWARDED_ALLOW_IPS` 에 VPC 대역을 추가한다:
+  `FORWARDED_ALLOW_IPS=172.28.0.0/16,10.0.0.0/16`
+- **nginx 에서 종단** — certbot 으로 인증서를 받고 `nginx/nginx.conf` 에 443 server
+  블록을 추가한 뒤 이미지를 다시 빌드한다. 설정이 이미지에 구워져 있어 서버에서
+  파일만 고치는 방식은 통하지 않는다.
+
+### 남은 것 (저장소 쪽)
+
+- **레지스트리 푸시**: CI 가 이미지를 빌드만 하고 버린다. GHCR 에 올리는 단계를 붙이면
+  위의 수동 전달이 사라진다.
+
+**해결된 것** — 비밀 관리: `DATABASE_URL` 을 compose 에 평문으로 두던 것을
+`POSTGRES_*` 조립으로 바꾸고, 배포 구성에서는 `:?` 로 미설정 시 기동을 거부하게 했다.
+`.env.prod` 는 `.gitignore` 의 `.env.*` 규칙에 걸려 커밋되지 않으며,
+`.env.prod.example`(값이 빈 템플릿)만 `!` 예외로 통과한다.
 
 ## 스택
 
