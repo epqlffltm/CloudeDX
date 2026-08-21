@@ -43,7 +43,21 @@ USER appuser
 
 EXPOSE 8000
 
+# ---------------------------------------------------------------------------
 # --proxy-headers: ALB나 nginx 뒤에 있을 때 원래 클라이언트 IP와 프로토콜을 살린다.
-CMD ["uvicorn", "app.main:app", \
-     "--host", "0.0.0.0", "--port", "8000", \
-     "--proxy-headers", "--forwarded-allow-ips", "*"]
+#
+# --forwarded-allow-ips 는 "누가 보낸 X-Forwarded-For 를 믿을지"를 정한다.
+# 이 헤더는 누구나 붙일 수 있으므로, 아무나 믿으면 클라이언트가 자기 IP를
+# 마음대로 위조할 수 있다. 접속 로그가 오염되고 IP 기반 제한도 무의미해진다.
+#
+# 기본값을 * 로 둔 것은 로컬 개발 편의 때문이다. 배포에서는 compose가
+# FORWARDED_ALLOW_IPS 로 프록시 대역만 지정해 덮어쓴다.
+#
+# 셸 형식(exec 형식이 아닌)으로 쓰는 이유는 환경변수 치환이 필요해서다.
+# exec 형식(JSON 배열)에서는 ${VAR} 가 문자 그대로 전달된다.
+# ---------------------------------------------------------------------------
+ENV FORWARDED_ALLOW_IPS=*
+
+CMD uvicorn app.main:app \
+    --host 0.0.0.0 --port 8000 \
+    --proxy-headers --forwarded-allow-ips "$FORWARDED_ALLOW_IPS"

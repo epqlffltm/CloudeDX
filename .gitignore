@@ -10,7 +10,10 @@ venv/
 # Environment variables
 .env
 .env.*
+# 값이 비어 있는 템플릿만 예외로 되살린다. .env.* 규칙이 실제 시크릿이 든
+# .env.prod 를 계속 막아주고, example 만 통과한다.
 !.env.example
+!.env.prod.example
 
 # IDE
 .idea/
