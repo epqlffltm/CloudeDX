@@ -1,0 +1,98 @@
+# docker-compose.crawler.yml
+name: reluxe-crawler
+#
+# 수집 계층. 크롤링 인스턴스(t3.medium) 한 대에서만 돈다.
+#
+#     docker compose -f docker-compose.crawler.yml --env-file .env.crawler up -d
+#
+# 이중화하지 않는다. 사용자 트래픽을 받지 않는 배치이고, 여러 대가 같은 사이트를
+# 동시에 긁으면 대상 서버 요청이 배수가 되어 차단 위험만 커진다. ASG min·max 를 1 로
+# 고정해 동시 실행은 막고 자동 복구는 되게 한다.
+#
+# 파이프라인에서 이 인스턴스의 위치:
+#
+#     [크롤러] → 정제 → DB ← 백엔드 → 프론트 → 사용자
+#      여기
+#
+# 즉 이쪽이 멈추면 사용자 화면은 계속 뜨지만 데이터가 늘지 않는다. 조용한 실패라
+# 감시가 필요하다 — 아래 "실패가 보이지 않는 문제" 참고.
+
+networks:
+  reluxe:
+    ipam:
+      config:
+        - subnet: 172.29.0.0/16
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  crawler:
+    image: ${CRAWLER_IMAGE:-reluxe-crawler:latest}
+    environment:
+      # 웹 계층과 같은 DB 를 본다. 여기도 Route 53 이름을 쓰므로 주 DB 전환 시
+      # 이 설정을 건드릴 필요가 없다.
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL 을 .env.crawler 에 설정하세요}
+
+      CRAWL_INTERVAL_MINUTES: ${CRAWL_INTERVAL_MINUTES:-30}
+      CRAWL_RETRY_MINUTES: ${CRAWL_RETRY_MINUTES:-5}
+      CRAWL_RUN_TIMEOUT_MINUTES: ${CRAWL_RUN_TIMEOUT_MINUTES:-60}
+      JOONGNA_PAGES_PER_BRAND: ${JOONGNA_PAGES_PER_BRAND:-3}
+      BUNJANG_PAGES_PER_JOB: ${BUNJANG_PAGES_PER_JOB:-3}
+      MISSING_THRESHOLD: ${MISSING_THRESHOLD:-3}
+
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: json
+
+    # -------------------------------------------------------------------
+    # Chromium 은 탭마다 공유 메모리를 쓰는데 컨테이너 기본 /dev/shm 이 64MB 뿐이라
+    # 페이지를 열다 죽는다. --disable-dev-shm-usage 로 우회할 수도 있지만 디스크를
+    # 대신 쓰게 되어 느려지므로, 메모리를 늘려주는 쪽을 택한다.
+    #
+    # 이 1GB 때문에 인스턴스가 t3.medium 이다. t3.micro(1GB)로는 이것만으로 찬다.
+    # -------------------------------------------------------------------
+    shm_size: 1gb
+
+    volumes:
+      # 수집 결과 JSON 덤프(디버깅용). DB 가 정본이라 없어도 동작한다.
+      - reluxe_crawler_data:/srv/data
+
+    # -------------------------------------------------------------------
+    # DB 가 아직 안 떠 있을 때.
+    #
+    # 같은 compose 안에 있을 때는 depends_on 으로 순서가 보장됐지만, 인스턴스가
+    # 갈리면서 그 보장이 사라졌다. 크롤러가 먼저 뜨면 wait_for_db 가 몇 번
+    # 재시도하다 포기하고 프로세스가 종료된다.
+    #
+    # unless-stopped 는 그때 컨테이너를 다시 띄운다. DB 가 준비되면 결국 붙으므로
+    # 이것으로 충분하다 — 재시도 로직을 앱에 더 넣는 것보다 단순하다.
+    # -------------------------------------------------------------------
+    restart: unless-stopped
+
+    networks:
+      - reluxe
+    logging: *default-logging
+
+    # -------------------------------------------------------------------
+    # 헬스체크를 두지 않는다.
+    #
+    # 크롤러는 HTTP 를 열지 않아 찔러볼 엔드포인트가 없다. 프로세스가 살아있는지는
+    # 컨테이너 상태로 알 수 있지만, 정작 중요한 것은 "수집이 실제로 되고 있는가"다.
+    # 프로세스는 멀쩡한데 대상 사이트 구조가 바뀌어 0건씩 긁어오는 상태가 가장
+    # 위험하고, 그건 헬스체크로 잡히지 않는다.
+    #
+    # ── 실패가 보이지 않는 문제 ──
+    # 이 인스턴스가 멈춰도 사용자 화면은 정상이다. DB 에 있던 데이터를 백엔드가
+    # 계속 서빙하기 때문이다. 며칠 지나서야 "매물이 안 늘어난다"로 발견된다.
+    #
+    # 그래서 감시는 컨테이너가 아니라 데이터 신선도로 한다:
+    #   GET /api/meta  →  마지막 수집 시각
+    # 이 값이 2시간 이상 갱신되지 않으면 경보를 낸다(설계상 "주의" 등급).
+    # 수집 결과는 crawl_runs 테이블에도 남으므로 사후 추적이 가능하다.
+    # -------------------------------------------------------------------
+
+volumes:
+  reluxe_crawler_data:

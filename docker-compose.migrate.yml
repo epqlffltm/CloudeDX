@@ -1,0 +1,52 @@
+# docker-compose.migrate.yml
+name: reluxe-migrate
+#
+# 스키마 마이그레이션. 운영 서버에서 배포 스크립트가 한 번만 호출한다.
+#
+#     docker compose -f docker-compose.migrate.yml --env-file .env.migrate \
+#         run --rm migrate
+#
+# up 이 아니라 run --rm 을 쓰는 이유:
+#   - 종료 코드가 그대로 셸에 전달된다. 실패하면 배포를 멈출 수 있다.
+#   - 컨테이너가 남지 않는다. 배포마다 하나씩 쌓이지 않는다.
+#
+# ---------------------------------------------------------------------------
+# 왜 웹 compose 에 넣지 않는가
+# ---------------------------------------------------------------------------
+#
+# 1. 동시 실행. 웹서버 3대에 같은 compose 를 배포하면 세 대가 각자
+#    alembic upgrade head 를 돌린다. Alembic 이 락을 잡긴 하지만 경합이 생기고,
+#    밀린 쪽이 실패하면 그 서버만 뜨지 않는 애매한 상태가 된다.
+#
+# 2. 배포 순서. 스키마 변경이 있는 배포는 "마이그레이션 → 앱 순차 교체" 순서여야
+#    한다. 웹 compose 안에 있으면 1번 서버가 새 코드로 뜨면서 마이그레이션이
+#    함께 도는데, 그 시점에 2·3번 서버는 아직 옛 코드로 새 스키마를 만난다.
+#
+# 3. 실패 처리. 배포 스크립트에서 돌면 실패가 곧 배포 중단이다. 웹 compose 안에
+#    있으면 3대 중 1대만 실패하고 나머지는 뜬다.
+#
+# 4. ASG. 웹서버는 자동 대체 기동 대상이다. 새 인스턴스가 뜰 때마다 마이그레이션이
+#    도는 것은 의도한 동작이 아니다.
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  migrate:
+    # 백엔드와 같은 이미지를 쓴다. alembic 과 모델 정의가 이미 들어 있어
+    # 별도 이미지를 만들 이유가 없다.
+    image: ${BACKEND_IMAGE:-reluxe-backend:latest}
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      # 운영 서버도 웹·크롤러와 같은 Route 53 이름으로 붙는다.
+      # 주 DB 전환 후 배포한다면 이 이름이 이미 대기 DB(승격됨)를 가리킨다.
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL 을 .env.migrate 에 설정하세요}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: json
+    logging: *default-logging
+    # run --rm 으로 쓰므로 restart 정책이 의미 없다. 실패하면 다시 돌리는 것은
+    # 배포 스크립트의 판단이지 도커의 판단이 아니다.
+    restart: "no"

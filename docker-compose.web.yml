@@ -1,0 +1,134 @@
+# docker-compose.web.yml
+name: reluxe-web
+#
+# 웹 계층. 웹서버 3대(AZ당 1대)에 **동일하게** 배포된다.
+#
+#     docker compose -f docker-compose.web.yml --env-file .env.web up -d
+#
+# 이 파일에 없는 것들:
+#
+#   db       별도 인스턴스(주/대기 스트리밍 복제)에 있다. DATABASE_URL 로만 붙는다.
+#   crawler  별도 인스턴스. docker-compose.crawler.yml 참고.
+#   migrate  운영 서버에서 배포 스크립트가 한 번만 돌린다.
+#            docker-compose.migrate.yml 참고 — 웹서버 3대가 각자 마이그레이션을
+#            돌리면 같은 리비전을 두고 락 경합이 일어난다.
+#
+# 로컬에서 전체를 한 번에 띄워보려면 docker-compose.prod.yml 을 쓴다.
+
+# ---------------------------------------------------------------------------
+# 컨테이너 네트워크 대역 고정.
+#
+# uvicorn 의 --forwarded-allow-ips 에 "신뢰할 프록시 대역"을 적어야 하는데,
+# 도커가 알아서 잡게 두면 172.17~172.31 중 어디가 될지 모른다. 못 박아두면
+# 백엔드가 "이 대역에서 온 nginx 만 믿는다"고 선언할 수 있다.
+# ---------------------------------------------------------------------------
+networks:
+  reluxe:
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  # ---------------------------------------------------------------------------
+  # nginx — ALB 와 백엔드 사이.
+  #
+  # 분산은 ALB 가 3대에 대해 하고, 이 nginx 는 자기 서버의 백엔드 1대 앞에 선다.
+  # 그래도 두는 이유:
+  #   - 보안 헤더를 한 곳에서 붙인다
+  #   - 요청 단위 액세스 로그의 정본 (uvicorn 액세스 로그는 꺼져 있다)
+  #   - 백엔드가 재시작 중일 때 502 대신 짧게 대기시킬 수 있다
+  #   - 나중에 정적 파일을 nginx 가 직접 내보내도록 바꿀 여지
+  # ---------------------------------------------------------------------------
+  nginx:
+    build:
+      context: ./nginx
+    image: ${WEB_IMAGE:-reluxe-web:latest}
+    ports:
+      # ALB 만 이 포트로 들어온다(웹 SG 인바운드 80 = ALB SG 에서만).
+      # 웹서버에는 공인 IP 가 없으므로 인터넷에서 직접 닿을 경로가 없다.
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - reluxe
+    logging: *default-logging
+    restart: unless-stopped
+
+  backend:
+    image: ${BACKEND_IMAGE:-reluxe-backend:latest}
+    # 이 서버에서는 1대다. 수평 확장은 ASG 가 인스턴스 단위로 한다.
+    # 한 호스트에 여러 대를 띄우면 t3.small(2GB) 에서 메모리가 빠듯하고,
+    # ALB 분산 위에 nginx 분산이 겹쳐 어느 쪽이 문제인지 가리기 어려워진다.
+    expose:
+      - "8000"
+    environment:
+      # -----------------------------------------------------------------
+      # DB 접속.
+      #
+      # 조립하지 않고 통째로 받는다. Route 53 프라이빗 호스팅 영역의
+      # db.reluxe.internal 을 가리키므로, 주 DB 장애 시 그 레코드만 대기 DB 로
+      # 바꾸면 애플리케이션 설정을 건드리지 않아도 된다.
+      #
+      # 전환이 실제로 먹으려면 앱이 죽은 커넥션을 붙잡고 있으면 안 되는데,
+      # engine.py 에 pool_pre_ping=True 가 걸려 있어 체크아웃할 때마다 살아있는지
+      # 확인하고 죽었으면 새로 맺는다. 그 시점에 DNS 를 다시 조회한다.
+      # -----------------------------------------------------------------
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL 을 .env.web 에 설정하세요}
+
+      # 수집은 크롤링 인스턴스가 전담한다. 여기서 켜면 웹서버 3대가 각자 긁게 되고,
+      # 애초에 이 이미지에는 Playwright 가 없어 시작하지도 못한다.
+      ENABLE_CRAWLER: "false"
+
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: json
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+
+      # -----------------------------------------------------------------
+      # 세션 서명 키 — 웹서버 3대가 반드시 같은 값을 써야 한다.
+      #
+      # 로그인 상태는 서버에 저장되지 않고 HMAC 으로 서명한 쿠키에만 담긴다.
+      # 서버 측 세션 저장소가 없으므로 ALB 스티키 세션은 필요 없지만, 그건
+      # "3대가 같은 키로 서명한다"는 전제 위에서만 성립한다.
+      #
+      # 키가 서로 다르면 ALB 가 요청을 다른 서버로 보낼 때마다 쿠키 검증이
+      # 실패해 로그인이 붙었다 풀렸다 한다. 증상은 앱 버그처럼 보이지만 원인은
+      # 배포 설정이고, 3대로 흩어져 있으면 재현조차 어렵다.
+      #
+      # 비워두면 config.py 가 프로세스마다 임의 키를 만들므로, 미설정 시
+      # 기동을 거부한다.
+      # -----------------------------------------------------------------
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET 을 .env.web 에 설정하세요 — 3대 모두 같은 값}
+      SESSION_MAX_AGE_SECONDS: ${SESSION_MAX_AGE_SECONDS:-43200}
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-5242880}
+
+      # -----------------------------------------------------------------
+      # X-Forwarded-For 를 믿어줄 대역.
+      #
+      # 체인이 두 단계다:  클라이언트 → ALB → nginx → uvicorn
+      # ALB 가 X-Forwarded-For 에 클라이언트 IP 를 넣고, nginx 가 거기에 ALB 의
+      # 사설 IP 를 이어 붙인다. uvicorn 이 원래 클라이언트를 찾으려면 중간 홉을
+      # 건너뛰어야 하므로, 도커 대역(nginx)과 VPC 대역(ALB) 둘 다 신뢰해야 한다.
+      #
+      # 이 헤더는 누구나 붙일 수 있다. 대역을 좁히지 않으면 클라이언트가 자기 IP 를
+      # 위조할 수 있어 접속 로그가 오염되고 IP 기반 제한도 무의미해진다.
+      # -----------------------------------------------------------------
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-172.28.0.0/16,10.0.0.0/16}
+    healthcheck:
+      # nginx 의 depends_on 기준. DB 와 스키마까지 확인하는 /ready 를 본다.
+      # ALB 의 헬스체크 대상도 /ready 다(10초 간격, 2회 실패 시 제외).
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/ready').status==200 else 1)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - reluxe
+    logging: *default-logging
+    restart: unless-stopped
