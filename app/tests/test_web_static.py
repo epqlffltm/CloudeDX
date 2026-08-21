@@ -28,19 +28,48 @@ async def test_root_serves_frontend(client):
 
 async def test_static_assets_served(client):
     """
-    번들 자산이 서빙된다.
+    화면이 참조하는 자산이 실제로 서빙된다.
 
-    프론트가 Vite 빌드 산출물로 바뀌면서 파일명에 해시가 붙는다
-    (assets/index-XXXXXXXX.js). 파일명을 박아두면 빌드할 때마다 테스트가
-    깨지므로, index.html이 참조하는 경로를 읽어서 그것을 요청한다.
+    프론트는 번들러를 거치지 않고 소스를 그대로 내보낸다. index.html이
+    <script type="module" src="js/main.js"> 로 ES 모듈을 직접 부르고, 페이지마다
+    필요한 스크립트(admin.js, login.js)만 로드하는 구조다.
+
+    파일명을 테스트에 박아두면 프론트를 손볼 때마다 함께 깨지므로, index.html이
+    실제로 참조하는 경로를 읽어서 그것을 요청한다. 참조는 상대 경로라 앞에
+    슬래시를 붙여 mount 지점 기준으로 만든다.
+
+    외부 호스트(폰트 CDN)와 SVG 내부 앵커(href="#i-crown")는 제외한다 — 서빙
+    대상이 아니다.
     """
     html = (await client.get("/")).text
-    refs = re.findall(r'(?:src|href)="(/assets/[^"]+)"', html)
 
-    assert refs, "index.html이 번들 자산을 참조하지 않는다"
+    refs = [
+        ref
+        for ref in re.findall(r'(?:src|href)="([^"]+)"', html)
+        if not ref.startswith(("http://", "https://", "//", "#", "data:"))
+        # href="./" 같은 자기 참조 링크는 자산이 아니다.
+        and re.search(r"\.(css|js|mjs|svg|png|webp|ico)$", ref)
+    ]
+
+    assert refs, "index.html이 로컬 자산을 참조하지 않는다"
 
     for ref in refs:
-        assert (await client.get(ref)).status_code == 200, ref
+        path = ref if ref.startswith("/") else f"/{ref}"
+        assert (await client.get(path)).status_code == 200, path
+
+
+async def test_module_entrypoint_is_served(client):
+    """
+    진입점 스크립트가 서빙된다.
+
+    위 테스트는 "참조된 것이 전부 200"을 보지만, 참조가 하나도 없어도(정규식이
+    아무것도 못 잡아도) 조용히 넘어갈 수 있는 구조는 아니다 — assert refs 가
+    막는다. 다만 진입점만은 이름이 바뀌면 화면 전체가 죽으므로 따로 못 박는다.
+    """
+    res = await client.get("/js/main.js")
+
+    assert res.status_code == 200
+    assert "javascript" in res.headers["content-type"]
 
 
 async def test_api_not_shadowed_by_mount(client, session):
