@@ -58,6 +58,10 @@ EXPOSE 8000
 # ---------------------------------------------------------------------------
 ENV FORWARDED_ALLOW_IPS=*
 
-CMD uvicorn app.main:app \
+CMD exec uvicorn app.main:app \
     --host 0.0.0.0 --port 8000 \
     --proxy-headers --forwarded-allow-ips "$FORWARDED_ALLOW_IPS"
+# exec 를 붙여 sh 프로세스를 uvicorn 으로 교체한다. 붙이지 않으면 PID 1 이 sh 가
+# 되고 uvicorn 은 그 자식이 되는데, sh 는 받은 SIGTERM 을 자식에게 전달하지 않는다.
+# 도커가 정지 신호를 보내도 uvicorn 이 못 받아 10초 뒤 SIGKILL 로 강제 종료되고,
+# 처리 중이던 요청이 끊긴다. ALB 등록 취소 지연 30초를 둔 의미가 사라진다.
