@@ -22,7 +22,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import repository
-from app.db.engine import get_session
+from app.db.engine import get_read_session
 from app.db.models import ItemRecord
 from app.domain.brands import LUXURY_BRANDS
 from app.domain.sources import SOURCES
@@ -114,7 +114,7 @@ def _to_view(item: ItemRecord) -> dict:
 async def board_list(
     request: Request,
     filters: Annotated[CrawledItemFilterParams, Query()],
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_session)],
 ):
     """수집한 매물을 목록으로 보여준다. 제목을 누르면 상세로 이동한다."""
     total = await repository.count_items(session, filters)
@@ -154,7 +154,7 @@ async def board_list(
 async def board_detail(
     request: Request,
     item_id: int,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_session)],
 ):
     """
     매물 단건 상세.

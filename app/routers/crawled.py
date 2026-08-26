@@ -22,7 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import repository
-from app.db.engine import get_session
+from app.db.engine import get_read_session
 from app.schemas.requests import CrawledItemFilterParams
 from app.schemas.responses import CrawledItemListResponse, CrawledItemOut
 
@@ -38,7 +38,7 @@ router = APIRouter(prefix="/crawled-items", tags=["crawled-items"])
 )
 async def get_crawled_items(
     filters: Annotated[CrawledItemFilterParams, Query()],
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_session)],
 ):
     """
     저장된 매물을 수집처/브랜드/검색어/가격/판매상태로 필터링해서 반환한다.
@@ -69,7 +69,7 @@ async def get_crawled_items(
 )
 async def get_crawled_item(
     item_id: int,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_session)],
 ):
     """id 기준 단건 조회. id는 크롤링이 다시 돌아도 바뀌지 않는다."""
     row = await repository.get_item(session, item_id)

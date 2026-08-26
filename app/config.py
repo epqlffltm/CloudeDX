@@ -68,6 +68,49 @@ def _bool_env(name: str, default: bool) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# 실행 환경
+# ---------------------------------------------------------------------------
+#
+# 로컬/CI와 운영에서 규칙이 갈리는 값이 있다. 대표적으로 비밀값이다 — 로컬에서는
+# .env 없이도 떠야 개발이 되고, 운영에서는 값이 없으면 아예 뜨지 않아야 한다.
+#
+# 그 분기를 각 값마다 따로 판단하지 않고 여기 한 곳에서 정한다. compose 배포에서는
+# docker-compose.web.yml 의 `:?` 가 같은 일을 하지만, 쿠버네티스에서는 매니페스트가
+# 그걸 대신해주지 않는다. 그래서 판단을 애플리케이션 안으로 들여온다.
+
+APP_ENV = os.getenv("APP_ENV", "local").strip().lower() or "local"
+
+IS_PRODUCTION = APP_ENV == "production"
+
+
+def _secret_env(name: str, local_default: str, *, hint: str = "") -> str:
+    """
+    비밀값을 읽는다. 운영에서 비어 있으면 기동을 거부한다.
+
+    로컬/CI에서는 기본값으로 조용히 진행한다. 운영에서 같은 관용을 베풀면 안 되는
+    이유는 증상이 늦게 나타나기 때문이다 — SESSION_SECRET 이 파드마다 다르면
+    "로그인이 됐다 안 됐다 하는" 버그로 보이고, 파드 3개에 흩어져 있으면 재현조차
+    어렵다. 기본 비밀번호로 뜬 서비스는 아예 아무 증상도 없다.
+
+    RuntimeError 를 여기서 올리면 프로세스가 임포트 단계에서 죽는다. 쿠버네티스는
+    CrashLoopBackOff 로 보여주고 로그에 이유가 남는다 — 잘못된 설정으로 트래픽을
+    받는 것보다 낫다.
+    """
+    raw = os.getenv(name, "").strip()
+
+    if raw:
+        return raw
+
+    if IS_PRODUCTION:
+        raise RuntimeError(
+            f"APP_ENV=production 인데 {name} 이 비어 있습니다. "
+            f"기동을 중단합니다.{' ' + hint if hint else ''}"
+        )
+
+    return local_default
+
+
+# ---------------------------------------------------------------------------
 # DB
 # ---------------------------------------------------------------------------
 
@@ -78,6 +121,24 @@ DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql+asyncpg://cloudedx:cloudedx@127.0.0.1:5432/cloudedx",
 )
+
+# 읽기 전용 접속 주소(RDS 읽기 복제본).
+#
+# 비워두면 DATABASE_URL 로 떨어진다 — 로컬과 CI에는 DB가 하나뿐이고, 그 환경에서
+# 읽기 경로가 따로 노는 것은 검증 가치가 없다. 두 값이 같으면 엔진도 새로 만들지
+# 않고 쓰기 엔진을 그대로 재사용한다(app/db/engine.py). 커넥션 풀이 두 벌 생기는
+# 것을 막기 위해서다.
+DATABASE_RO_URL = os.getenv("DATABASE_RO_URL", "").strip() or DATABASE_URL
+
+# 읽기 복제본 접속에 실패했을 때, 다시 시도하기까지 쓰기 엔진으로 보낼 시간(초).
+#
+# 복제본 장애는 요청 단위가 아니라 분 단위로 지속되는 사건이다. 매 요청마다 죽은
+# 복제본에 붙어보고 10초(connect timeout)를 버리면 폴백이 있으나 마나 한 상태가
+# 된다. 한 번 실패하면 이 시간 동안은 시도 자체를 건너뛴다.
+#
+# 짧게 잡으면 복제본이 돌아왔을 때 빨리 복귀하고, 길게 잡으면 장애 중 낭비가 줄어든다.
+# 30초면 복제본 재기동(수 분)에 비해 충분히 짧고, 요청당 비용도 거의 없다.
+READ_FALLBACK_COOLDOWN_SECONDS = _int_env("READ_FALLBACK_COOLDOWN_SECONDS", 30, minimum=1)
 
 # ---------------------------------------------------------------------------
 # 크롤러
@@ -147,25 +208,61 @@ LOG_FORMAT = os.getenv("LOG_FORMAT", "text").strip().lower() or "text"
 # 계정이 둘뿐이고 회원가입이 없어서 DB 테이블 대신 설정에 둔다. 자세한 이유는
 # app/auth.py의 모듈 설명을 참고한다.
 #
-# 배포에서는 반드시 .env로 덮어쓴다. 기본값은 로컬 시연 편의를 위한 것이다.
+# 로컬에서는 .env 없이도 뜨도록 기본값을 둔다. 운영(APP_ENV=production)에서는
+# 비밀값이 비어 있으면 _secret_env 가 기동을 거부한다.
 
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin").strip() or "admin"
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin1234")
+ADMIN_PASSWORD = _secret_env(
+    "ADMIN_PASSWORD",
+    "admin1234",
+    hint="Secrets Manager 에서 주입되는 값입니다.",
+)
 
 CLIENT_USERNAME = os.getenv("CLIENT_USERNAME", "client").strip() or "client"
-CLIENT_PASSWORD = os.getenv("CLIENT_PASSWORD", "client1234")
+CLIENT_PASSWORD = _secret_env(
+    "CLIENT_PASSWORD",
+    "client1234",
+    hint="Secrets Manager 에서 주입되는 값입니다.",
+)
 
 # 세션 쿠키 서명 키.
 #
 # 지정하지 않으면 프로세스마다 임의로 만든다. 서버를 재시작하면 기존 로그인이
 # 전부 풀리고, 인스턴스를 여러 개 띄우면 서로의 쿠키를 인정하지 않는다.
-# 시연에서는 그래도 되지만, 배포에서는 반드시 고정값을 넣는다.
+# 로컬 시연에서는 그래도 되지만, 파드가 3개인 운영에서는 로그인이 사실상 동작하지
+# 않는다 — 그래서 운영에서는 미설정 시 기동을 거부한다.
 #     python -c "import secrets; print(secrets.token_hex(32))"
-SESSION_SECRET = os.getenv("SESSION_SECRET", "").strip() or secrets.token_hex(32)
+SESSION_SECRET = _secret_env(
+    "SESSION_SECRET",
+    secrets.token_hex(32),
+    hint="파드 3개가 같은 값을 써야 합니다.",
+)
 
 # 로그인 유지 시간. 기본 12시간.
 SESSION_MAX_AGE_SECONDS = _int_env("SESSION_MAX_AGE_SECONDS", 12 * 60 * 60, minimum=60)
 
+# 세션 쿠키에 Secure 플래그를 붙일지 여부.
+#
+# 붙이면 브라우저가 HTTPS 연결에서만 쿠키를 보낸다. 로컬은 http://localhost 라
+# 켜면 로그인이 아예 안 되므로 기본값을 APP_ENV 에 맡긴다.
+#
+# request.url.scheme 으로 판단하지 않는 이유: TLS 는 ALB/CloudFront 에서 끝나고
+# 그 뒤 구간은 평문 HTTP 다. 앱이 보는 scheme 은 --proxy-headers 를 켜도
+# X-Forwarded-Proto 에 의존하는데, 그 헤더는 신뢰 대역 설정이 어긋나면 조용히
+# 틀린 값이 된다. 쿠키 보안 속성을 그런 값에 걸어두고 싶지 않다.
+COOKIE_SECURE = _bool_env("COOKIE_SECURE", IS_PRODUCTION)
+
 # CSV 업로드 한 번에 받을 최대 바이트. 기본 5MB.
-# 이 선이 없으면 실수로 올린 수백 MB 파일이 그대로 메모리에 올라온다.
+# 본문을 읽는 도중에 이 선을 넘으면 그 자리에서 끊는다 — 다 읽은 뒤에 재고 거절하면
+# 막으려던 파일이 이미 메모리에 올라와 있다(app/routers/uploads.py 참고).
 MAX_UPLOAD_BYTES = _int_env("MAX_UPLOAD_BYTES", 5 * 1024 * 1024, minimum=1024)
+
+# 쓰기 경로가 DB를 붙잡고 있을 수 있는 최대 시간(초).
+#
+# 주 DB가 페일오버하는 동안 업로드 요청은 어차피 성공하지 못한다. 제한이 없으면
+# 커넥션 타임아웃까지 매달려 워커를 붙잡고, 그 사이 살아 있는 조회 경로까지
+# 대기가 생긴다. 빨리 503으로 끊고 다시 시도하게 하는 편이 낫다.
+#
+# connect timeout(10초)보다는 넉넉해야 한다 — 그보다 짧게 잡으면 정상적인
+# 재연결까지 잘라내서, DB가 멀쩡한데도 업로드가 실패한다.
+WRITE_TIMEOUT_SECONDS = _int_env("WRITE_TIMEOUT_SECONDS", 15, minimum=1)

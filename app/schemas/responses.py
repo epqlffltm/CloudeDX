@@ -228,5 +228,13 @@ class ReadyResponse(BaseModel):
     """
 
     ready: bool = Field(description="트래픽을 받아도 되는 상태인지")
-    database: DatabaseCheck
+    database: DatabaseCheck = Field(
+        description="읽기 경로 확인 결과. ready 판정의 기준이다"
+    )
+    database_write: DatabaseCheck = Field(
+        description=(
+            "쓰기 경로(주 DB) 확인 결과. 참고용이며 ready 판정에는 넣지 않는다 — "
+            "주 DB가 죽어도 조회는 복제본으로 계속되므로 파드를 뺄 이유가 없다"
+        )
+    )
     migration: MigrationCheck

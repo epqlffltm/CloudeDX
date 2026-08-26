@@ -6,6 +6,7 @@
 파이프라인은 하나다: 크롤러가 수집 -> DB(items 테이블)에 upsert -> 그 DB를 서빙.
 서빙 경로는 이렇게 나뉜다.
     /health, /ready     운영용 상태 확인 (app/routers/health.py의 설명 참고)
+    /metrics            Prometheus 지표 (클러스터 내부 수집용)
     /board              Jinja2로 그린 게시판 화면 (목록 -> 제목 클릭 -> 상세)
     /api/crawled-items  같은 데이터를 주는 JSON API
     /api/meta           필터 선택지와 수집 현황
@@ -53,9 +54,16 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from prometheus_fastapi_instrumentator import Instrumentator
 
-from app.config import ALLOWED_ORIGINS, API_PREFIX, DATABASE_URL, ENABLE_CRAWLER
-from app.db.engine import mask_url, wait_for_db
+from app.config import (
+    ALLOWED_ORIGINS,
+    API_PREFIX,
+    DATABASE_RO_URL,
+    DATABASE_URL,
+    ENABLE_CRAWLER,
+)
+from app.db.engine import engine, mask_url, read_engine, wait_for_db
 from app.logging_config import setup_logging
 from app.routers.admin import router as admin_router
 from app.routers.auth import router as auth_router
@@ -120,9 +128,29 @@ def _start_crawler() -> asyncio.Task | None:
 async def lifespan(app: FastAPI):
     # 테이블을 만들지는 않는다 — 스키마는 Alembic이 관리한다. 여기서는 DB가 응답하는지만
     # 확인하고, 컨테이너가 아직 기동 중이면 잠깐 기다린다.
-    logger.info("연결 확인 중... (%s)", mask_url(DATABASE_URL))
-    await wait_for_db()
+    #
+    # 기동을 막는 기준은 **읽기 경로**다. 조회가 이 서비스 트래픽의 대부분이고,
+    # 그것조차 안 되는 파드는 떠 봐야 할 일이 없다.
+    logger.info("연결 확인 중... (%s)", mask_url(DATABASE_RO_URL))
+    await wait_for_db(read_engine)
     logger.info("연결 확인 완료")
+
+    # 주 DB는 확인하되 기동을 막지 않는다.
+    #
+    # 페일오버 중에 파드가 새로 뜨는 경우가 있다 — 노드 교체, 스케일 아웃, 앞선
+    # 파드의 재시작. 여기서 예외를 올리면 그 파드는 CrashLoopBackOff 로 빠지고,
+    # 복제본이 멀쩡한데도 조회를 서빙하지 못한다. 읽기/쓰기를 나눠놓고 기동에서
+    # 다시 묶어버리는 셈이다.
+    #
+    # 주 DB가 없는 상태는 /ready 의 database_write 와 업로드 요청의 실패로 드러난다.
+    if read_engine is not engine:
+        try:
+            await wait_for_db(engine, retries=2)
+        except RuntimeError:
+            logger.warning(
+                "주 DB에 연결하지 못했습니다 (%s). 조회는 계속하고 쓰기만 실패합니다.",
+                mask_url(DATABASE_URL),
+            )
 
     crawler_task: asyncio.Task | None = None
 
@@ -171,6 +199,32 @@ app.include_router(products_router, prefix=API_PREFIX)
 app.include_router(auth_router, prefix=API_PREFIX)
 app.include_router(admin_router, prefix=API_PREFIX)
 app.include_router(uploads_router, prefix=API_PREFIX)
+
+# ---------------------------------------------------------------------------
+# Prometheus 지표 — /metrics
+#
+# 노드/컨테이너 지표만으로는 사용자 관점을 볼 수 없다. 노드 CPU 그래프는 "DB가
+# 죽는 동안에도 조회는 200을 뱉었다"를 보여주지 못한다. 요청 수·지연·상태 코드를
+# 경로별로 남겨야 그 문장이 그래프가 된다.
+#
+# 여기서 붙이는 이유는 등록 순서 때문이다. 아래 StaticFiles mount 가 "/" 를 통째로
+# 가져가므로, /metrics 는 반드시 그 앞에서 등록돼야 한다.
+#
+# 경로 라벨은 raw path 가 아니라 라우트 템플릿으로 나간다(/board/{item_id}).
+# raw path 로 두면 매물 id 하나마다 시계열이 하나씩 생겨서 카디널리티가 터진다.
+#
+# 읽기/쓰기 구분은 여기가 아니라 app/db/engine.py 의 cloudedx_db_session_total 이
+# 담당한다. HTTP 지표는 "요청이 성공했는가"만 알고, 그 요청이 복제본 덕에 성공한
+# 것인지는 모르기 때문이다.
+#
+# 주의 — 이 엔드포인트는 앱과 같은 포트(8000)에 붙는다. Ingress 가 "/" 를 백엔드로
+# 보내는 이상 외부에서도 열린다. 차단은 Ingress 규칙에서 해야 하고, ServiceMonitor
+# 설정만으로는 막히지 않는다.
+# ---------------------------------------------------------------------------
+Instrumentator(
+    # 헬스체크는 몇 초마다 오므로 지표에 섞이면 실제 트래픽 그래프가 묻힌다.
+    excluded_handlers=["/metrics", "/health", "/ready"],
+).instrument(app).expose(app, include_in_schema=False)
 
 # ---------------------------------------------------------------------------
 # 웹 화면 서빙. 프론트(web/)를 API와 같은 출처에서 내보낸다.

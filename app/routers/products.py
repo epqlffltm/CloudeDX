@@ -22,7 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import repository
-from app.db.engine import get_session
+from app.db.engine import get_read_session
 from app.db.models import ItemRecord
 from app.schemas.products import ListingListResponse, ListingOut
 from app.schemas.requests import CrawledItemFilterParams
@@ -55,7 +55,7 @@ def _to_listing(item: ItemRecord) -> ListingOut:
 )
 async def list_listings(
     filters: Annotated[CrawledItemFilterParams, Query()],
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_session)],
 ):
     """
     매물을 프론트 계약(ListingOut)으로 반환한다.
@@ -86,7 +86,7 @@ async def list_listings(
 )
 async def get_listing(
     item_id: int,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_session)],
 ):
     """
     매물 단건 조회. id는 정수 PK다.

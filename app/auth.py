@@ -34,6 +34,7 @@ from app.config import (
     ADMIN_USERNAME,
     CLIENT_PASSWORD,
     CLIENT_USERNAME,
+    COOKIE_SECURE,
     SESSION_MAX_AGE_SECONDS,
     SESSION_SECRET,
 )
@@ -125,6 +126,12 @@ def issue_session(response: Response, user: User) -> None:
         max_age=SESSION_MAX_AGE_SECONDS,
         # JS에서 못 읽게 한다. XSS가 나도 세션이 바로 새어 나가지는 않는다.
         httponly=True,
+        # HTTPS 연결에서만 쿠키를 보낸다. 이게 없으면 평문 HTTP 요청에도 세션이
+        # 실려 나가서, 중간에 있는 누구나 그대로 주워 로그인 상태를 가져갈 수 있다.
+        #
+        # 로컬은 http://localhost 라 켜면 로그인이 아예 안 된다. 그래서 값을
+        # 고정하지 않고 COOKIE_SECURE(기본값은 APP_ENV)에 맡긴다.
+        secure=COOKIE_SECURE,
         # 화면과 API가 같은 출처라 lax로 충분하다. 외부 사이트에서 건너온
         # POST에는 쿠키가 붙지 않으므로 CSRF 표면이 줄어든다.
         samesite="lax",
@@ -133,7 +140,20 @@ def issue_session(response: Response, user: User) -> None:
 
 
 def clear_session(response: Response) -> None:
-    response.delete_cookie(COOKIE_NAME, path="/")
+    """
+    로그아웃. 쿠키를 지운다.
+
+    삭제도 발급과 같은 속성(path·secure·samesite·httponly)으로 보내야 한다.
+    브라우저는 이 속성들이 일치할 때만 같은 쿠키로 보고 덮어쓴다 — 하나라도
+    어긋나면 만료된 쿠키가 하나 더 생길 뿐 원래 세션은 그대로 남는다.
+    """
+    response.delete_cookie(
+        COOKIE_NAME,
+        path="/",
+        httponly=True,
+        samesite="lax",
+        secure=COOKIE_SECURE,
+    )
 
 
 def _parse_session(raw: str | None) -> User | None:

@@ -236,9 +236,20 @@ def _dedupe_by_url(items: list[CrawledItem]) -> list[dict]:
     return list(merged.values())
 
 
-async def upsert_items(items: list[CrawledItem]) -> int:
+async def upsert_items(
+    items: list[CrawledItem],
+    session: AsyncSession | None = None,
+) -> int:
     """
     크롤링 결과를 url 기준으로 insert-or-update 하고, 처리한 건수를 반환한다.
+
+    session 을 주면 그것을 쓰고, 없으면 자체 세션을 연다. 기본값이 None 인 이유는
+    호출부 대부분(크롤러, 테스트)이 세션을 들고 있지 않기 때문이다.
+
+    세션을 넘길 수 있어야 하는 이유는 커넥션 횟수다. 업로드 라우터는 이미 Depends 로
+    세션을 하나 받아 두는데, 여기서 또 열면 한 요청이 커넥션을 두 번 맺는다. 평소에는
+    풀에서 꺼내 오니 티가 안 나지만 DB가 죽어 있을 때 드러난다 — 접속 시도마다
+    connect timeout(10초)을 통째로 기다려서, 응답이 30초 넘게 매달린다.
 
     이미 있는 매물이면 가격/상태 등만 갱신하고 last_seen_at을 지금으로 찍는다.
     first_seen_at은 건드리지 않는다 — 이 값이 유지돼야 posted_at을 못 구한 매물의
@@ -256,34 +267,43 @@ async def upsert_items(items: list[CrawledItem]) -> int:
     if not rows:
         return 0
 
-    async with async_session() as session:
-        for start in range(0, len(rows), UPSERT_CHUNK_SIZE):
-            chunk = rows[start : start + UPSERT_CHUNK_SIZE]
+    if session is not None:
+        await _upsert_rows(session, rows)
+        return len(rows)
 
-            stmt = pg_insert(ItemRecord).values(chunk)
-            stmt = stmt.on_conflict_do_update(
-                index_elements=[ItemRecord.url],
-                set_={
-                    **{col: getattr(stmt.excluded, col) for col in _UPDATABLE_COLUMNS},
-                    "posted_at": func.coalesce(
-                        ItemRecord.posted_at, stmt.excluded.posted_at
-                    ),
-                    # 파싱에 실패했다고 기존 가격을 지우지 않는다. 사이트 표기가
-                    # 잠깐 달라져 값을 못 읽는 경우가 있는데, NULL로 덮으면 그
-                    # 라운드 동안 화면이 '가격 미상'으로 깜빡이고, 가격 필터가 걸린
-                    # 조회에서는 매물이 사라졌다 나타나기를 반복한다.
-                    "price_value": func.coalesce(
-                        stmt.excluded.price_value, ItemRecord.price_value
-                    ),
-                    "last_seen_at": func.now(),
-                },
-            )
-
-            await session.execute(stmt)
-
-        await session.commit()
+    async with async_session() as owned:
+        await _upsert_rows(owned, rows)
 
     return len(rows)
+
+
+async def _upsert_rows(session: AsyncSession, rows: list[dict]) -> None:
+    """UPSERT 본체. 세션의 출처와 무관하게 같은 SQL을 돌린다."""
+    for start in range(0, len(rows), UPSERT_CHUNK_SIZE):
+        chunk = rows[start : start + UPSERT_CHUNK_SIZE]
+
+        stmt = pg_insert(ItemRecord).values(chunk)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[ItemRecord.url],
+            set_={
+                **{col: getattr(stmt.excluded, col) for col in _UPDATABLE_COLUMNS},
+                "posted_at": func.coalesce(
+                    ItemRecord.posted_at, stmt.excluded.posted_at
+                ),
+                # 파싱에 실패했다고 기존 가격을 지우지 않는다. 사이트 표기가
+                # 잠깐 달라져 값을 못 읽는 경우가 있는데, NULL로 덮으면 그
+                # 라운드 동안 화면이 '가격 미상'으로 깜빡이고, 가격 필터가 걸린
+                # 조회에서는 매물이 사라졌다 나타나기를 반복한다.
+                "price_value": func.coalesce(
+                    stmt.excluded.price_value, ItemRecord.price_value
+                ),
+                "last_seen_at": func.now(),
+            },
+        )
+
+        await session.execute(stmt)
+
+    await session.commit()
 
 
 async def sweep_missing(scope: CrawlScope, seen_urls: set[str]) -> dict[str, int]:

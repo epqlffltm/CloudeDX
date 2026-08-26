@@ -110,19 +110,24 @@ async def client(session: AsyncSession) -> AsyncGenerator[AsyncClient]:
     """
     앱에 요청을 보내는 클라이언트.
 
-    get_session 의존성을 테스트 세션으로 갈아끼워서, 라우터가 보는 데이터와 테스트가
-    직접 넣은 데이터가 같은 트랜잭션 시야를 공유하게 한다.
+    get_session(쓰기)과 get_read_session(읽기) 둘 다 테스트 세션으로 갈아끼워서,
+    라우터가 보는 데이터와 테스트가 직접 넣은 데이터가 같은 트랜잭션 시야를 공유하게
+    한다.
+
+    읽기 쪽도 반드시 갈아끼워야 한다. 안 그러면 조회 라우터만 진짜 엔진을 열어서,
+    테스트가 넣은(아직 커밋 안 된) 데이터를 못 보고 조용히 0건을 돌려준다.
 
     lifespan을 실행하지 않는다. lifespan은 DB 연결 확인과 크롤러 기동을 하는데,
     여기서는 둘 다 불필요하고 크롤러 임포트는 Playwright를 요구한다.
     """
-    from app.db.engine import get_session
+    from app.db.engine import get_read_session, get_session
     from app.main import app
 
     async def override() -> AsyncGenerator[AsyncSession]:
         yield session
 
     app.dependency_overrides[get_session] = override
+    app.dependency_overrides[get_read_session] = override
 
     transport = ASGITransport(app=app)
 

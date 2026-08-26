@@ -208,7 +208,7 @@ lifespan이 `create_task`로 띄우고 바로 요청을 받기 시작하므로 �
 
 **첫 라운드는 조건부로 즉시 실행한다.** `crawl_runs`의 마지막 기록을 보고, 주기보다
 오래됐거나 기록이 없으면 바로 시작하고 최근이면 건너뛴다. 개발 중에는 서버를 하루에도
-몇 번씩 재시작하는데 그때마다 검색 8회를 새로 도는 건 사이트에도 부담이고 봇 감지
+몇 번씩 재시작하는데 그때마다 검색 12회를 새로 도는 건 사이트에도 부담이고 봇 감지
 위험도 올리기 때문이다.
 
 `items.last_seen_at`이 아니라 `crawl_runs`를 보는 이유는 실패한 라운드도 세기
@@ -596,6 +596,11 @@ CloudeDX/0.1 (+https://github.com/epqlffltm/CloudeDX)
 | 변수 | 기본값 | 설명 |
 |---|---|---|
 | `DATABASE_URL` | `postgresql+asyncpg://cloudedx:cloudedx@127.0.0.1:5432/cloudedx` | DB 접속 정보 |
+| `APP_ENV` | `local` | `production` 이면 비밀값 미설정 시 기동을 거부하고 쿠키에 Secure 를 붙인다 |
+| `DATABASE_RO_URL` | (`DATABASE_URL`) | 읽기 복제본 주소. 비우면 주 DB로 떨어진다 |
+| `READ_FALLBACK_COOLDOWN_SECONDS` | `30` | 복제본 접속 실패 후 주 DB로 보내는 시간 |
+| `COOKIE_SECURE` | (`APP_ENV`) | 세션 쿠키 Secure 플래그. 로컬 HTTP에서는 꺼야 로그인이 된다 |
+| `WRITE_TIMEOUT_SECONDS` | `15` | 쓰기 경로가 DB를 붙잡을 수 있는 최대 시간. 넘으면 503 |
 | `DB_PORT` | `5432` | docker-compose가 호스트에 열 포트. 5432가 이미 점유돼 있으면 여기만 바꾼다 |
 | `ENABLE_CRAWLER` | `true` | `false`면 백그라운드 크롤러를 돌리지 않는다 |
 | `CRAWL_INTERVAL_MINUTES` | `30` | 수집 주기(분) |
@@ -612,7 +617,7 @@ CloudeDX/0.1 (+https://github.com/epqlffltm/CloudeDX)
 | `POSTGRES_USER` | `cloudedx` | compose 가 db 초기화와 접속 문자열 조립에 함께 쓴다 |
 | `POSTGRES_PASSWORD` | `cloudedx` | 위와 같음. 배포에서는 필수 |
 | `POSTGRES_DB` | `cloudedx` | 위와 같음 |
-| `SESSION_SECRET` | (시연용 고정값) | 세션 쿠키 서명 키. 배포에서는 필수 |
+| `SESSION_SECRET` | (프로세스마다 랜덤) | 세션 쿠키 서명 키. `APP_ENV=production` 이면 미설정 시 기동 거부 |
 | `SESSION_MAX_AGE_SECONDS` | `43200` | 로그인 유지 시간(초). 기본 12시간 |
 | `MAX_UPLOAD_BYTES` | `5242880` | CSV 업로드 최대 바이트. nginx 의 `client_max_body_size` 와 맞춰야 한다 |
 | `FORWARDED_ALLOW_IPS` | `*` (배포 `172.28.0.0/16`) | `X-Forwarded-For` 를 믿어줄 프록시 대역 |
@@ -1616,7 +1621,7 @@ netstat -ano | findstr :5432
   두 번째 품목(시계 등)을 열 때 `CrawledItem`에 필드를 추가하고
   `_dedupe_by_url` → `_UPDATABLE_COLUMNS` 경로로 흘려야 한다.
 - `CrawledItem`/`items` 테이블에 중고나라의 "무료배송" 여부에 대응하는 필드가 아직 없음
-- 브랜드 4개 x 사이트 2개 = 검색 8회를 현재는 의도적으로 순차 실행한다. 외부 사이트에
+- 브랜드 4개 x 수집처 3개 = 검색 12회를 현재는 의도적으로 순차 실행한다. 외부 사이트에
   불필요한 동시 요청을 보내지 않는 쪽을 우선한 선택이다. 대상이 늘어 한 라운드 시간이
   운영 요구를 넘기면 bounded concurrency나 브랜드별 스케줄 분산을 고려할 수 있다.
 - `_should_crawl_now()`의 중복 수집 억제는 진짜 잠금이 아니다. 두 프로세스가 동시에
@@ -1645,7 +1650,7 @@ netstat -ano | findstr :5432
 | 지금 | 실서비스라면 |
 |---|---|
 | 계정 2개(`admin`/`client`)를 환경변수에 고정 | 사용자 테이블 + 해시 저장(PBKDF2·bcrypt), 회원가입/비밀번호 변경 |
-| `SESSION_SECRET` 에 시연용 고정 기본값 | 시크릿 매니저에서 주입, 주기적 로테이션 |
+| `SESSION_SECRET` 이 미설정 시 프로세스마다 랜덤 | 시크릿 매니저에서 주입, 주기적 로테이션 |
 | 세션 = HMAC 서명 쿠키, 서버 측 저장 없음 | Redis 세션 스토어 또는 JWT + 토큰 버저닝(즉시 무효화 가능) |
 | 단일 Postgres 컨테이너 | RDS(Multi-AZ), 백업·PITR |
 | 크롤러 상시 컨테이너 | EventBridge 스케줄 태스크 — 유휴 시간에 브라우저를 안 올려 비용이 크게 준다. 진입점은 이미 있다: `python -m app.crawler --once` |

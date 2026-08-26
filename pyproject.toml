@@ -12,6 +12,9 @@ dependencies = [
     "asyncpg>=0.31.0",
     "fastapi>=0.141.1",
     "jinja2>=3.1.6",
+    # /metrics 노출. prometheus_client 를 함께 끌어오고, app/db/engine.py 의
+    # DB 세션 카운터도 그 클라이언트를 쓴다.
+    "prometheus-fastapi-instrumentator>=7.0.0",
     "python-dotenv>=1.2.2",
     "sqlalchemy>=2.0.51",
     "uvicorn[standard]>=0.52.1",

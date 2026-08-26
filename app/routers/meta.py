@@ -28,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import CRAWL_INTERVAL_MINUTES, CRAWL_RUN_TIMEOUT_MINUTES
 from app.db import crawl_runs, repository
-from app.db.engine import get_session
+from app.db.engine import get_read_session
 from app.db.models import CrawlRunStatus
 from app.domain.brands import TARGET_ALIASES
 from app.domain.search_plan import _CATEGORY_SEARCHES
@@ -46,7 +46,7 @@ router = APIRouter(prefix="/meta", tags=["meta"])
     operation_id="getMeta",
     summary="필터 선택지와 수집 현황",
 )
-async def get_meta(session: Annotated[AsyncSession, Depends(get_session)]):
+async def get_meta(session: Annotated[AsyncSession, Depends(get_read_session)]):
     """
     필터에 쓸 수 있는 값들과 현재 수집 현황을 반환한다.
 

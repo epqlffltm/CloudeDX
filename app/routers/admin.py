@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import User, require_role
 from app.config import CRAWL_INTERVAL_MINUTES, CRAWL_RUN_TIMEOUT_MINUTES, MISSING_THRESHOLD
 from app.db import crawl_runs, repository
-from app.db.engine import get_session
+from app.db.engine import get_read_session
 from app.db.models import CrawlRun, CrawlRunStatus, ItemRecord
 from app.schemas.requests import CrawledItemFilterParams
 
@@ -57,7 +57,7 @@ async def _count_by(session: AsyncSession, column, *, active_only: bool = True) 
 )
 async def overview(
     user: Annotated[User, Depends(require_role("admin"))],
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_session)],
 ):
     """
     운영 지표를 한 번에 준다. 화면(web/admin.html)이 이 응답 하나로 전부 그린다.
