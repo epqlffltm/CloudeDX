@@ -16,6 +16,7 @@ services:
     volumes:
       - ./app:/srv/app:ro
       - ./alembic:/srv/alembic:ro
+      - ./web:/srv/web:ro
     command:
       - uvicorn
       - app.main:app
