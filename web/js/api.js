@@ -41,6 +41,8 @@ export function buildQuery(filters, offset, limit) {
   if (filters.min > 0) q.set('min_price', String(filters.min));
   if (filters.max < PRICE_UNLIMITED) q.set('max_price', String(filters.max));
   if (filters.sort) q.set('order_by', filters.sort);
+  // 인증 매물만. 기본값(false)은 보내지 않는다 — 부재가 곧 "필터 없음"이다.
+  if (filters.authenticatedOnly) q.set('authenticated_only', 'true');
 
   q.set('limit', String(limit));
   q.set('offset', String(offset));

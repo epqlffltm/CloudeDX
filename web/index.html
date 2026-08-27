@@ -3,259 +3,176 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Reverdi - 중고명품 통합검색</title>
-  <meta name="description" content="국내 주요 플랫폼의 중고 명품 매물을 한곳에서 검색하고 비교하세요." />
+  <title>Reverdi — 중고명품 통합검색</title>
+  <meta name="description" content="당근마켓·중고나라·번개장터의 중고 명품 매물을 한곳에서 검색하고 비교하세요." />
+
+  <meta property="og:title" content="Reverdi — 중고명품 통합검색" />
+  <meta property="og:description" content="당근마켓·중고나라·번개장터의 중고 명품 매물을 한곳에서." />
+  <meta property="og:type" content="website" />
+
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,400..900&family=Noto+Sans+KR:wght@300..700&family=Noto+Serif+KR:wght@400..700&family=Plus+Jakarta+Sans:wght@400..800&display=swap" />
-  <link rel="stylesheet" href="css/tokens.css" />
-  <link rel="stylesheet" href="css/app.css" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,500&family=Noto+Serif+KR:wght@500;600;700&display=swap" />
+  <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" />
+  <link rel="stylesheet" href="css/reverdi.css" />
 </head>
 <body class="mode-home">
 
 <!-- 아이콘 정의. 같은 아이콘을 여러 번 그리므로 <use>로 참조한다. -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <defs>
-    <linearGradient id="goldGrad" x1="15%" y1="0%" x2="85%" y2="100%">
-      <stop offset="0%" stop-color="#F7ECC9" /><stop offset="20%" stop-color="#E5CB8E" />
-      <stop offset="45%" stop-color="#D4B776" /><stop offset="70%" stop-color="#BE9D59" />
-      <stop offset="100%" stop-color="#8C6E33" />
-    </linearGradient>
-
-    <g id="i-crown"><path d="M 16 58 L 14 26 C 24 38, 36 46, 50 14 C 64 46, 76 38, 86 26 L 84 58 Z" fill="url(#goldGrad)" stroke="#8A6D33" stroke-width=".8" stroke-linejoin="round"/><rect x="13" y="58" width="74" height="8.5" rx="1" fill="url(#goldGrad)" stroke="#8A6D33" stroke-width=".8"/><circle cx="50" cy="10.5" r="4.2" fill="none" stroke="url(#goldGrad)" stroke-width="2.2"/><circle cx="14" cy="24" r="3.2" fill="url(#goldGrad)"/><circle cx="86" cy="24" r="3.2" fill="url(#goldGrad)"/></g>
-
-    <g id="i-sparkles" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.6 4.3L6 9l4.4 1.7L12 15l1.6-4.3L18 9l-4.4-1.7L12 3Z"/><path d="m5 14-.8 2.2L2 17l2.2.8L5 20l.8-2.2L8 17l-2.2-.8L5 14Z"/></g>
     <g id="i-bag" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18M16 10a4 4 0 0 1-8 0"/></g>
     <g id="i-watch" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="6"/><path d="M12 9v3l1.5 1.5M9 2h6l.5 4M9 22h6l.5-4"/></g>
     <g id="i-gem" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12l4 6-10 12L2 9Z"/><path d="M2 9h20M12 21 8 9l2-6M12 21l4-12-2-6"/></g>
     <g id="i-shirt" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20.38 3.46 16 2a4 4 0 0 1-8 0L3.62 3.46a2 2 0 0 0-1.34 2.23l.58 3.47a1 1 0 0 0 .99.84H6v10a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V10h2.15a1 1 0 0 0 .99-.84l.58-3.47a2 2 0 0 0-1.34-2.23z"/></g>
     <g id="i-shoe" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12.5V20"/><path d="M3 18c3 0 6-1 9-5l3.5-4.5C17 6.8 19.5 7.2 20.2 9L21 12c-2.5 1.2-5 3-7 6H3Z"/><path d="M12 13c2-2 4.5-3 6.5-2.5"/></g>
+    <g id="i-ring" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="14" r="6"/><path d="m9 5 1-3h4l1 3M9 5h6l-1.5 3h-3Z"/></g>
+    <g id="i-home" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1Z"/><path d="M9.5 21v-6h5v6"/></g>
+    <g id="i-sparkles" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.6 4.3L6 9l4.4 1.7L12 15l1.6-4.3L18 9l-4.4-1.7L12 3Z"/><path d="m5 14-.8 2.2L2 17l2.2.8L5 20l.8-2.2L8 17l-2.2-.8L5 14Z"/></g>
 
     <g id="i-search" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></g>
-    <g id="i-x" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></g>
-    <g id="i-sliders" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></g>
-    <g id="i-rotate" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></g>
-    <g id="i-award" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="6"/><path d="m8.2 13.9-1.4 7.1 5.2-3 5.2 3-1.4-7.1"/></g>
-    <g id="i-store" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v11a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V9"/><path d="M2 9 4 3h16l2 6a3 3 0 0 1-5 2 3 3 0 0 1-5 0 3 3 0 0 1-5 0 3 3 0 0 1-5-2Z"/></g>
-    <g id="i-sort" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m8 3 0 18M4 7l4-4 4 4M16 21V3M20 17l-4 4-4-4"/></g>
-    <g id="i-coins" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6"/><path d="M18.09 10.37A6 6 0 1 1 10.34 18M7 6h1v4M16.71 13.88l.7.71-2.82 2.82"/></g>
-    <g id="i-down" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 17h6v-6"/><path d="m22 17-8.5-8.5-5 5L2 7"/></g>
-    <g id="i-up" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 7h6v6"/><path d="m22 7-8.5 8.5-5-5L2 17"/></g>
-    <g id="i-chev-l" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></g>
-    <g id="i-chev-r" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></g>
-    <g id="i-menu" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></g>
-    <g id="i-login" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="m10 17 5-5-5-5M15 12H3"/></g>
-    <g id="i-user" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21a7 7 0 0 0-14 0"/><circle cx="12" cy="7" r="4"/></g>
-    <g id="i-arrow-up" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></g>
-    <g id="i-plus" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></g>
+    <g id="i-heart" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8Z"/></g>
+    <g id="i-user" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 5-6 8-6s6.5 2 8 6"/></g>
+    <g id="i-seal" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8 12.5 2.5 2.5L16 9"/></g>
+    <g id="i-arrow-r" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></g>
   </defs>
 </svg>
 
-<!-- ======================================================== 상단바 -->
-<header class="topbar">
-  <div class="wrap topbar__inner">
-    <button class="cat-trigger" id="megaToggle" type="button" aria-expanded="false" aria-controls="megaMenu">
-      <svg viewBox="0 0 24 24"><use href="#i-menu"/></svg>
-      <span>카테고리</span>
-    </button>
+<header class="site">
+  <div class="wrap header-row">
+    <button class="logo" type="button" data-home aria-label="Reverdi 홈">rev<em>e</em>rdi</button>
 
-    <div class="topbar__right">
-      <div class="account">
-        <button type="button" id="loginBtn">
-          <svg viewBox="0 0 24 24"><use href="#i-login"/></svg><span>로그인</span>
-        </button>
-        <span class="account__sep">|</span>
-        <button type="button" id="myPageBtn">
-          <svg viewBox="0 0 24 24"><use href="#i-user"/></svg><span>마이페이지</span>
-        </button>
-        <span class="login-tip" id="loginTip" role="status" hidden>준비 중입니다</span>
-      </div>
-      <a class="logo logo--sm home-link" href="./" aria-label="Reverdi 홈">
-        <svg class="logo__crown" viewBox="0 0 100 80"><use href="#i-crown"/></svg><span class="logo__mark">Reverdi</span>
-      </a>
+    <div class="header-actions">
+      <form class="search-pill" id="searchForm" role="search">
+        <button type="submit" aria-label="검색"><svg viewBox="0 0 24 24"><use href="#i-search"/></svg></button>
+        <label class="visually-hidden" for="searchInput">브랜드, 모델명 검색</label>
+        <input id="searchInput" type="search" autocomplete="off" enterkeyhint="search"
+               placeholder="브랜드, 모델명 검색" />
+      </form>
+      <a class="icon-btn" href="login.html" aria-label="기업고객 로그인"><svg viewBox="0 0 24 24"><use href="#i-user"/></svg></a>
     </div>
   </div>
 
-  <div class="mega" id="megaMenu" aria-hidden="true">
-    <div class="wrap mega__grid">
-      <button class="mega__card" type="button" data-category="bag"><svg viewBox="0 0 24 24"><use href="#i-bag"/></svg><strong>가방</strong></button>
-      <button class="mega__card" type="button" data-category="watch"><svg viewBox="0 0 24 24"><use href="#i-watch"/></svg><strong>시계</strong></button>
-      <button class="mega__card" type="button" data-category="jewelry"><svg viewBox="0 0 24 24"><use href="#i-gem"/></svg><strong>주얼리 <small>준비중</small></strong></button>
-      <button class="mega__card" type="button" data-category="apparel"><svg viewBox="0 0 24 24"><use href="#i-shirt"/></svg><strong>의류 <small>준비중</small></strong></button>
-      <button class="mega__card" type="button" data-category="shoes"><svg viewBox="0 0 24 24"><use href="#i-shoe"/></svg><strong>신발 <small>준비중</small></strong></button>
-    </div>
+  <div class="wrap">
+    <!-- 카테고리 링크는 /api/meta 응답으로 채운다. -->
+    <nav class="main-nav" id="mainNav" aria-label="카테고리"></nav>
   </div>
 </header>
 
 <main>
 
-<!-- ==================================================== 대문 (home) -->
-<div class="home-page">
-  <section class="hero">
-    <a class="logo logo--lg home-link" href="./" aria-label="Reverdi 홈">
-      <svg class="logo__crown" viewBox="0 0 100 80"><use href="#i-crown"/></svg><span class="logo__mark">Reverdi</span>
-    </a>
-    <h1 class="hero__title">중고명품 통합검색 사이트</h1>
-    <p class="hero__sub">국내 주요 플랫폼의 매물을 검색하여 운명을 찾아보세요</p>
+<!-- ══════════════════════════════════════════ 대문 -->
+<div class="home-view">
 
+  <section class="hero" id="hero">
+    <div class="hero-overlay"></div>
+    <div class="hero-copy">
+      <p class="hero-eyebrow">Curated Pre-loved Luxury</p>
+      <h1 class="hero-title">다시, 봄</h1>
+      <p class="hero-sub">당근마켓 · 중고나라 · 번개장터의 매물을 한곳에서</p>
+      <button class="btn-primary" type="button" data-browse>
+        매물 둘러보기
+        <svg viewBox="0 0 24 24"><use href="#i-arrow-r"/></svg>
+      </button>
+    </div>
+  </section>
+
+  <section class="section">
     <div class="wrap">
-      <form class="search" id="heroSearchForm" role="search">
-        <button class="search__icon" type="submit" aria-label="검색"><svg viewBox="0 0 24 24"><use href="#i-search"/></svg></button>
-        <input id="heroSearchInput" type="search" autocomplete="off" enterkeyhint="search"
-               placeholder="브랜드명, 모델명, 상품명을 검색해보세요 (예: 샤넬 클래식, 롤렉스 서브마리너)" />
-        <button class="search__clear" type="button" data-clear="heroSearchInput" aria-label="검색어 지우기"><svg viewBox="0 0 24 24"><use href="#i-x"/></svg></button>
-        <button class="search__submit" type="submit">통합검색</button>
-      </form>
-      <div class="popular" id="heroPopular"></div>
+      <div class="cat-grid" id="catGrid"></div>
     </div>
   </section>
 
-  <section class="wrap categories" aria-labelledby="catHeading">
-    <div class="section-head">
-      <h2 id="catHeading">카테고리 선택</h2>
-      <p>원하는 명품 카테고리를 클릭하여 매물을 검색하세요</p>
+  <section class="section section--flush">
+    <div class="wrap">
+      <div class="brand-scroll" id="brandScroll"></div>
     </div>
-    <div class="cat-grid" id="catGrid"></div>
   </section>
 
-  <section class="wrap reco">
-    <div class="reco__head">
-      <div>
-        <span class="badge-pick"><svg viewBox="0 0 24 24"><use href="#i-sparkles"/></svg>Reverdi 에디터 픽</span>
-        <div class="section-head" style="margin:0">
-          <h2>추천물품</h2>
-          <p>Reverdi가 추천하는 명품 매물</p>
+  <section class="section section--alt">
+    <div class="wrap">
+      <div class="tab-row" role="tablist" aria-label="정렬">
+        <button class="tab-btn" type="button" role="tab" data-rail="latest" aria-selected="true">신규 물품</button>
+        <button class="tab-btn" type="button" role="tab" data-rail="authenticated" aria-selected="false">인증 물품</button>
+      </div>
+      <div class="rail" id="railGrid"></div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <div class="promo">
+        <div>
+          <p class="promo-eyebrow">For Business</p>
+          <h2 class="promo-title">보유 재고를 Reverdi에 올리세요</h2>
+          <p class="promo-sub">기업고객 계정으로 CSV를 올리면 목록에 함께 노출됩니다.</p>
         </div>
-      </div>
-      <div class="reco__nav">
-        <button type="button" data-reco="prev" aria-label="이전"><svg viewBox="0 0 24 24"><use href="#i-chev-l"/></svg></button>
-        <div class="reco__page"><strong id="recoPage">1</strong> / <span id="recoPages">1</span></div>
-        <button type="button" data-reco="next" aria-label="다음"><svg viewBox="0 0 24 24"><use href="#i-chev-r"/></svg></button>
+        <a class="btn-primary" href="client.html">
+          매물 등록하기
+          <svg viewBox="0 0 24 24"><use href="#i-arrow-r"/></svg>
+        </a>
       </div>
     </div>
-    <div class="grid" id="recoGrid"></div>
-    <div class="reco__dots" id="recoDots"></div>
   </section>
+
 </div>
 
-<!-- =========================================== 검색 결과 (list) -->
-<div class="results-page">
-  <section class="results-head">
-    <div class="wrap">
-      <form class="search" id="searchForm" role="search">
-        <button class="search__icon" type="submit" aria-label="검색"><svg viewBox="0 0 24 24"><use href="#i-search"/></svg></button>
-        <input id="searchInput" type="search" autocomplete="off" enterkeyhint="search"
-               placeholder="브랜드명, 모델명, 상품명을 검색해보세요" />
-        <button class="search__clear" type="button" data-clear="searchInput" aria-label="검색어 지우기"><svg viewBox="0 0 24 24"><use href="#i-x"/></svg></button>
-        <button class="search__submit" type="submit">검색</button>
-      </form>
-      <div class="popular" id="listPopular"></div>
-
-      <div class="results-meta">
-        <div>
-          <div>
-            <span class="badge-result">통합 검색 결과</span>
-            <span class="results-sources" id="resultSources"></span>
-          </div>
-          <h1 class="results-title" id="resultTitle"></h1>
-        </div>
-        <div class="stats" id="priceStats" hidden>
-          <div class="stats__cell">
-            <div class="stats__label"><svg class="down" viewBox="0 0 24 24"><use href="#i-down"/></svg>최저 가격</div>
-            <div class="stats__value low" id="statMin">-</div>
-          </div>
-          <div class="stats__cell">
-            <div class="stats__label">평균 가격</div>
-            <div class="stats__value" id="statAvg">-</div>
-          </div>
-          <div class="stats__cell">
-            <div class="stats__label"><svg class="up" viewBox="0 0 24 24"><use href="#i-up"/></svg>최고 가격</div>
-            <div class="stats__value high" id="statMax">-</div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
+<!-- ══════════════════════════════════════════ 검색 결과 -->
+<div class="list-view">
   <div class="wrap">
-    <div class="tabs" id="catTabs"></div>
 
-    <!-- 상세 필터 검색 -->
-    <form class="filters glass" id="filters" aria-label="상세 필터">
-      <div class="filters__head">
-        <div class="filters__title">
-          <svg viewBox="0 0 24 24"><use href="#i-sliders"/></svg>
-          <span id="filterTitle">상세 필터 검색</span>
-          <span class="filters__catbadge" id="filterCatBadge" hidden></span>
-        </div>
-        <button class="btn-reset" id="filterReset" type="button">
-          <svg viewBox="0 0 24 24"><use href="#i-rotate"/></svg><span>필터 초기화</span>
-        </button>
-      </div>
+    <div class="results-head">
+      <h1 class="results-title" id="resultTitle">전체 매물</h1>
+      <p class="results-count" id="resultCount"></p>
+    </div>
 
-      <div class="frow" id="brandRow">
-        <span class="frow__label"><svg viewBox="0 0 24 24"><use href="#i-award"/></svg>브랜드:</span>
-        <span id="brandChips" style="display:contents"></span>
-      </div>
+    <div class="filter-bar">
+      <div class="filter-group" id="sourceChips" role="group" aria-label="수집처"></div>
+      <div class="filter-group" id="brandChips" role="group" aria-label="브랜드"></div>
+      <div class="filter-spacer"></div>
+      <label class="visually-hidden" for="sortSelect">정렬</label>
+      <select class="sort-select" id="sortSelect"></select>
+    </div>
 
-      <div class="frow">
-        <span class="frow__label"><svg viewBox="0 0 24 24"><use href="#i-store"/></svg>거래 플랫폼:</span>
-        <span id="sourceChips" style="display:contents"></span>
-      </div>
+    <div class="grid" id="resultGrid"></div>
 
-      <div class="frow">
-        <span class="frow__label"><svg viewBox="0 0 24 24"><use href="#i-sort"/></svg>정렬 방식:</span>
-        <span id="sortChips" style="display:contents"></span>
-      </div>
-
-      <div class="price-row">
-        <div class="price-row__top">
-          <div class="price-inputs">
-            <span class="frow__label"><svg viewBox="0 0 24 24"><use href="#i-coins"/></svg>가격 범위 필터:</span>
-            <label class="price-box"><span class="lbl">최저</span>
-              <input id="minPrice" type="number" inputmode="numeric" min="0" step="10" placeholder="0" />
-              <span class="unit">만원</span>
-            </label>
-            <span class="price-tilde">~</span>
-            <label class="price-box"><span class="lbl">최고</span>
-              <input id="maxPrice" type="number" inputmode="numeric" min="0" step="10" placeholder="무제한" />
-              <span class="unit">만원</span>
-            </label>
-          </div>
-          <div class="presets" id="pricePresets"></div>
-        </div>
-
-        <div class="range" id="priceRange">
-          <div class="range__track"></div>
-          <div class="range__fill" id="rangeFill"></div>
-          <input type="range" id="rangeMin" min="0" max="20000000" step="200000" value="0" aria-label="최저 가격 조절" />
-          <input type="range" id="rangeMax" min="0" max="20000000" step="200000" value="20000000" aria-label="최고 가격 조절" />
-        </div>
-      </div>
-    </form>
-
-    <div class="grid" id="grid" aria-live="polite"></div>
     <div class="pager" id="pager"></div>
+
   </div>
 </div>
 
 </main>
 
-<footer class="footer">
-  <div class="wrap footer__inner">
-    <a class="logo logo--sm logo--dark home-link" href="./" aria-label="Reverdi 홈">
-      <svg class="logo__crown" viewBox="0 0 100 80"><use href="#i-crown"/></svg><span class="logo__mark">Reverdi</span>
-    </a>
-    <div class="footer__links">
-      <a href="#">이용약관</a><span>|</span>
-      <a href="https://github.com/epqlffltm/CloudeDX/issues" target="_blank" rel="noopener noreferrer">고객센터</a>
+<footer class="site">
+  <div class="wrap footer-top">
+    <div class="footer-brand">
+      <div class="logo">rev<em>e</em>rdi</div>
+      <p>국내 중고 거래 플랫폼의 명품 매물을 모아 한 화면에서 비교합니다. 거래는 각 플랫폼에서 이루어집니다.</p>
     </div>
-    <p class="footer__copy">© 2026 Reverdi. All rights reserved.</p>
+    <div class="footer-col">
+      <h5>서비스</h5>
+      <a href="#" data-browse>전체 매물</a>
+      <a href="/board">수집 현황</a>
+      <a href="/docs">API 문서</a>
+    </div>
+    <div class="footer-col">
+      <h5>기업고객</h5>
+      <a href="login.html">로그인</a>
+      <a href="client.html">매물 등록</a>
+    </div>
+    <div class="footer-col">
+      <h5>수집처</h5>
+      <p>당근마켓</p>
+      <p>중고나라</p>
+      <p>번개장터</p>
+    </div>
+  </div>
+  <div class="wrap footer-bottom">
+    <span>© 2026 Reverdi</span>
+    <span id="lastCrawled"></span>
   </div>
 </footer>
 
-<button class="btn-top" id="topBtn" type="button" aria-label="맨 위로"><svg viewBox="0 0 24 24"><use href="#i-arrow-up"/></svg></button>
-
-<script type="module" src="js/main.js"></script>
+<script type="module" src="js/home.js"></script>
 </body>
 </html>
