@@ -26,6 +26,11 @@ class CrawledItem:
     # None은 "개인 판매자"가 아니라 "판정할 수 없음"을 뜻한다.
     seller_type: str | None = None
 
+    # 정품 인증 여부. 크롤러는 이 값을 채우지 않는다(기본 False). 기업고객이
+    # 올린 CSV의 인증 컬럼에서만 True가 들어오고, 실제 저장 여부는
+    # repository가 source까지 함께 보고 결정한다.
+    is_authenticated: bool = False
+
     @property
     def posted_at(self) -> datetime | None:
         """

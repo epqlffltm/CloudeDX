@@ -43,6 +43,7 @@ def _to_listing(item: ItemRecord) -> ListingOut:
         price=item.price_value,
         image_url=item.image_url,
         item_url=item.url,
+        is_authenticated=item.is_authenticated,
     )
 
 

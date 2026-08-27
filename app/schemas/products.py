@@ -27,6 +27,11 @@
 | `posted_at`, `listed_days` | 등록 시각을 안 주는 수집처가 있어 사이트 간 비교가 성립하지 않는다 |
 | `price_drop_rate` | 가격 수정이 불가능한 수집처에서 신호가 반대로 뒤집힌다 |
 
+**`is_authenticated`는 왜 넣었나.** 위 표와 반대 방향이라 짚어 둔다. 저것들은 "사이트가
+주지 않는 값을 우리가 지어내는 것"이라 뺐다. 이쪽은 우리가 실제로 아는 사실이다 —
+기업고객 계정으로 올라온 매물인지 아닌지는 업로드 경로가 확정하고, 그 계정은 사람이
+직접 발급한 것이다. 근거 없는 값이 아니라 근거가 우리 안에 있는 값이라 계약에 넣었다.
+
 운영·디버깅용 전체 필드가 필요하면 /api/crawled-items(CrawledItemOut)를 쓴다.
 """
 
@@ -61,6 +66,13 @@ class ListingOut(BaseModel):
     )
     image_url: str | None = None
     item_url: str = Field(description="원문 매물 주소. 거래는 각 수집처에서 이루어진다")
+    is_authenticated: bool = Field(
+        default=False,
+        description=(
+            "정품 인증 뱃지. 기업고객이 증표를 확인해 등록한 매물에만 true다. "
+            "크롤링분은 예외 없이 false — 원문 사이트의 매물을 검증한 적이 없다"
+        ),
+    )
 
 
 class ListingListResponse(BaseModel):

@@ -25,6 +25,7 @@ from app.db.models import ItemRecord, UnavailableReason
 from app.domain.cleaning import clean_title
 from app.domain.collection import CrawlScope
 from app.domain.models import CrawledItem
+from app.domain.sources import UPLOAD
 from app.schemas.requests import CrawledItemFilterParams
 
 # 한 INSERT 문에 넣을 최대 행 수. 너무 크면 바인드 파라미터가 폭증해서
@@ -49,6 +50,9 @@ _UPDATABLE_COLUMNS = (
     "image_url",
     "is_sold",
     "seller_type",
+    # 재업로드로 인증 표시를 켜고 끌 수 있어야 한다. 빼면 최초 1회만 반영되고
+    # 이후 수정이 조용히 무시된다.
+    "is_authenticated",
     # 다시 발견됐다는 뜻이므로 미발견 카운트를 되돌리고 활성 상태를 복구한다.
     # 판매완료로 다시 올라온 경우는 _dedupe_by_url이 is_active=False로 계산해 둔다.
     "missing_count",
@@ -85,6 +89,9 @@ def _apply_filters(stmt: Select, filters: CrawledItemFilterParams) -> Select:
 
     if filters.is_sold is not None:
         stmt = stmt.where(ItemRecord.is_sold == filters.is_sold)
+
+    if filters.authenticated_only:
+        stmt = stmt.where(ItemRecord.is_authenticated.is_(True))
 
     # 기본은 활성 매물만. 이미 사라진 매물이 목록에 남으면 클릭이 죽은 링크로 이어지는데,
     # 원문 아웃링크가 서비스의 전부인 구조에서 죽은 링크는 치명적이다.
@@ -223,6 +230,13 @@ def _dedupe_by_url(items: list[CrawledItem]) -> list[dict]:
             "url": item.url,
             "is_sold": item.is_sold,
             "seller_type": item.seller_type,
+            # 정품 인증 뱃지. **출처와 파일 내용을 모두 요구한다.**
+            #
+            # UPLOAD_SOURCE는 업로드 라우터가 require_role("client")를 통과한
+            # 요청에만 박는 값이라, 크롤러가 어떤 값을 들고 와도 여기서 False로
+            # 떨어진다. 파일 컬럼만 보면 크롤러 파서가 오작동하는 것만으로
+            # 크롤링 매물에 인증 뱃지가 붙을 수 있다.
+            "is_authenticated": item.is_authenticated and item.source == UPLOAD,
             "posted_at": item.posted_at,
             # 이번 라운드에서 봤으므로 미발견 카운트를 되돌린다. 판매완료 표기가
             # 있으면 그 자리에서 비활성 처리한다 — 사이트가 알려준 사실이라

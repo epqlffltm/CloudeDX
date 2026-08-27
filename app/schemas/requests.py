@@ -48,6 +48,14 @@ class CrawledItemFilterParams(PaginationParams):
         default=None,
         description="판매완료 여부. 지정하지 않으면 활성 매물 기준으로 전부 포함",
     )
+    authenticated_only: bool = Field(
+        default=False,
+        description=(
+            "정품 인증 매물만 볼지. 기업고객이 증표를 확인해 등록한 매물만 남는다. "
+            "기본은 false로 전체를 본다 — 인증분은 아직 수가 적어서, 기본값으로 "
+            "켜면 목록이 거의 비어 보인다"
+        ),
+    )
     include_unusable: bool = Field(
         default=False,
         description=(

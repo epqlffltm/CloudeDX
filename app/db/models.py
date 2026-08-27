@@ -84,6 +84,22 @@ class ItemRecord(Base):
     # "판정할 수 없음"을 뜻한다 (app/domain/seller.py 참고).
     seller_type: Mapped[str | None] = mapped_column(String(20))
 
+    # 정품 인증 뱃지. 화면 카드의 "정품인증" 씰이 이 값 하나만 본다.
+    #
+    # 크롤링분은 전부 False다. 원문 사이트의 매물을 우리가 검증한 적이 없고
+    # 중개도 하지 않으므로, True로 두면 사실이 아닌 보증을 표시하게 된다.
+    #
+    # True가 되는 경로는 하나뿐이다 — source가 '직접등록'인 업로드 매물 중,
+    # 업자가 CSV에 인증 표시를 한 행. 두 조건을 모두 요구하는 것은
+    # repository._dedupe_by_url에서 강제한다.
+    #
+    # seller_type(중고나라 인증셀러 배지)과는 다른 축이다. 그쪽은 "사이트가
+    # 인증한 셀러", 이쪽은 "우리가 계정을 발급한 업자가 증표를 확인한 물건"이다.
+    # 한 컬럼에 합치면 두 가지 다른 보증이 같은 뱃지로 나간다.
+    is_authenticated: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false", index=True
+    )
+
     # ---- 정제 결과 --------------------------------------------------------
     #
     # brand는 크롤러의 검색어가 아니라 제목에서 다시 판정한 값이다. 실측 599건에서

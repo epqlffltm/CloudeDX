@@ -19,9 +19,12 @@ import re
 from dataclasses import dataclass, field
 
 from app.domain.models import CrawledItem
+from app.domain.sources import UPLOAD
 
-# 업로드 출처 표기. 수집처 칩에 그대로 뜨므로, 크롤링분과 구분되는 이름을 쓴다.
-UPLOAD_SOURCE = "직접등록"
+# 업로드 출처 표기. 정본은 app/domain/sources.py에 있다 — 정품 인증 뱃지 판정이
+# 같은 값을 보기 때문에 수집처 상수와 같은 곳에 둔다. 기존 임포트 경로를 쓰는
+# 호출처가 있어 이름은 남겨 둔다.
+UPLOAD_SOURCE = UPLOAD
 
 # 필수 컬럼. 이 셋이 없으면 매물로 성립하지 않는다.
 #   title  화면 카드 제목이자 브랜드·카테고리 판정의 입력
@@ -29,7 +32,12 @@ UPLOAD_SOURCE = "직접등록"
 #   url    중복 판정 키(items.url은 unique)
 REQUIRED_COLUMNS = ("title", "price", "url")
 
-OPTIONAL_COLUMNS = ("brand", "image_url", "region")
+OPTIONAL_COLUMNS = ("brand", "image_url", "region", "is_authenticated")
+
+# 인증 컬럼에서 참으로 읽는 표기. 사람이 만든 시트라 표기가 제각각이고,
+# 엑셀은 TRUE를 대문자로 저장한다. 목록에 없는 값은 전부 거짓으로 본다 —
+# 애매한 값을 참으로 해석하면 없는 보증이 화면에 붙는다.
+_TRUTHY = frozenset({"true", "1", "y", "yes", "o", "t", "인증", "정품인증", "예", "참"})
 
 # 헤더 표기 흔들림을 흡수한다. 사람이 만든 CSV라 한글 헤더가 흔하고,
 # 엑셀에서 저장하면 대문자나 공백이 섞인다.
@@ -40,6 +48,9 @@ _HEADER_ALIASES = {
     "brand": "brand", "브랜드": "brand",
     "image_url": "image_url", "이미지": "image_url", "image": "image_url", "썸네일": "image_url",
     "region": "region", "지역": "region",
+    "is_authenticated": "is_authenticated", "인증": "is_authenticated",
+    "정품인증": "is_authenticated", "정품": "is_authenticated",
+    "authenticated": "is_authenticated", "verified": "is_authenticated",
 }
 
 # 최대 처리 행 수. 시연 규모를 넘어가는 파일은 거절한다 —
@@ -202,6 +213,10 @@ def parse_csv(raw: bytes) -> ImportReport:
                 url=url,
                 is_sold=False,
                 seller_type=None,
+                # 정품 인증 표시. 이 값만으로는 뱃지가 켜지지 않는다 —
+                # repository가 source까지 함께 보고 결정한다. 여기서 하는 일은
+                # 시트에 적힌 표기를 불리언으로 읽는 것뿐이다.
+                is_authenticated=value.get("is_authenticated", "").strip().lower() in _TRUTHY,
             )
         )
         report.accepted += 1
