@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from playwright.async_api import Browser, BrowserContext, Page, Playwright
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from app.domain.parse_health import ParseHealth
 
@@ -43,6 +44,21 @@ _DEFAULT_USER_AGENT = (
 )
 
 
+# 받지 않을 리소스 종류.
+#
+# 카드에서 읽는 것은 href, 텍스트, img의 src **속성**뿐이다. 이미지 바이트를 실제로
+# 내려받을 필요가 없고, 폰트와 동영상도 마찬가지다. 요청을 끊으면 페이지가 준비되는
+# 시점이 크게 앞당겨진다 — 검색 결과 한 페이지에 썸네일이 수십 장씩 붙는다.
+#
+# stylesheet는 일부러 넣지 않았다. scroll_page가 document.body.scrollHeight로 바닥을
+# 판단하는데, CSS가 없으면 레이아웃이 무너져 그 값이 엉뚱해진다. 스크롤 종료 판정이
+# 어긋나면 "끝까지 봤다"는 확신이 깨지고, 그건 미발견 판정의 전제라 매물 생명주기까지
+# 영향을 준다. 로딩 시간 조금 줄이자고 건드릴 곳이 아니다.
+#
+# script도 넣지 않는다. 두 사이트 모두 카드를 JS로 그린다.
+DEFAULT_BLOCKED_RESOURCES: frozenset[str] = frozenset({"image", "media", "font"})
+
+
 @dataclass(slots=True)
 class EngineConfig:
     headless: bool = True
@@ -51,6 +67,13 @@ class EngineConfig:
     viewport_height: int = 800
     # None이면 실행 중인 Chromium 버전으로 만든다. 고정 문자열을 쓰고 싶으면 직접 준다.
     user_agent: str | None = None
+
+    # 받지 않을 리소스 종류. 빈 집합을 주면 전부 받는다.
+    #
+    # 사이트별로 조정할 수 있게 열어 뒀다. 지연 로딩 방식에 따라서는 이미지 요청을
+    # 끊으면 img의 src 속성이 영영 안 채워지는 경우가 있다 — 사이트가 로드 성공을
+    # 확인한 뒤에 src를 넣는 구조라면 그렇다. 그런 사이트에서는 "image"를 빼면 된다.
+    blocked_resources: frozenset[str] = DEFAULT_BLOCKED_RESOURCES
 
 
 def build_user_agent(browser: Browser) -> str:
@@ -81,7 +104,54 @@ async def create_browser_context(
         viewport={"width": config.viewport_width, "height": config.viewport_height},
         user_agent=config.user_agent or build_user_agent(browser),
     )
+
+    if config.blocked_resources:
+        await _block_resources(context, config.blocked_resources)
+
     return browser, context
+
+
+async def _block_resources(context: BrowserContext, kinds: frozenset[str]) -> None:
+    """
+    지정한 종류의 리소스 요청을 중단시킨다.
+
+    사이트에 부담을 덜 주는 방향이기도 하다 — 우리가 쓰지도 않을 썸네일 수십 장을
+    라운드마다 내려받지 않게 된다.
+    """
+
+    async def _route(route) -> None:
+        if route.request.resource_type in kinds:
+            await route.abort()
+            return
+
+        await route.continue_()
+
+    await context.route("**/*", _route)
+
+
+async def wait_for_cards(page: Page, selector: str, *, timeout_ms: int) -> bool:
+    """
+    카드가 하나라도 그려질 때까지 기다린다. 나타났으면 True, 시간 안에 못 봤으면 False.
+
+    **예외를 올리지 않는 것이 핵심이다.** 검색 결과가 정말 0건인 페이지에서도 이 함수는
+    타임아웃에 걸리는데, 그것을 실패로 올리면 source_runner가 페이지 실패로 세고
+    브랜드 전체 실패로 번진다. "결과 0건은 실패가 아니라 정상 성공"이라는 규칙이
+    깨지는 셈이다(app/crawler/source_runner.py 참고).
+
+    고정 sleep을 대신한다. 페이지가 0.3초에 준비돼도 2초를 기다리던 것을, 준비되는
+    즉시 넘어가게 바꾼 것이다. 페이지 수만큼 곱해지는 시간이라 체감이 크다.
+    """
+    try:
+        await page.wait_for_selector(selector, timeout=timeout_ms, state="attached")
+        return True
+    except PlaywrightTimeoutError:
+        logger.info(
+            "카드 셀렉터가 %dms 안에 나타나지 않았습니다. 결과 0건이거나 "
+            "셀렉터가 바뀐 것일 수 있습니다: %s",
+            timeout_ms,
+            selector,
+        )
+        return False
 
 
 async def scroll_page(page: Page, *, count: int, pause_seconds: float) -> bool:

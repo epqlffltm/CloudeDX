@@ -13,7 +13,13 @@ from urllib.parse import urlencode
 
 from playwright.async_api import async_playwright
 
-from app.crawler.base import EngineConfig, collect_cards, create_browser_context, scroll_page
+from app.crawler.base import (
+    EngineConfig,
+    collect_cards,
+    create_browser_context,
+    scroll_page,
+    wait_for_cards,
+)
 from app.crawler.daangn.config import DaangnCrawlerConfig
 from app.crawler.daangn.parser import (
     is_item_detail_url,
@@ -72,6 +78,7 @@ class DaangnCrawler:
         engine_config = EngineConfig(
             headless=self.config.headless,
             timeout_ms=self.config.timeout_ms,
+            blocked_resources=self.config.blocked_resources,
         )
 
         async with async_playwright() as p:
@@ -87,6 +94,12 @@ class DaangnCrawler:
                     url,
                     wait_until="domcontentloaded",
                     timeout=self.config.timeout_ms,
+                )
+
+                # 카드가 붙을 때까지 기다린다. 안 나타나도 예외가 아니다 —
+                # 결과가 정말 0건인 검색어가 있고, 그건 실패가 아니다.
+                await wait_for_cards(
+                    page, ITEM_LINK_SELECTOR, timeout_ms=self.config.card_wait_ms
                 )
 
                 # 끝까지 내려갔는지가 중요하다. 스크롤 횟수 제한에 걸려 못 본 매물을

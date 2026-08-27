@@ -11,13 +11,18 @@ DB 저장은 여기서 하지 않는다.
 브랜드/사이트 실패 정책이 실제 장애와 정상적인 "검색 결과 0건"을 구분할 수 있다.
 """
 
-import asyncio
 import logging
 from urllib.parse import quote
 
 from playwright.async_api import async_playwright
 
-from app.crawler.base import EngineConfig, collect_cards, create_browser_context, scroll_page
+from app.crawler.base import (
+    EngineConfig,
+    collect_cards,
+    create_browser_context,
+    scroll_page,
+    wait_for_cards,
+)
 from app.crawler.joongna.config import JoongnaCrawlerConfig
 from app.crawler.joongna.parser import parse_card_text, parse_price_value
 from app.crawler.source_runner import collect_pages
@@ -77,9 +82,16 @@ class JoongnaCrawler:
             timeout=self.config.timeout_ms,
         )
 
-        # 페이지 로딩 직후 동적 카드가 붙을 시간을 준다.
+        # 동적 카드가 붙을 때까지 기다린다. 예전에는 고정 2초를 잤는데, 페이지가
+        # 0.3초에 준비돼도 2초를 버리는 방식이었다. 페이지 수만큼 곱해지는 시간이라
+        # 브랜드당 6초가 여기서 나갔다.
+        #
+        # 안 나타나도 예외가 아니다 — 결과가 정말 0건인 페이지가 있고, 그것을 실패로
+        # 올리면 collect_pages가 페이지 실패로 세어 브랜드 전체 실패로 번진다.
         # 실제 페이지 간 간격은 source_runner.collect_pages()가 별도로 적용한다.
-        await asyncio.sleep(2)
+        await wait_for_cards(
+            page, ITEM_LINK_SELECTOR, timeout_ms=self.config.card_wait_ms
+        )
 
         await scroll_page(
             page,
@@ -107,6 +119,7 @@ class JoongnaCrawler:
         engine_config = EngineConfig(
             headless=self.config.headless,
             timeout_ms=self.config.timeout_ms,
+            blocked_resources=self.config.blocked_resources,
         )
 
         async with async_playwright() as p:
