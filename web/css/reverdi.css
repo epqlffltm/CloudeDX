@@ -303,6 +303,26 @@ nav.main-nav button[aria-current="true"] { color: var(--accent); }
 .results-count { font-size: 13px; color: var(--ink-soft); margin-top: 6px; }
 .results-count strong { color: var(--accent-deep); }
 
+/* 실시간 조회 진행 배지. 검색어로 번개장터를 조회하는 몇 초 동안만 보인다.
+ * 목록은 이미 떠 있으므로 화면을 가리지 않고 건수 옆에 조용히 붙는다. */
+.live-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-left: 10px; padding: 3px 10px;
+  border-radius: 999px; background: var(--accent-tint);
+  font-size: 11.5px; font-weight: 600; color: var(--accent-deep);
+}
+.live-badge::before {
+  content: ''; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent); animation: live-pulse 1.2s ease-in-out infinite;
+}
+@keyframes live-pulse {
+  0%, 100% { opacity: .3; }
+  50%      { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .live-badge::before { animation: none; opacity: 1; }
+}
+
 .filter-bar {
   display: flex; flex-wrap: wrap; gap: 10px 8px;
   align-items: center; padding: 22px 0 20px;

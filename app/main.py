@@ -53,6 +53,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from prometheus_fastapi_instrumentator import Instrumentator
 
@@ -69,6 +70,7 @@ from app.routers.admin import router as admin_router
 from app.routers.auth import router as auth_router
 from app.routers.crawled import router as crawled_router
 from app.routers.health import router as health_router
+from app.routers.live import router as live_router
 from app.routers.meta import router as meta_router
 from app.routers.products import router as products_router
 from app.routers.uploads import router as uploads_router
@@ -191,6 +193,41 @@ if ALLOWED_ORIGINS:
     )
     logger.info("허용 출처: %s", ', '.join(ALLOWED_ORIGINS))
 
+# ---------------------------------------------------------------------------
+# 보안 헤더와 응답 압축.
+#
+# 예전에는 nginx가 붙여 주던 것이다. 배포에서 nginx를 걷어내고 uvicorn이 화면까지
+# 직접 서빙하기로 하면서, 프록시가 하던 일 중 앱에 없던 두 가지를 여기로 옮겼다.
+#
+# 미들웨어로 두는 이유는 StaticFiles mount까지 덮기 위해서다. 라우터 의존성으로
+# 붙이면 등록된 라우트에만 걸리고, 정작 사람이 보는 화면(index.html, css, js)에는
+# 헤더가 안 붙는다. 미들웨어는 라우팅보다 앞이라 mount로 떨어지는 요청도 지난다.
+#
+# setdefault를 쓰는 것은 라우터가 같은 헤더를 직접 정한 경우를 덮어쓰지 않기
+# 위해서다. 여기서 정하는 것은 "아무도 안 정했을 때의 기본값"이다.
+#
+# 값의 근거:
+#   nosniff  브라우저가 Content-Type을 무시하고 내용으로 타입을 추측하는 것을 막는다.
+#            업로드된 CSV가 HTML로 해석되는 종류의 사고를 막는다.
+#   DENY     이 화면을 iframe에 넣지 못하게 한다. 클릭재킹 방지다.
+#   Referrer 외부 링크로 나갈 때 경로·쿼리를 빼고 출처만 보낸다. 매물 링크를 타고
+#            수집처로 나갈 때 검색어가 새어 나가지 않는다.
+# ---------------------------------------------------------------------------
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    response = await call_next(request)
+
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+
+    return response
+
+
+# 1KB 미만은 압축해도 헤더 오버헤드에 묻히므로 건너뛴다. 이미 압축된 형식
+# (이미지·폰트)은 GZipMiddleware가 Content-Type을 보고 알아서 뺀다.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
+
 app.include_router(health_router)
 app.include_router(web_router)
 app.include_router(crawled_router, prefix=API_PREFIX)
@@ -199,6 +236,7 @@ app.include_router(products_router, prefix=API_PREFIX)
 app.include_router(auth_router, prefix=API_PREFIX)
 app.include_router(admin_router, prefix=API_PREFIX)
 app.include_router(uploads_router, prefix=API_PREFIX)
+app.include_router(live_router, prefix=API_PREFIX)
 
 # ---------------------------------------------------------------------------
 # Prometheus 지표 — /metrics

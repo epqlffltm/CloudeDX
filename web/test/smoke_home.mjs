@@ -54,6 +54,9 @@ const { window } = dom;
 
 window.fetch = async (url) => {
   calls.push(String(url));
+  if (String(url).includes("/api/live/search")) {
+    return { ok: true, status: 200, json: async () => ({ status: "saved", saved: 4, keyword: "샤넬 클래식" }) };
+  }
   const body = String(url).includes("/api/meta") ? META : {
     total: 1720, count: ITEMS.length, limit: 30, offset: 0, has_next: true, items: ITEMS,
   };
@@ -121,6 +124,11 @@ check("결과 그리드", $("resultGrid").querySelectorAll(".p-card").length ===
 check("페이저 다음 활성", !$("pager").querySelector('[data-page="next"]').disabled);
 check("페이저 이전 비활성", $("pager").querySelector('[data-page="prev"]').disabled);
 check("주소창 반영", window.location.search.includes("q=%EC%83%A4%EB%84%AC") || window.location.search.includes("view=list"));
+
+console.log("\n[실시간 조회]");
+check("live 엔드포인트 호출", calls.some((c) => c.includes("/api/live/search")));
+check("검색어 전달", calls.some((c) => c.includes("q=")));
+check("저장 후 목록 재조회", calls.filter((c) => c.includes("/api/products")).length >= 3);
 
 console.log("\n[필터]");
 const brandChip = [...$("brandChips").querySelectorAll(".chip")].find((c) => c.dataset.brand === "샤넬");

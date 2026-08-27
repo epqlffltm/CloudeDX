@@ -28,6 +28,14 @@ BUNJANG_BRAND_IDS: dict[str, str] = {
 class BunjangCrawlerConfig:
     brand: str = "구찌"
     keyword_suffix: str = "가방"
+
+    # 검색어를 직접 지정한다. None이면 brand + keyword_suffix로 만든다.
+    #
+    # 실시간 검색(app/routers/live.py)이 쓴다. 그쪽은 사용자가 친 문자열을 이미
+    # 정규화해서 완성된 검색어를 들고 오는데, brand에 그것을 넣으면 저장되는
+    # 매물의 브랜드가 "샤넬 클래식 가방"이 된다. 검색어와 브랜드는 다른 값이라
+    # 자리를 따로 둔다.
+    keyword_override: str | None = None
     max_pages: int = 3
     timeout_seconds: float = 10.0
     between_page_pause_seconds: float = 0.8  # 원본 스크립트의 검증된 간격
@@ -36,6 +44,9 @@ class BunjangCrawlerConfig:
     def keyword(self) -> str:
         # 원본 스크립트는 "구찌가방"처럼 붙여 검색했지만, 번개장터 검색은
         # 토큰 단위라 공백 유무가 결과를 가르지 않는다 — 우리 표준(공백)을 따른다.
+        if self.keyword_override:
+            return self.keyword_override
+
         return f"{self.brand} {self.keyword_suffix}".strip()
 
     @property

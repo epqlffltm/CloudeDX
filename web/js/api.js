@@ -58,6 +58,17 @@ export function fetchListings(filters, offset, limit, signal) {
   return getJSON(`${API_BASE}/api/products?${buildQuery(filters, offset, limit)}`, signal);
 }
 
+/**
+ * 검색어로 번개장터를 즉시 조회해 저장하도록 요청한다.
+ *
+ * 실패해도 서버가 200에 status='failed'를 담아 준다. 화면이 이미 DB 결과를 보여주고
+ * 있으므로 이 호출의 실패가 목록을 가려서는 안 되기 때문이다. 네트워크 자체가
+ * 끊긴 경우만 여기서 예외가 되고, 호출부가 그것도 삼킨다.
+ */
+export function fetchLive(query, signal) {
+  return getJSON(`${API_BASE}/api/live/search?q=${encodeURIComponent(query)}`, signal);
+}
+
 /** 필터 선택지와 수집 현황 (브랜드·수집처·카테고리별 건수). */
 export function fetchMeta(signal) {
   return getJSON(`${API_BASE}/api/meta`, signal);

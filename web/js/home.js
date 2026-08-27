@@ -10,7 +10,7 @@
 // 뒤 이 화면에 자동으로 칸이 늘어난다. 프론트에 목록을 박아두면 백엔드를 고칠 때마다
 // 양쪽을 같이 고쳐야 하고, 실제로는 한쪽만 고쳐서 어긋난다.
 
-import { fetchListings, fetchMeta } from './api.js';
+import { fetchListings, fetchLive, fetchMeta } from './api.js';
 import { PAGE_SIZE, PRICE_UNLIMITED, toDisplayBrand } from './state.js';
 
 // ── 표시용 사전 ─────────────────────────────────────────────────────
@@ -70,6 +70,9 @@ const state = {
   hasNext: false,
   status: 'loading', // loading | ready | error
   errorMessage: '',
+  // 실시간 조회 상태. idle | running | done
+  // 화면에 "최신 매물을 확인하는 중" 배지를 띄우는 용도다.
+  live: 'idle',
   // 대문 레일 탭. 'latest'는 최신순 전체, 'authenticated'는 인증 매물만.
   railTab: 'latest',
 };
@@ -247,8 +250,12 @@ function renderResultHeader() {
     ? `"${q}" 검색 결과`
     : (parts.join(' ') || '전체 매물');
 
+  const badge = state.live === 'running'
+    ? ' <span class="live-badge">최신 매물 확인 중…</span>'
+    : '';
+
   $('resultCount').innerHTML = state.status === 'ready'
-    ? `총 <strong>${won.format(state.total)}</strong>건`
+    ? `총 <strong>${won.format(state.total)}</strong>건${badge}`
     : '';
 }
 
@@ -411,6 +418,36 @@ async function loadRail() {
   }
 }
 
+/**
+ * 검색어로 번개장터를 즉시 조회하고, 새 매물이 저장됐으면 목록을 다시 그린다.
+ *
+ * DB 조회를 막지 않는 것이 핵심이다. 화면은 이미 결과를 보여주고 있고, 이 함수는
+ * 그 위에 몇 초 뒤 최신 매물을 얹는다. 그래서 await로 순서를 묶지 않고 따로 띄운다.
+ *
+ * 실패는 조용히 넘어간다. 사용자가 볼 목록은 멀쩡한데 "실시간 조회 실패"를 띄우면
+ * 아무 문제 없는 화면에 오류만 얹는 셈이다.
+ */
+async function refreshLive(query) {
+  if (!query) return;
+
+  state.live = 'running';
+  renderResultHeader();
+
+  try {
+    const result = await fetchLive(query);
+
+    // 저장된 것이 있을 때만 다시 그린다. skipped/ignored/failed면 목록이 그대로다.
+    if (result.status === 'saved' && result.saved > 0) {
+      await loadList();
+    }
+  } catch {
+    // 네트워크가 끊긴 경우. 목록은 이미 떠 있으므로 아무것도 하지 않는다.
+  } finally {
+    state.live = 'done';
+    renderResultHeader();
+  }
+}
+
 async function loadMeta() {
   try {
     state.meta = await fetchMeta();
@@ -442,6 +479,13 @@ function apply(patch, { resetOffset = true } = {}) {
   renderNav();
   renderFilterChips();
   loadList();
+
+  // 검색어가 있을 때만 실시간 조회를 건다. 브랜드 칩이나 카테고리 클릭은 이미
+  // 수집된 범위를 좁히는 동작이라 새로 긁을 이유가 없다.
+  if (patch.q !== undefined && state.filters.q) {
+    refreshLive(state.filters.q);
+  }
+
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
