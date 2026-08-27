@@ -36,6 +36,9 @@ const ITEMS = [
     category: "bag", price: null, image_url: null, item_url: "https://ex.test/b1", is_authenticated: false },
   { id: 3, source: "당근마켓", title: "구찌 마몬트 스몰", brand: "구찌",
     category: "bag", price: 1_450_000, image_url: null, item_url: "https://ex.test/b2", is_authenticated: false },
+  { id: 4, source: "직접등록", title: "디올 레이디디올 미디움 S급", brand: "디올",
+    category: "bag", price: 6_200_000, image_url: "/uploads/2026/08/abc.jpg",
+    item_url: "https://demo.reverdi.local/items/0001", is_authenticated: true, seller_id: 3 },
 ];
 
 const calls = [];
@@ -54,6 +57,15 @@ const { window } = dom;
 
 window.fetch = async (url) => {
   calls.push(String(url));
+  if (String(url).includes("/api/sellers/")) {
+    return { ok: true, status: 200, json: async () => ({
+      id: 3, name: "해운대 빈티지", business_number: "345-67-89012",
+      phone: "051-345-6789", has_store: true,
+      address: "부산광역시 해운대구 우동 3-3 (시연용 가상 주소)",
+      latitude: 35.1631, longitude: 129.1636,
+      description: "빈티지 라인 위주로 소량만 들여옵니다.", item_count: 8,
+    }) };
+  }
   if (String(url).includes("/api/live/search")) {
     return { ok: true, status: 200, json: async () => ({ status: "saved", saved: 4, keyword: "샤넬 클래식" }) };
   }
@@ -89,7 +101,7 @@ check("가방 라벨 한글화", $("catGrid").textContent.includes("가방"));
 check("브랜드 모노그램 5개", $("brandScroll").querySelectorAll(".brand-item").length === 5);
 check("브랜드 영문 표기", $("brandScroll").textContent.includes("CHANEL"));
 check("상단 내비에 카테고리", $("mainNav").querySelectorAll("button").length === 6);
-check("레일에 카드 3장", $("railGrid").querySelectorAll(".p-card").length === 3);
+check("레일에 카드 4장", $("railGrid").querySelectorAll(".p-card").length === 4);
 check("히어로 이미지 주입", !!$("hero").querySelector("img"));
 check("마지막 수집 시각", $("lastCrawled").textContent.length > 0);
 
@@ -101,8 +113,8 @@ check("수집처 뱃지", rail.includes("당근마켓"));
 check("제목 이스케이프", rail.includes("&lt;캐비어&gt;") && !rail.includes("<캐비어>"));
 check("바깥 링크 rel", rail.includes('rel="noopener noreferrer"'));
 check("이미지 없는 매물 처리", rail.includes("이미지 없음"));
-check("인증 매물에 씰 1개", (rail.match(/p-seal/g) || []).length === 1);
-check("비인증 매물엔 씰 없음", (rail.match(/정품인증/g) || []).length === 1);
+check("인증 매물에만 씰 2개", (rail.match(/p-seal/g) || []).length === 2);
+check("비인증 매물엔 씰 없음", (rail.match(/정품인증/g) || []).length === 2);
 
 console.log("\n[인증 물품 탭]");
 const authTab = window.document.querySelector('[data-rail="authenticated"]');
@@ -120,10 +132,32 @@ await new Promise((r) => setTimeout(r, 120));
 check("리스트 모드 전환", window.document.body.className === "mode-list");
 check("결과 제목", $("resultTitle").textContent.includes("샤넬 클래식"));
 check("총 건수", $("resultCount").textContent.includes("1,720"));
-check("결과 그리드", $("resultGrid").querySelectorAll(".p-card").length === 3);
+check("결과 그리드", $("resultGrid").querySelectorAll(".p-card").length === 4);
 check("페이저 다음 활성", !$("pager").querySelector('[data-page="next"]').disabled);
 check("페이저 이전 비활성", $("pager").querySelector('[data-page="prev"]').disabled);
 check("주소창 반영", window.location.search.includes("q=%EC%83%A4%EB%84%AC") || window.location.search.includes("view=list"));
+
+console.log("\n[입점 판매자]");
+const railHtml = $("railGrid").innerHTML;
+check("입점 매물은 button 카드", railHtml.includes('<button class="p-card"'));
+check("크롤링 매물은 a 카드", railHtml.includes('<a class="p-card"'));
+check("data-seller 속성", railHtml.includes('data-seller="3"'));
+
+const sellerBtn = window.document.querySelector('[data-seller]');
+sellerBtn?.dispatchEvent(new window.Event("click", { bubbles: true }));
+await new Promise((r) => setTimeout(r, 120));
+
+const panel = $("sellerPanel");
+check("패널 열림", !panel.hidden);
+check("판매자 이름", panel.textContent.includes("해운대 빈티지"));
+check("사업자번호 노출", panel.textContent.includes("345-67-89012"));
+check("매물 건수", panel.textContent.includes("8건"));
+check("지도 렌더", !!panel.querySelector(".seller-map img"));
+check("검증 범위 고지", panel.textContent.includes("국세청 진위확인을 거치지 않았"));
+
+panel.querySelector("[data-seller-close]")?.dispatchEvent(new window.Event("click", { bubbles: true }));
+await new Promise((r) => setTimeout(r, 50));
+check("패널 닫힘", panel.hidden);
 
 console.log("\n[실시간 조회]");
 check("live 엔드포인트 호출", calls.some((c) => c.includes("/api/live/search")));

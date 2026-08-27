@@ -59,6 +59,33 @@ MAX_ROWS = 5_000
 
 _DIGITS = re.compile(r"[0-9]+")
 
+# 스프레드시트가 수식으로 해석하는 시작 문자.
+#
+# 셀 값이 "=cmd|'/c calc'!A1" 이면 엑셀이 그것을 수식으로 읽고, 사용자가 경고를
+# 승인하면 실행된다. 우리가 CSV를 읽기만 할 때는 무해하지만, 저장한 값을 나중에
+# 관리자 화면에서 CSV로 내보내면 그 파일이 무기가 된다.
+#
+# 내보내는 쪽에서 막지 않고 **들어올 때 무력화한다.** 내보내는 경로가 하나뿐이라는
+# 보장이 없어서다 — 나중에 누가 다른 내보내기를 추가하면 방어를 다시 붙여야 하고,
+# 붙이는 것을 잊는 쪽이 훨씬 흔하다.
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def neutralize_formula(value: str) -> str:
+    """
+    스프레드시트 수식으로 해석될 수 있는 값 앞에 작은따옴표를 붙인다.
+
+    "-5000" 같은 정상 값도 걸리는데, 이 함수는 화면에 그대로 뜨는 텍스트 컬럼
+    (제목·브랜드·지역)에만 쓴다. 가격은 parse_price가 숫자로 바꾸므로 통과시키지
+    않는다 — 숫자 컬럼까지 걸면 음수 가격을 못 넣는다.
+    """
+    text = (value or "").strip()
+
+    if text.startswith(_FORMULA_PREFIXES):
+        return f"'{text}"
+
+    return text
+
 
 @dataclass
 class ImportReport:
@@ -165,6 +192,13 @@ def parse_csv(raw: bytes) -> ImportReport:
             break
 
         value = {col: (row[i].strip() if i < len(row) else "") for i, col in columns.items()}
+
+        # 화면에 그대로 뜨고, 나중에 CSV로 다시 나갈 수 있는 텍스트 컬럼만 무력화한다.
+        # url은 제외한다 — 뒤에서 http(s)로 시작하는지 따로 검사하므로 여기서
+        # 따옴표가 붙으면 그 검사가 실패한다.
+        for column in ("title", "brand", "region"):
+            if column in value:
+                value[column] = neutralize_formula(value[column])
 
         title = value.get("title", "")
         url = value.get("url", "")

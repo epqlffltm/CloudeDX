@@ -69,6 +69,11 @@ export function fetchLive(query, signal) {
   return getJSON(`${API_BASE}/api/live/search?q=${encodeURIComponent(query)}`, signal);
 }
 
+/** 입점 판매자 정보. 크롤링 매물에는 seller_id가 없으므로 호출하지 않는다. */
+export function fetchSeller(sellerId, signal) {
+  return getJSON(`${API_BASE}/api/sellers/${sellerId}`, signal);
+}
+
 /** 필터 선택지와 수집 현황 (브랜드·수집처·카테고리별 건수). */
 export function fetchMeta(signal) {
   return getJSON(`${API_BASE}/api/meta`, signal);

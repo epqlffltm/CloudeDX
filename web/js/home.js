@@ -10,7 +10,7 @@
 // 뒤 이 화면에 자동으로 칸이 늘어난다. 프론트에 목록을 박아두면 백엔드를 고칠 때마다
 // 양쪽을 같이 고쳐야 하고, 실제로는 한쪽만 고쳐서 어긋난다.
 
-import { fetchListings, fetchLive, fetchMeta } from './api.js';
+import { fetchListings, fetchLive, fetchMeta, fetchSeller } from './api.js';
 import { PAGE_SIZE, PRICE_UNLIMITED, toDisplayBrand } from './state.js';
 
 // ── 표시용 사전 ─────────────────────────────────────────────────────
@@ -46,6 +46,15 @@ const SORT_OPTIONS = [
 ];
 
 const ALL = '전체';
+
+// 브이월드 정적 지도. 브라우저가 직접 호출하므로 키가 프론트에 노출된다 —
+// 원래 그런 용도로 발급하는 키이고, 인증키 신청 시 사용 도메인을 등록해 두면
+// 남이 가져다 쓰는 것을 막을 수 있다.
+//
+// 키가 비어 있으면 이미지 요청이 실패하고, onerror가 지도 블록을 통째로 지운다.
+// 그래서 키를 넣지 않아도 화면은 깨지지 않는다.
+const VWORLD_STATIC = 'https://api.vworld.kr/req/image';
+const VWORLD_KEY = document.querySelector('meta[name="vworld-key"]')?.content ?? '';
 
 const categoryLabel = (id) => CATEGORY_LABELS[id] ?? id;
 const categoryIcon = (id) => CATEGORY_ICONS[id] ?? 'i-sparkles';
@@ -132,8 +141,15 @@ function cardHtml(item) {
     ? '<span class="p-seal"><svg viewBox="0 0 24 24"><use href="#i-seal"/></svg>정품인증</span>'
     : '';
 
+  // 입점 판매자 매물은 바깥 링크가 아니라 판매자 패널을 연다. 원문 사이트가
+  // 없는 판매자라 나갈 곳이 없고, 연락처와 매장 위치가 우리 화면에만 있다.
+  const tag = item.seller_id ? 'button' : 'a';
+  const attrs = item.seller_id
+    ? `type="button" data-seller="${item.seller_id}"`
+    : `href="${esc(item.item_url)}" target="_blank" rel="noopener noreferrer"`;
+
   return `
-    <a class="p-card" href="${esc(item.item_url)}" target="_blank" rel="noopener noreferrer">
+    <${tag} class="p-card" ${attrs}>
       <div class="p-img${item.image_url ? '' : ' p-img--empty'}">
         ${image}
         <span class="p-badge">${esc(item.source)}</span>
@@ -142,7 +158,7 @@ function cardHtml(item) {
       <div class="p-brand">${esc(toDisplayBrand(item.brand))}</div>
       <div class="p-name">${esc(item.title)}</div>
       <div class="p-price${unknown ? ' p-price--unknown' : ''}">${priceText(item.price)}</div>
-    </a>`;
+    </${tag}>`;
 }
 
 function skeletonHtml(count) {
@@ -448,6 +464,83 @@ async function refreshLive(query) {
   }
 }
 
+/**
+ * 입점 판매자 패널.
+ *
+ * 지도는 브이월드 정적 지도 이미지를 브라우저가 직접 받는다. **백엔드를 거치지
+ * 않는다** — 백엔드는 폐쇄망에 있고, 지도 타일은 사용자 브라우저가 외부망에서
+ * 가져오면 되는 자원이라 서버가 중계할 이유가 없다.
+ *
+ * 매장이 없는 판매자는 지도를 아예 그리지 않는다. has_store가 false면 주소와
+ * 좌표가 없는 것이 정상이고, 빈 지도를 띄우면 "위치를 못 찾았다"로 읽힌다.
+ */
+function renderSellerPanel(seller) {
+  const panel = $('sellerPanel');
+
+  const map = seller.has_store && seller.latitude && seller.longitude
+    ? `
+      <div class="seller-map">
+        <img src="${VWORLD_STATIC}?key=${VWORLD_KEY}&center=${seller.longitude},${seller.latitude}&crs=EPSG:4326&zoom=16&size=560,240&format=png&basemap=GRAPHIC&marker=point:${seller.longitude},${seller.latitude}"
+             alt="${esc(seller.name)} 매장 위치" loading="lazy"
+             onerror="this.closest('.seller-map').remove()">
+        <p class="seller-map-note">지도 제공: 국토교통부 브이월드</p>
+      </div>`
+    : '';
+
+  const store = seller.has_store
+    ? `<dt>매장 주소</dt><dd>${esc(seller.address ?? '등록되지 않음')}</dd>`
+    : '<dt>매장</dt><dd>매장 없이 온라인으로만 판매합니다.</dd>';
+
+  panel.innerHTML = `
+    <div class="seller-sheet" role="dialog" aria-modal="true" aria-labelledby="sellerName">
+      <button class="seller-close" type="button" data-seller-close aria-label="닫기">&times;</button>
+
+      <p class="seller-eyebrow">입점 판매자</p>
+      <h2 class="seller-name" id="sellerName">${esc(seller.name)}</h2>
+      ${seller.description ? `<p class="seller-desc">${esc(seller.description)}</p>` : ''}
+
+      <dl class="seller-facts">
+        <dt>사업자등록번호</dt><dd>${esc(seller.business_number)}</dd>
+        <dt>연락처</dt><dd><a href="tel:${esc(seller.phone)}">${esc(seller.phone)}</a></dd>
+        ${store}
+        <dt>등록 매물</dt><dd>${won.format(seller.item_count)}건</dd>
+      </dl>
+
+      ${map}
+
+      <p class="seller-disclaimer">
+        사업자등록번호는 형식만 확인한 값입니다. 국세청 진위확인을 거치지 않았으며,
+        거래 전 직접 확인하시기 바랍니다.
+      </p>
+    </div>`;
+
+  panel.hidden = false;
+  panel.querySelector('[data-seller-close]')?.focus();
+}
+
+function closeSellerPanel() {
+  const panel = $('sellerPanel');
+  panel.hidden = true;
+  panel.innerHTML = '';
+}
+
+async function openSeller(sellerId) {
+  const panel = $('sellerPanel');
+
+  panel.hidden = false;
+  panel.innerHTML = '<div class="seller-sheet"><p class="seller-loading">판매자 정보를 불러오는 중…</p></div>';
+
+  try {
+    renderSellerPanel(await fetchSeller(sellerId));
+  } catch {
+    panel.innerHTML = `
+      <div class="seller-sheet">
+        <button class="seller-close" type="button" data-seller-close aria-label="닫기">&times;</button>
+        <p class="seller-loading">판매자 정보를 불러오지 못했습니다.</p>
+      </div>`;
+  }
+}
+
 async function loadMeta() {
   try {
     state.meta = await fetchMeta();
@@ -544,6 +637,15 @@ document.addEventListener('click', (e) => {
 
   if (hit('[data-retry]')) { loadList(); return; }
 
+  const sellerBtn = hit('[data-seller]');
+  if (sellerBtn) { openSeller(sellerBtn.dataset.seller); return; }
+
+  // 닫기 버튼, 또는 시트 바깥(배경)을 눌렀을 때.
+  if (hit('[data-seller-close]') || e.target.id === 'sellerPanel') {
+    closeSellerPanel();
+    return;
+  }
+
   const tab = hit('[data-rail]');
   if (tab) {
     state.railTab = tab.dataset.rail;
@@ -554,6 +656,10 @@ document.addEventListener('click', (e) => {
 
     loadRail();
   }
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('sellerPanel').hidden) closeSellerPanel();
 });
 
 $('searchForm').addEventListener('submit', (e) => {

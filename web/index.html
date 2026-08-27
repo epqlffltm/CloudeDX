@@ -10,6 +10,12 @@
   <meta property="og:description" content="당근마켓·중고나라·번개장터의 중고 명품 매물을 한곳에서." />
   <meta property="og:type" content="website" />
 
+  <!-- 브이월드 지도 인증키. 브라우저가 직접 호출하므로 여기 둔다 —
+       백엔드는 폐쇄망에 있어 지도 서버에 나가지 못한다.
+       비워 두면 지도 블록만 조용히 사라지고 나머지 화면은 그대로 동작한다.
+       https://www.vworld.kr/dev/v4api.do 에서 발급받아 넣는다. -->
+  <meta name="vworld-key" content="" />
+
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,500&family=Noto+Serif+KR:wght@500;600;700&display=swap" />
@@ -142,6 +148,9 @@
 </div>
 
 </main>
+
+<!-- 입점 판매자 패널. 매물 카드를 누르면 채워진다. -->
+<div class="seller-panel" id="sellerPanel" hidden></div>
 
 <footer class="site">
   <div class="wrap footer-top">

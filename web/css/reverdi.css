@@ -416,3 +416,87 @@ footer.site {
   display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;
 }
 @media (max-width: 880px) { .footer-top { grid-template-columns: 1fr 1fr; row-gap: 30px; } }
+
+
+/* ── 입점 판매자 패널 ───────────────────────────────────────────────
+ *
+ * 매물 카드를 누르면 열린다. 크롤링 매물은 원문 사이트로 나가지만, 입점 판매자의
+ * 매물은 나갈 곳이 없다 — 연락처와 매장 위치가 우리 화면에만 있다.
+ */
+
+.seller-panel {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(28, 28, 26, .55);
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+}
+.seller-panel[hidden] { display: none; }
+
+.seller-sheet {
+  position: relative;
+  width: min(600px, 100%); max-height: 86vh; overflow-y: auto;
+  background: #fff; border-radius: 8px; padding: 34px 34px 28px;
+}
+
+.seller-close {
+  position: absolute; top: 14px; right: 16px;
+  width: 34px; height: 34px; border-radius: 50%;
+  font-size: 22px; line-height: 1; color: var(--ink-soft);
+}
+.seller-close:hover { background: var(--accent-pill); color: var(--accent-deep); }
+
+.seller-eyebrow {
+  margin: 0 0 6px; font-size: 11px; font-weight: 700;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--accent);
+}
+.seller-name {
+  font-family: var(--font-kr-serif); font-size: 24px; font-weight: 700;
+  margin-bottom: 10px;
+}
+.seller-desc {
+  margin: 0 0 22px; font-size: 13.5px; line-height: 1.7; color: var(--ink-soft);
+}
+
+.seller-facts {
+  display: grid; grid-template-columns: 108px 1fr;
+  gap: 10px 16px; margin: 0 0 24px;
+  padding: 20px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+}
+.seller-facts dt {
+  font-size: 12px; font-weight: 700; color: var(--ink-faint);
+  letter-spacing: .02em;
+}
+.seller-facts dd { margin: 0; font-size: 13.5px; color: var(--ink); }
+.seller-facts a { color: var(--accent-deep); text-decoration: underline; }
+
+.seller-map { margin-bottom: 20px; }
+.seller-map img {
+  width: 100%; height: auto; border-radius: 4px; border: 1px solid var(--line);
+}
+.seller-map-note {
+  margin: 6px 0 0; font-size: 11px; color: var(--ink-faint);
+}
+
+/* 검증 범위를 명확히 알리는 자리. 사업자등록번호는 형식만 확인한 값이라,
+ * 그 이상으로 읽히지 않게 화면에서 직접 말한다. */
+.seller-disclaimer {
+  margin: 0; padding: 12px 14px; border-radius: 4px;
+  background: var(--bg-alt); font-size: 12px; line-height: 1.6; color: var(--ink-soft);
+}
+
+.seller-loading {
+  margin: 0; padding: 40px 0; text-align: center;
+  font-size: 14px; color: var(--ink-soft);
+}
+
+/* 카드가 <button>일 때도 <a>와 같게 보이게 한다. 입점 매물은 바깥 링크가 아니라
+ * 판매자 패널을 열므로 button으로 그린다. */
+button.p-card {
+  width: 100%; padding: 0; text-align: left; font: inherit;
+}
+
+@media (max-width: 620px) {
+  .seller-sheet { padding: 28px 20px 22px; }
+  .seller-facts { grid-template-columns: 1fr; gap: 4px 0; }
+  .seller-facts dd { margin-bottom: 10px; }
+}

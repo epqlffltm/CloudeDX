@@ -70,6 +70,24 @@
   </section>
 
   <section class="panel">
+    <h2 class="panel__title">매물 사진</h2>
+    <p class="panel__note">
+      CSV에 <code>image_url</code>을 적지 않았거나 사진 주소가 없다면, 여기서 파일을
+      직접 올릴 수 있습니다. 올린 사진은 서버에서 다시 인코딩되어 저장되므로
+      촬영 위치 정보(EXIF)는 남지 않고, 긴 변이 1600px로 줄어듭니다.
+    </p>
+
+    <div class="table-wrap">
+      <table class="table">
+        <thead><tr><th style="width:88px">사진</th><th>매물</th><th style="width:260px">올리기</th></tr></thead>
+        <tbody id="photoRows"></tbody>
+      </table>
+    </div>
+
+    <button class="btn-reset" id="photoReload" type="button" style="margin-top:12px">목록 새로고침</button>
+  </section>
+
+  <section class="panel">
     <h2 class="panel__title">파일 형식</h2>
     <p class="panel__note">
       첫 줄은 헤더입니다. <b>title, price, url</b> 세 개는 반드시 있어야 하고,
@@ -85,7 +103,7 @@
           <tr><td><code>price</code></td><td>필수</td><td>가격. 980만원 / 9,800,000 / 9800000 모두 인식</td><td>980만원</td></tr>
           <tr><td><code>url</code></td><td>필수</td><td>원본 상품 링크. 중복 판정 기준입니다</td><td>https://example.com/1</td></tr>
           <tr><td><code>brand</code></td><td>선택</td><td>비워도 제목에서 판정합니다</td><td>샤넬</td></tr>
-          <tr><td><code>image_url</code></td><td>선택</td><td>썸네일 주소</td><td>https://example.com/1.jpg</td></tr>
+          <tr><td><code>image_url</code></td><td>선택</td><td>썸네일 주소. 비워 두고 위 "매물 사진"에서 직접 올려도 됩니다</td><td>https://example.com/1.jpg</td></tr>
           <tr><td><code>region</code></td><td>선택</td><td>지역</td><td>서울 강남구</td></tr>
         </tbody>
       </table>
@@ -99,5 +117,6 @@
 </main>
 
 <script type="module" src="js/client.js"></script>
+<script type="module" src="js/client_photos.js"></script>
 </body>
 </html>

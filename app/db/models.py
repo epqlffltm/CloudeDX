@@ -20,6 +20,8 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     DateTime,
+    Float,
+    ForeignKey,
     Integer,
     MetaData,
     String,
@@ -83,6 +85,18 @@ class ItemRecord(Base):
     # 당근마켓에는 대응 배지가 없어 항상 NULL이고, 그건 "개인 판매자"가 아니라
     # "판정할 수 없음"을 뜻한다 (app/domain/seller.py 참고).
     seller_type: Mapped[str | None] = mapped_column(String(20))
+
+    # 이 매물을 등록한 입점 판매자. 크롤링분은 NULL이다.
+    #
+    # NULL이 "판매자를 모른다"가 아니라 "우리 판매자가 아니다"를 뜻한다. 크롤링
+    # 매물에도 원문 사이트의 셀러가 있지만 그건 우리가 계약한 상대가 아니고,
+    # 연락처를 화면에 띄울 근거도 없다. 그 구분을 컬럼 하나로 유지한다.
+    #
+    # ondelete는 SET NULL이다. 판매자를 지운다고 매물까지 사라지면, 이미 목록에
+    # 노출되고 검색에 걸린 매물이 통째로 증발한다. 매물은 남기고 연결만 끊는다.
+    seller_id: Mapped[int | None] = mapped_column(
+        ForeignKey("sellers.id", ondelete="SET NULL"), index=True
+    )
 
     # 정품 인증 뱃지. 화면 카드의 "정품인증" 씰이 이 값 하나만 본다.
     #
@@ -230,3 +244,56 @@ class CrawlRun(Base):
     # 실패 사유. 일부 사이트만 실패한 경우 status는 success지만 여기에 기록이 남는다.
     # 어떤 사이트가 왜 막혔는지가 나중에 셀렉터를 고칠 때 유일한 단서라 길이 제한을 두지 않는다.
     error: Mapped[str | None] = mapped_column(Text)
+
+class Seller(Base):
+    """
+    입점 판매자.
+
+    사이트를 갖고 있지 않은 사업자를 위한 자리다. 매장이 있는 판매자도, 온라인으로만
+    파는 판매자도 상정한다 — has_store가 그 둘을 가른다.
+
+    **계정 테이블이 아니다.** 로그인 계정은 설정에서 읽는 별도 체계이고(app/auth.py),
+    여기는 화면에 표시할 사업자 정보다. 둘을 한 테이블로 합치면 계정 없이 정보만
+    등록해 두는 경우(시연 시드가 그렇다)를 다룰 수 없다.
+
+    **여기 담긴 값은 우리가 검증한 것이 아니다.** 사업자등록번호의 진위는 국세청
+    API로만 확인할 수 있는데 백엔드가 폐쇄망에 있어 나가지 못한다. 저장하는 것은
+    형식 검사를 통과한 값일 뿐이고, 화면 문구도 그 수준을 넘어서면 안 된다.
+    """
+
+    __tablename__ = "sellers"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+
+    # 사업자등록번호. 3-2-5 하이픈 형식으로 정규화해서 넣는다
+    # (app/domain/sellers.py의 normalize_business_number).
+    #
+    # 유니크를 건다. 같은 사업자가 두 번 등록되면 매물이 두 판매자로 갈라져,
+    # 화면에서 같은 가게가 서로 다른 연락처로 두 번 뜬다.
+    business_number: Mapped[str] = mapped_column(String(20), nullable=False, unique=True)
+
+    phone: Mapped[str] = mapped_column(String(20), nullable=False)
+
+    # 매장 보유 여부. False면 주소와 좌표가 없는 것이 정상이고, 화면은 지도를
+    # 아예 그리지 않는다. "주소가 NULL이니 매장이 없나 보다"로 추정하지 않기 위해
+    # 별도 컬럼으로 둔다 — 매장은 있는데 주소를 아직 안 적은 경우와 구분해야 한다.
+    has_store: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false"
+    )
+
+    address: Mapped[str | None] = mapped_column(String(200))
+
+    # 위경도. 폐쇄망이라 백엔드에서 지오코딩을 할 수 없어, 등록 시점에 이미 좌표가
+    # 정해진 채로 들어온다(시드가 직접 넣거나, 브라우저가 지오코더를 호출해 폼에
+    # 채워 보낸다). 클라이언트가 보내는 값이므로 저장 전에 한국 영토 범위를 검사한다.
+    latitude: Mapped[float | None] = mapped_column(Float)
+    longitude: Mapped[float | None] = mapped_column(Float)
+
+    # 판매자 소개. 상세 화면 상단에 짧게 보여준다.
+    description: Mapped[str | None] = mapped_column(Text)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

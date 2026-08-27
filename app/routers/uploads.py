@@ -8,6 +8,9 @@ python-multipart를 새로 넣어야 하는데, 파일이 하나뿐이고 함께
 의존성과 uv.lock을 건드릴 만한 이유가 못 된다. 화면은 FileReader로 읽어 그대로
 POST한다(web/js/client.js).
 
+매물 사진 등록(PUT /items/{id}/image)도 같은 방식이다. 매물 id는 경로에 있고
+파일은 하나이며 함께 보낼 필드가 없어서, 여기서도 multipart가 주는 이점이 없다.
+
 저장은 repository.upsert_items로 간다 — 크롤러와 같은 문이다. 제목 정제, 브랜드
 판정, 카테고리 분류, url 기준 중복 처리가 업로드분에도 똑같이 걸린다. 별도 경로를
 만들면 "크롤링한 샤넬"과 "올린 샤넬"의 표기가 갈라진다.
@@ -26,11 +29,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import User, require_role
 from app.config import MAX_UPLOAD_BYTES, WRITE_TIMEOUT_SECONDS
+from app.domain.image_security import MAX_UPLOAD_BYTES as MAX_IMAGE_BYTES
+from app.domain.image_security import ImageRejected, sanitize_image
+from app.domain.sources import UPLOAD
+from app.domain.storage import delete_image, public_url, save_image
 from app.db import repository
 from app.db.engine import get_session
 from app.db.models import ItemRecord
 from app.domain.csv_import import REQUIRED_COLUMNS, parse_csv
 from app.schemas.auth import UploadResponse
+from app.schemas.uploads import ImageUploadResponse
 
 logger = logging.getLogger(__name__)
 
@@ -198,4 +206,121 @@ async def upload_csv(
         skipped=report.skipped,
         errors=report.errors,
         filtered=list(hidden),
+    )
+
+@router.put(
+    "/items/{item_id}/image",
+    response_model=ImageUploadResponse,
+    status_code=status.HTTP_200_OK,
+    operation_id="uploadItemImage",
+    summary="매물 사진 등록 (기업고객 전용)",
+    responses={
+        400: {"description": "이미지로 받아들일 수 없는 파일입니다."},
+        401: {"description": "로그인이 필요합니다."},
+        403: {"description": "기업고객이 등록한 매물만 수정할 수 있습니다."},
+        404: {"description": "해당 매물을 찾을 수 없습니다."},
+        413: {"description": "파일이 너무 큽니다."},
+        503: {"description": "DB에 쓸 수 없는 상태입니다. 잠시 후 다시 시도하세요."},
+    },
+)
+async def upload_item_image(
+    item_id: int,
+    request: Request,
+    user: Annotated[User, Depends(require_role("client"))],
+    session: Annotated[AsyncSession, Depends(get_session)],
+):
+    """
+    이미지 본문을 받아 매물 사진으로 저장한다.
+
+    CSV로 매물을 먼저 올린 뒤, 목록에서 매물을 골라 사진을 붙이는 흐름이다.
+    CSV에 이미지 주소를 적을 수 있는 판매자는 그대로 쓰면 되고, 사이트가 없어
+    올릴 곳이 없는 판매자를 위한 경로가 이쪽이다.
+
+    CSV 업로드와 마찬가지로 multipart가 아니라 본문으로 받는다. 매물 id는 경로에
+    있고 파일은 하나이며 함께 보낼 필드가 없어서, multipart가 주는 이점이 없다.
+    화면은 FileReader나 File 객체를 그대로 PUT한다.
+
+    POST가 아니라 PUT인 이유는 같은 매물에 여러 번 올리면 마지막 것만 남기 때문이다.
+    사진 컬럼이 하나뿐이라 이 연산은 멱등하다.
+    """
+    raw = await _read_body_capped(request, MAX_IMAGE_BYTES)
+
+    item = await session.get(ItemRecord, item_id)
+
+    if item is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="해당 매물을 찾을 수 없습니다.",
+        )
+
+    # 크롤링 매물은 건드리지 못한다.
+    #
+    # 원문 사이트의 매물이라 우리가 사진을 바꿀 권한이 없고, 바꾸면 그 사이트에
+    # 실제로 걸린 사진과 우리 화면이 달라진다. 사용자가 링크를 눌러 갔을 때
+    # 다른 물건처럼 보인다.
+    #
+    # 여기까지가 지금 계정 체계로 강제할 수 있는 전부다. 계정이 설정 기반이라
+    # (app/auth.py) client 계정과 sellers 행을 잇는 연결이 없어서, "내가 등록한
+    # 매물인가"까지는 확인하지 못한다. client 계정이 하나뿐인 지금은 차이가
+    # 없지만, 판매자별 계정을 만드는 순간 여기에 소유자 검사가 필요해진다.
+    if item.source != UPLOAD:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="기업고객이 등록한 매물만 수정할 수 있습니다.",
+        )
+
+    # 검증과 재인코딩. 원본 바이트는 여기서 버려지고 픽셀만 새 파일로 옮겨진다.
+    try:
+        safe = sanitize_image(raw)
+    except ImageRejected as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+
+    previous = item.image_url
+
+    object_name = save_image(safe.data, safe.extension)
+    item.image_url = public_url(object_name)
+
+    try:
+        async with asyncio.timeout(WRITE_TIMEOUT_SECONDS):
+            await session.commit()
+    except (TimeoutError, SQLAlchemyError) as exc:
+        await session.rollback()
+
+        # 커밋이 실패했으면 방금 쓴 파일은 아무도 참조하지 않는다. 지우지 않으면
+        # 볼륨에 영영 남는다 — 어느 매물의 것도 아니라 나중에 찾아낼 방법도 없다.
+        delete_image(object_name)
+
+        logger.warning(
+            "매물 %s 사진 저장 실패: %s: %s", item_id, type(exc).__name__, exc
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="지금은 저장할 수 없습니다. 잠시 후 다시 시도해 주세요.",
+        ) from exc
+
+    # 이전 사진을 지운다. 커밋이 끝난 **뒤에** 지우는 것이 중요하다 — 먼저 지우고
+    # 커밋이 실패하면 옛 사진도 새 사진도 없는 상태가 된다.
+    #
+    # 우리가 저장한 파일만 지운다. CSV에 적어 올린 외부 주소는 남의 파일이라
+    # 지울 수도 없고 지울 대상도 아니다.
+    if previous and previous.startswith("/uploads/"):
+        delete_image(previous.removeprefix("/uploads/"))
+
+    logger.info(
+        "매물 %s 사진 등록: %dx%d, %d바이트 (%s)",
+        item_id,
+        safe.width,
+        safe.height,
+        len(safe.data),
+        user.username,
+    )
+
+    return ImageUploadResponse(
+        item_id=item_id,
+        image_url=item.image_url,
+        width=safe.width,
+        height=safe.height,
+        bytes=len(safe.data),
     )

@@ -66,6 +66,14 @@ class ListingOut(BaseModel):
     )
     image_url: str | None = None
     item_url: str = Field(description="원문 매물 주소. 거래는 각 수집처에서 이루어진다")
+    seller_id: int | None = Field(
+        default=None,
+        description=(
+            "입점 판매자 id. 크롤링 매물은 null이다 — null은 '판매자를 모른다'가 "
+            "아니라 '우리 판매자가 아니다'를 뜻한다. 값이 있으면 화면이 "
+            "/api/sellers/{id}로 연락처와 매장 위치를 가져온다"
+        ),
+    )
     is_authenticated: bool = Field(
         default=False,
         description=(
