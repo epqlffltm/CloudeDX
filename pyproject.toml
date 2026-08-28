@@ -11,6 +11,7 @@ dependencies = [
     "alembic>=1.19.1",
     "asyncpg>=0.31.0",
     "fastapi>=0.141.1",
+    "httpx>=0.28.1",
     "jinja2>=3.1.6",
     "pillow>=11.0.0",
     # /metrics 노출. prometheus_client 를 함께 끌어오고, app/db/engine.py 의
@@ -26,7 +27,6 @@ dependencies = [
 #   uv sync --extra crawler
 crawler = [
     "playwright>=1.62.0",
-    "httpx>=0.28.1",
 ]
 
 # 로컬 개발에서는 크롤러까지 함께 돌리므로 `uv sync --extra crawler` 를 쓴다.

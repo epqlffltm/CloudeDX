@@ -63,6 +63,7 @@ from app.config import (
     DATABASE_RO_URL,
     DATABASE_URL,
     ENABLE_CRAWLER,
+    UPLOAD_DIR,
 )
 from app.db.engine import engine, mask_url, read_engine, wait_for_db
 from app.logging_config import setup_logging
@@ -73,6 +74,7 @@ from app.routers.health import router as health_router
 from app.routers.live import router as live_router
 from app.routers.meta import router as meta_router
 from app.routers.products import router as products_router
+from app.routers.sellers import router as sellers_router
 from app.routers.uploads import router as uploads_router
 from app.routers.web import router as web_router
 from app.version import __version__
@@ -208,7 +210,10 @@ if ALLOWED_ORIGINS:
 #
 # 값의 근거:
 #   nosniff  브라우저가 Content-Type을 무시하고 내용으로 타입을 추측하는 것을 막는다.
-#            업로드된 CSV가 HTML로 해석되는 종류의 사고를 막는다.
+#            업로드된 CSV가 HTML로 해석되는 종류의 사고를 막는다. 판매자 사진을
+#            /uploads 에서 서빙하기 시작하면서 더 중요해졌다 — 이미지로 저장된
+#            파일이 HTML로 해석되면 우리 출처에서 스크립트가 돈다. 업로드 경로가
+#            재인코딩으로 그런 파일을 걸러내지만, 방어는 겹쳐 두는 것이 맞다.
 #   DENY     이 화면을 iframe에 넣지 못하게 한다. 클릭재킹 방지다.
 #   Referrer 외부 링크로 나갈 때 경로·쿼리를 빼고 출처만 보낸다. 매물 링크를 타고
 #            수집처로 나갈 때 검색어가 새어 나가지 않는다.
@@ -237,6 +242,7 @@ app.include_router(auth_router, prefix=API_PREFIX)
 app.include_router(admin_router, prefix=API_PREFIX)
 app.include_router(uploads_router, prefix=API_PREFIX)
 app.include_router(live_router, prefix=API_PREFIX)
+app.include_router(sellers_router, prefix=API_PREFIX)
 
 # ---------------------------------------------------------------------------
 # Prometheus 지표 — /metrics
@@ -276,6 +282,18 @@ Instrumentator(
 # html=True는 "/" 요청에 index.html을 돌려준다 — 예전의 /board 리다이렉트를
 # 대체한다. 이제 루트가 곧 서비스 화면이고, 게시판은 /board 직행으로 남는다.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 업로드 이미지 서빙.
+#
+# web/ mount보다 **먼저** 등록해야 한다. 등록 순서가 곧 우선순위인데, web/은 "/"에
+# 붙어 남는 경로를 전부 가져가므로 그 뒤에 두면 /uploads 요청이 web/으로 떨어진다.
+#
+# 디렉토리는 없으면 만든다. 볼륨을 새로 붙인 직후에는 비어 있고, StaticFiles는
+# 없는 디렉토리를 마운트하면 기동 시점에 예외를 올린다.
+# ---------------------------------------------------------------------------
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+
 _WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
 if _WEB_DIR.is_dir():

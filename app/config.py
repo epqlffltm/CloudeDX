@@ -17,6 +17,7 @@ scheduler를 임포트하게 되고, scheduler는 Playwright를 끌고 온다 �
 
 import os
 import secrets
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -190,6 +191,17 @@ LIVE_SEARCH_MAX_PAGES = _int_env("LIVE_SEARCH_MAX_PAGES", 1, minimum=1)
 # 있으므로 사용자가 잃는 것은 "몇 초 더 신선했을 매물"뿐이다. 반대로 제한이 없으면
 # 상대 사이트가 느릴 때 요청이 매달려 워커를 붙잡는다.
 LIVE_SEARCH_TIMEOUT_SECONDS = _int_env("LIVE_SEARCH_TIMEOUT_SECONDS", 8, minimum=1)
+
+# ---------------------------------------------------------------------------
+# 업로드 이미지 (app/domain/storage.py)
+# ---------------------------------------------------------------------------
+
+# 판매자가 올린 이미지를 저장할 디렉토리.
+#
+# web/ 아래에 두지 않는다. web/은 도커 이미지에 구워지고 git에 들어가는 곳이라,
+# 그 밑에 업로드를 받으면 사용자 파일이 커밋될 수 있고 이미지를 새로 빌드할 때마다
+# 사라진다. 별도 볼륨을 붙여 여기로 마운트한다(docker-compose.yml).
+UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "/srv/uploads"))
 
 # ---------------------------------------------------------------------------
 # API
