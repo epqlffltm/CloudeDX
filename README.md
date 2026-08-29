@@ -23,13 +23,12 @@
 ```
 크롤러(당근·중나 Playwright / 번장 API) → items 테이블(upsert) → 서빙
                                               ├─ /       웹 화면 (web/, 정적 서빙)
-                                              ├─ /board  게시판 화면 (Jinja2, 시연용)
                                               └─ /api    JSON API
 ```
 
 웹 화면은 `web/`의 정적 파일을 StaticFiles로 같은 출처에서 내보낸다 —
 그래서 CORS 설정 없이 동작한다(`ALLOWED_ORIGINS`는 화면을 외부에서 호스팅할
-때만 쓰는 선택지다). 게시판과 API는 같은 `app/db/repository.py`를 통해 조회한다. 화면과 API가 서로 다른
+때만 쓰는 선택지다). 화면과 API는 같은 `app/db/repository.py`를 통해 조회한다 — 서로 다른
 쿼리를 쓰기 시작하면 "API로는 나오는데 화면엔 없는" 상황이 생기기 때문이다.
 
 ## 현재 상태
@@ -49,7 +48,7 @@ copy .env.example .env
 docker compose up -d --build
 ```
 
-게시판 http://localhost:8000/board · 문서 http://localhost:8000/docs
+화면 http://localhost:8000 · 문서 http://localhost:8000/docs
 
 AWS 없이 배포 구성 전체를 한 대에서 확인하려면:
 
@@ -78,7 +77,7 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 - **중고나라 = 전국 최저가 비교용.** 중고나라는 원래 택배거래 중심의 온라인 마켓이라
   위치가 의미 없다. 그래서 "구찌 가방 전국 최저가"라는 개념이 여기서는 실제로 성립한다.
 
-게시판과 API 모두 `source` 필터로 이 둘을 구분한다 — "내 동네에서 보기"는 `당근마켓`,
+화면과 API 모두 `source` 필터로 이 둘을 구분한다 — "내 동네에서 보기"는 `당근마켓`,
 "최저가 비교"는 `중고나라`.
 
 ## 아키텍처
@@ -97,12 +96,11 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 | 라우터 | `app/routers/` | HTTP 관심사만 — 경로, 상태 코드, 404 처리 |
 | 리포지토리 | `app/db/repository.py` | 실제 SQL, 정렬, 카운트, upsert |
 | 응답 스키마 | `app/schemas/responses.py` | JSON API로 나가는 형태 |
-| 템플릿 | `app/templates/` | 게시판 화면 |
 
 요청 스키마는 `Annotated[CrawledItemFilterParams, Query()]`로 주입한다(FastAPI 0.115+).
 필터가 늘어나도 라우터 시그니처가 길어지지 않고, `min_price > max_price` 같은 모순은
-repository까지 내려가기 전에 422로 걸러진다. **게시판과 JSON API가 이 모델 하나를
-공유**하기 때문에 두 화면의 필터 동작이 갈라지지 않는다.
+repository까지 내려가기 전에 422로 걸러진다. `/api/crawled-items`와 `/api/products`가
+**이 모델 하나를 공유**하기 때문에 두 경로의 필터 동작이 갈라지지 않는다.
 
 목록 조회에서 `count_items()`와 `list_items()`가 같은 `_apply_filters()`를 공유하는 것도
 같은 이유다 — 조건이 어긋나면 `total`과 `items`가 서로 안 맞는 응답이 나간다.
@@ -137,7 +135,7 @@ app/
 ├── routers/
 │   ├── health.py                  # /health, /ready — 운영용 상태 확인
 │   ├── products.py                 # /api/products — 프론트 계약 어댑터
-│   ├── web.py                      # /board — 게시판 화면 (목록 → 상세)
+│   ├── memo.py                     # /api/admin/memo — 관리자 공용 메모 (파일 저장)
 │   ├── crawled.py                  # /api/crawled-items — 매물 JSON API
 │   └── meta.py                      # /api/meta — 필터 선택지/수집 현황
 ├── schemas/
@@ -155,9 +153,8 @@ app/
 
 ## 화면
 
-화면은 두 갈래다. `web/`의 정적 웹 화면(서비스 본편)과 `/board`의 Jinja2 게시판
-(시연·운영 점검용). 둘 다 같은 `app/db/repository.py`를 통해 조회하므로 결과가
-갈라지지 않는다.
+화면은 `web/`의 정적 웹 화면 하나다. 예전에 있던 Jinja2 게시판(/board)은
+제거했다 — 경위는 이 절 끝의 "게시판 — 제거함" 참고.
 
 ### 웹 화면 (web/) — 에디토리얼 리디자인
 
@@ -212,26 +209,26 @@ JS와 백엔드를 건드릴 필요가 없다. 실제로 메인 화면은 JS 무
 참조하지 않는다. 예전 admin.html이 참조하던 존재하지 않는 `css/app.css` 링크
 (매 로드 404)도 이번 교체로 사라졌다.
 
-### 게시판 (/board)
+### 관리자 메모 — 게시판을 걷어낸 자리
 
-`/board`가 목록, 제목을 누르면 `/board/{id}` 상세로 들어간다.
+관리자 콘솔(admin.html)의 "메모" 화면은 관리자들이 공용으로 쓰는 텍스트 한 장이다.
+인수인계·작업 기록 용도이고, 구현은 요구('txt 파일처럼') 그대로 **파일 하나**다
+(`/api/admin/memo`, `app/routers/memo.py`). DB 테이블로 만들지 않은 이유와 저장
+위치의 근거는 그 모듈 설명에 있다. 인스턴스를 여러 개 띄우면 파드마다 파일이
+갈라지므로, 그 시점이 오면 한 줄짜리 테이블로 옮긴다.
 
-필터는 자바스크립트 없는 GET form이라, 필터를 건 상태의 주소가 그대로 공유 가능한
-링크가 된다. 페이지 이동 링크도 현재 쿼리스트링을 유지한 채 `offset`만 바꾸므로
-3페이지에서 검색어가 풀리지 않는다.
+### 게시판 — 제거함
 
-목록 각 행에는 **등록 후 경과 막대**가 붙는다. 원글이 올라온 시각(`posted_at`)부터
-지금까지를 2주 최대치로 잡아 표시한다. 오래 걸려 있는 매물, 즉 가격 협상 여지가 있는
-매물을 훑어보며 찾는 것이 목적이다.
+`/board`(Jinja2 게시판)는 2026-08에 제거했다. 웹 화면(web/)이 목록·필터·상세를 전부
+갖추면서 역할이 겹쳤고, 화면 두 벌을 유지하면 손보는 쪽과 잊히는 쪽이 갈라진다.
 
-제목은 우리 쪽 상세 화면으로, 각 행의 `원글 ↗`은 당근/중고나라 원본 게시글로 간다.
-목록에서 바로 원본을 열고 싶은 경우와 우리 쪽 상세를 보려는 경우가 다르기 때문에
-둘 다 둔다.
-
-**등록 시각을 구하는 방법**은 아래 "등록 시각" 절에 정리했다. 값을 구하지 못한 매물은
-`first_seen_at`(우리가 처음 본 시각)으로 대체하고, 대체했다는 사실을 "등록"이 아니라
-"수집"이라고 표기하고 막대를 흐리게 해서 구분한다. 사이트가 시각을 표기하지 않은
-경우인데, 수집 시각을 등록일인 것처럼 보여주면 실제보다 최근 글로 오해하게 된다.
+게시판에만 있던 것들의 행방:
+- **등록 후 경과 막대** (오래 걸린 매물 = 협상 여지 찾기): 웹 화면에 아직 없다.
+  필요해지면 `posted_at`이 이미 API로 내려오므로 프론트에서만 붙일 수 있다.
+- JS 없는 GET form 필터 (공유 가능한 링크): 웹 화면도 필터 상태를 주소창에
+  기록하므로(`writeURL`) 링크 공유는 동일하게 된다.
+- 걷어낸 것: `app/routers/web.py`, `app/templates/`, 게시판 렌더링 테스트.
+  이 제거로 백엔드에서 Jinja2 의존이 사라졌다.
 
 ## 등록 시각
 
@@ -253,12 +250,9 @@ JS와 백엔드를 건드릴 필요가 없다. 실제로 메인 화면은 JS 무
 - **누락**: 중고나라는 카드에 시각 표기가 없는 경우가 있다. 그런 행은 `posted_at`이
   NULL이고 화면에서 수집 시각으로 대체된다.
 
-상세 화면에는 **상품 설명 본문이 없다.** 현재 크롤러가 검색 결과의 카드 목록만 훑기
+화면에는 **상품 설명 본문이 없다.** 현재 크롤러가 검색 결과의 카드 목록만 훑기
 때문이다. 본문을 채우려면 개별 매물 페이지를 한 번 더 방문하는 2단계 수집이 필요하고,
 그때까지는 원본 링크로 안내한다 (TODO 참고).
-
-게시판은 시연용이다. 나중에 프론트엔드를 따로 붙이면 `app/routers/web.py`와
-`app/templates/`만 걷어내면 되고, `/api` 아래는 그대로 남는다.
 
 ## 수집 동작
 
@@ -396,7 +390,7 @@ docker compose ps
 |---|---|---|
 | `db` | Postgres | — |
 | `migrate` | `alembic upgrade head` 후 종료 | `db` healthy |
-| `backend` | API + 게시판 | `migrate` 성공 종료 |
+| `backend` | API + 웹 화면 | `migrate` 성공 종료 |
 | `crawler` | 주기 수집 | `migrate` 성공 종료 |
 
 **`migrate`를 별도 서비스로 둔 이유**는 백엔드를 2대로 늘렸을 때 두 대가 동시에 같은
@@ -1059,12 +1053,12 @@ uv run uvicorn app.main:app
 `docker compose up -d`(서비스 이름 없이)를 치면 백엔드·크롤러 컨테이너까지 함께 떠서
 8000 포트가 겹치고 크롤러가 두 벌 돈다. 로컬 개발에서는 `db`만 지정한다.
 
-- 게시판: http://127.0.0.1:8000/board
+- 화면: http://127.0.0.1:8000/
 - Swagger UI: http://127.0.0.1:8000/docs
 - ReDoc: http://127.0.0.1:8000/redoc
 
 **서버는 크롤링을 기다리지 않고 바로 열린다.** DB 테이블 준비만 끝나면 요청을 받기
-시작하고, 수집은 백그라운드 태스크로 돈다. 수집 전이면 목록이 비어 있을 뿐 게시판과
+시작하고, 수집은 백그라운드 태스크로 돈다. 수집 전이면 목록이 비어 있을 뿐 화면과
 API는 정상 응답한다.
 
 이 구조가 필요한 이유는 배포 환경 때문이다. ECS나 App Runner 같은 오케스트레이터는
@@ -1072,7 +1066,7 @@ API는 정상 응답한다.
 수 분짜리 크롤링을 기다리면 서버가 뜨기도 전에 재시작되는 무한 루프에 빠진다.
 
 브라우저를 계속 띄우는 게 부담되면 `.env`에서 `ENABLE_CRAWLER=false`로 꺼둘 수 있다.
-꺼두더라도 DB 테이블 준비는 항상 하기 때문에, 이전에 수집해둔 데이터가 있으면 게시판과
+꺼두더라도 DB 테이블 준비는 항상 하기 때문에, 이전에 수집해둔 데이터가 있으면 화면과
 API 모두 정상적으로 조회된다.
 
 크롤러를 단독 프로세스로 돌리려면:
@@ -1110,11 +1104,11 @@ uv run python -m app.crawler.daangn.debug_cards --query "냉장고"
 
 | 메서드 | 경로 | 설명 |
 |---|---|---|
-| GET | `/` | `/board`로 리다이렉트 |
+| GET | `/` | 웹 화면 (web/index.html) |
 | GET | `/health` | 프로세스 생존 확인 (liveness) |
 | GET | `/ready` | 트래픽 수용 가능 여부 (readiness). 준비 안 됐으면 503 |
-| GET | `/board` | 게시판 목록 화면 |
-| GET | `/board/{item_id}` | 게시판 상세 화면 |
+| GET | `/api/admin/memo` | 관리자 공용 메모 읽기 (관리자 전용) |
+| PUT | `/api/admin/memo` | 관리자 공용 메모 저장 (관리자 전용) |
 | GET | `/api/crawled-items` | 매물 목록 JSON |
 | GET | `/api/crawled-items/{item_id}` | 매물 단건 JSON |
 | GET | `/api/meta` | 필터 선택지(브랜드/수집처)와 수집 현황 |
@@ -1142,7 +1136,7 @@ uv run python -m app.crawler.daangn.debug_cards --query "냉장고"
 `rounds_completed`가 0이면 아직 한 번도 성공하지 못했다는 뜻이다. `last_error`는
 일부 사이트만 실패했을 때도 기록되므로, 값이 있다고 해서 수집이 멈춘 건 아니다.
 
-목록의 쿼리 파라미터는 게시판과 API가 동일하다: `source`, `brand`, `search`, `is_sold`,
+목록의 쿼리 파라미터는 두 목록 API가 동일하다: `source`, `brand`, `search`, `is_sold`,
 `min_price`, `max_price`, `limit`(1~100), `offset`.
 
 응답의 `posted_at`은 원글 등록 시각이고, 구하지 못했으면 `null`이다. 원문 표기는
@@ -1246,7 +1240,7 @@ false). 컬럼이 NOT NULL(기본 `bag`)로 이미 배포돼 있어 센티널을
 
 ### 프론트엔드 연결
 
-API는 `/api` 아래에 모여 있다. 화면 경로(`/board`)와 분리해 뒀기 때문에, 리버스
+API는 `/api` 아래에 모여 있다. 화면 경로와 분리해 뒀기 때문에, 리버스
 프록시에서 `/api`만 백엔드로 넘기거나 나중에 `/api/v2`를 병행하는 구성이 쉽다.
 
 **CORS**: 프론트를 별도 개발 서버(Vite 5173 등)로 띄우면 브라우저가 다른 출처로 보고
@@ -1407,7 +1401,7 @@ ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 LUXURY_BRANDS = ("구찌", "에르메스", "샤넬", "루이비통")
 ```
 
-이 목록만 고치면 `scheduler.py`, 두 사이트 `run.py`의 `--all-brands`, 게시판의 브랜드
+이 목록만 고치면 `scheduler.py`, 두 사이트 `run.py`의 `--all-brands`, 화면의 브랜드
 선택 상자가 전부 그대로 반영한다. 브랜드가 늘어나는 만큼 한 라운드 소요 시간도 비례해서
 늘어난다는 점은 감안해야 한다.
 
@@ -1480,7 +1474,7 @@ uv run pytest
 | 파일 | 대상 |
 |---|---|
 | `test_repository.py` | 필터, 정렬, 페이지네이션, upsert |
-| `test_api.py` | 응답 계약, 422/404, 게시판 렌더링 |
+| `test_api.py` | 응답 계약, 422/404 |
 | `test_runner.py` | 라운드 실행 규칙 — 사이트 실패 처리, 주기 판단, 루프 생존 |
 | `test_source_runner.py` | 사이트 내부 실패 정책 — 전체/부분 실패, 정상 0건, 페이지 실패 |
 | `test_crawl_runs.py` | 라운드 상태 전이, stale 판정 |
@@ -1692,8 +1686,6 @@ netstat -ano | findstr :5432
   차단 확률이 올라간다.
 - `crawl_runs`가 계속 쌓인다. 30분 주기면 하루 48건, 1년에 1만7천 건이라 당장은 문제가
   없지만, 오래된 기록을 정리하는 작업이 언젠가 필요하다.
-- 게시판 스타일이 `base.html` 안에 인라인으로 들어가 있다. 시연용으로 정적 파일 마운트
-  없이 돌리려는 선택이고, 프론트를 분리하면 통째로 버릴 코드다.
 - 브라우저 자체를 띄우는 E2E 크롤러 테스트는 실제 사이트에 의존해서 CI에서 돌리지 않는다.
   대신 파서, 라운드 정책(`test_runner.py`), 브랜드/페이지 실패 정책(`test_source_runner.py`)은
   브라우저 없이 검증한다. 향후 HTML 픽스처를 저장해 셀렉터까지 고정적으로 검증하는 방식을

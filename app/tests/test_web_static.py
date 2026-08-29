@@ -82,6 +82,11 @@ async def test_api_not_shadowed_by_mount(client, session):
     assert res.json()["total"] == 1
 
 
-async def test_board_still_alive(client, session):
-    """게시판은 리다이렉트 없이 /board 직행으로 남는다."""
-    assert (await client.get("/board")).status_code == 200
+async def test_board_is_gone(client):
+    """
+    게시판(/board)은 제거됐다 — 웹 화면과 역할이 겹쳐서다.
+
+    404가 곧 계약이다: 라우트가 어딘가에 남아 부활하면 이 테스트가 잡는다.
+    (StaticFiles mount가 받아 404를 주므로 상태 코드는 mount 존재와 무관하게 404다.)
+    """
+    assert (await client.get("/board")).status_code == 404

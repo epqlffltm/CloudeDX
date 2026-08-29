@@ -69,7 +69,7 @@ function durationText(seconds) {
 
 /* ------------------------------------------------------------- 라우터 */
 
-const ROUTES = ['dashboard', 'api', 'db', 'crawler', 'items'];
+const ROUTES = ['dashboard', 'api', 'db', 'crawler', 'items', 'memo'];
 
 function route() {
   const name = location.hash.replace('#', '');
@@ -523,6 +523,61 @@ function renderBars(containerId, data, { limit = 12 } = {}) {
     .join('');
 }
 
+/* -------------------------------------------------------------- 메모 뷰 */
+//
+// 관리자 공용 메모 (GET/PUT /api/admin/memo — 서버가 텍스트 파일 한 장으로 저장).
+// dirty 플래그가 핵심이다: 입력 중일 때 새로고침(loadAll)이 돌아도 쓰고 있던
+// 내용을 서버 값으로 덮어쓰지 않는다.
+
+let memoDirty = false;
+
+function memoStatus(text, cls = '') {
+  const el = $('memoStatus');
+  el.textContent = text;
+  el.className = `memo-status${cls ? ` memo-status--${cls}` : ''}`;
+}
+
+async function loadMemo() {
+  if (memoDirty) return; // 입력 중이면 서버 값으로 덮지 않는다
+
+  try {
+    const res = await fetch('/api/admin/memo', { credentials: 'same-origin' });
+    if (!res.ok) throw new Error(String(res.status));
+
+    const data = await res.json();
+
+    $('memoText').value = data.text;
+    memoStatus(data.updated_at ? `마지막 저장 ${when(data.updated_at)}` : '아직 저장된 메모가 없습니다');
+  } catch {
+    memoStatus('메모를 불러오지 못했습니다.', 'error');
+  }
+}
+
+async function saveMemo() {
+  const btn = $('memoSave');
+  btn.disabled = true;
+
+  try {
+    const res = await fetch('/api/admin/memo', {
+      method: 'PUT',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: $('memoText').value,
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) throw new Error(data.detail || `서버가 ${res.status}로 응답했습니다.`);
+
+    memoDirty = false;
+    memoStatus(`저장됨 · ${when(data.updated_at)}`);
+  } catch (err) {
+    memoStatus(`저장 실패: ${err.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 /* ------------------------------------------------------------------ 로드 */
 
 async function loadAll() {
@@ -547,6 +602,8 @@ async function loadAll() {
     if (!overviewRes.ok) throw new Error(`서버가 ${overviewRes.status}로 응답했습니다.`);
 
     const data = await overviewRes.json();
+
+    loadMemo(); // 결과는 자기 화면(#memo)에 직접 그린다
 
     renderStatusCards(health, ready, data.crawler);
     renderKpi(data.items);
@@ -579,6 +636,20 @@ async function init() {
   route();
 
   $('refreshBtn').addEventListener('click', loadAll);
+
+  // 메모: 저장 버튼 + Ctrl/⌘+S. 입력이 시작되면 dirty 표시로 알려준다.
+  $('memoSave').addEventListener('click', saveMemo);
+  $('memoText').addEventListener('input', () => {
+    memoDirty = true;
+    memoStatus('저장되지 않은 변경이 있습니다', 'dirty');
+  });
+  $('memoText').addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+      e.preventDefault();
+      saveMemo();
+    }
+  });
+
   await loadAll();
 
   // 스파크라인용 지표 폴링. 10초면 지표 응답(수 KB)에 비해 부담이 없고,

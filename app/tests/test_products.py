@@ -51,9 +51,16 @@ async def test_maps_item_to_listing(client, session):
     body = (await client.get("/api/products")).json()
     listing = body["items"][0]
     assert set(listing) == {
-    "id", "source", "title", "brand", "category",
-    "price", "image_url", "item_url",
-    "seller_id", "is_authenticated",   # ← 추가
+        "id",
+        "source",
+        "title",
+        "brand",
+        "category",
+        "price",
+        "image_url",
+        "item_url",
+        "seller_id",
+        "is_authenticated",
     }
     assert isinstance(listing["id"], int)
     assert listing["source"] == "중고나라"

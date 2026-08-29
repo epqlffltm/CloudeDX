@@ -76,7 +76,7 @@ from app.routers.meta import router as meta_router
 from app.routers.products import router as products_router
 from app.routers.sellers import router as sellers_router
 from app.routers.uploads import router as uploads_router
-from app.routers.web import router as web_router
+from app.routers.memo import router as memo_router
 from app.version import __version__
 
 logger = logging.getLogger(__name__)
@@ -234,12 +234,13 @@ async def add_security_headers(request, call_next):
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 app.include_router(health_router)
-app.include_router(web_router)
+#app.include_router(web_router)
 app.include_router(crawled_router, prefix=API_PREFIX)
 app.include_router(meta_router, prefix=API_PREFIX)
 app.include_router(products_router, prefix=API_PREFIX)
 app.include_router(auth_router, prefix=API_PREFIX)
 app.include_router(admin_router, prefix=API_PREFIX)
+app.include_router(memo_router, prefix=API_PREFIX)
 app.include_router(uploads_router, prefix=API_PREFIX)
 app.include_router(live_router, prefix=API_PREFIX)
 app.include_router(sellers_router, prefix=API_PREFIX)
