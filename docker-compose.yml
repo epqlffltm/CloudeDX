@@ -1,6 +1,6 @@
 # docker-compose.yml
 #
-# 로컬 개발/시연용 구성. 배포용은 docker-compose.prod.yml 을 따로 둔다.
+# 로컬 개발/시연용 구성. 배포용 환경변수 계약은 docs/deploy-env.md 참고.
 #
 # 모든 값에 기본값이 있어 .env 없이도 `docker compose up -d` 로 뜬다.
 # 값을 바꾸고 싶으면 .env.example 을 복사해 .env 를 만들고 채운다.

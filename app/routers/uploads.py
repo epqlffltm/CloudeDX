@@ -57,8 +57,8 @@ async def _read_body_capped(request: Request, limit: int) -> bytes:
     있더라도 클라이언트가 보내는 값이라 실제 본문과 일치한다는 보장이 없다. 헤더는
     빠른 거절용으로만 쓰고, 판단은 실제로 읽은 바이트로 한다.
 
-    nginx client_max_body_size 가 있어도 이 검사는 필요하다. 배포 구성에서 nginx 를
-    빼는 방향이고, 앱이 프록시 없이 뜨는 로컬·CI에는 애초에 그 방어가 없다.
+    앞단에 프록시가 있어도 이 검사는 필요하다. 배포의 앞단인 ALB 는 본문 크기를
+    제한해 주지 않고, 앱이 프록시 없이 뜨는 로컬·CI에는 애초에 그 방어가 없다.
     """
     declared = request.headers.get("content-length")
 

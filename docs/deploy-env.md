@@ -49,6 +49,7 @@ RuntimeError → CrashLoopBackOff). 버그가 아니라 설계다 — 기본 비
 | `MAX_UPLOAD_BYTES` | `5242880` (5MB) | 이미지 업로드 상한 |
 | `READ_FALLBACK_COOLDOWN_SECONDS` | `30` | 복제본 장애 시 주 DB로 보내는 시간 |
 | `ADMIN_USERNAME` / `CLIENT_USERNAME` | `admin` / `client` | 계정 아이디를 바꾸고 싶을 때만 |
+| `FORWARDED_ALLOW_IPS` | `*` | ALB 뒤에서는 VPC 대역(예: `10.0.0.0/16`)으로 좁힌다 — X-Forwarded-For 위조 방지. nginx 제거로 체인이 클라이언트→ALB→uvicorn 한 단계다 |
 
 지정하지 않는 변수: `UPLOAD_DIR` — S3 모드에서는 안 쓴다. `ADMIN_MEMO_PATH` —
 **폐기됨** (메모가 DB 테이블 `admin_memo`로 옮겨져서 변수 자체가 사라졌다).
@@ -103,7 +104,10 @@ S3 변수는 불필요 — 크롤링 이미지는 수집처 CDN URL을 그대로
 - [ ] Secrets Manager에 SESSION_SECRET·ADMIN_PASSWORD·CLIENT_PASSWORD 등록, 3대가 같은 값 참조
 - [ ] DATABASE_URL / DATABASE_RO_URL 접두어가 `postgresql+asyncpg://`
 - [ ] 이미지 버킷 생성 + 공개 읽기 정책 + Task Role/IRSA에 PutObject·DeleteObject
-- [ ] 배포 이미지에 boto3 포함 (`uv add boto3` — S3 모드 필수, 로컬 개발은 불필요)
+- [ ] boto3는 pyproject 기본 의존성에 포함됨(2026-08-29) — 별도 조치 불필요, uv.lock 그대로 빌드하면 됨
 - [ ] 마이그레이션 태스크를 서비스 갱신보다 먼저 실행하는 순서 확인
 - [ ] ALB 헬스체크 경로: 로드밸런서 등록/제거 판단은 `/ready`, 컨테이너 생존 판단은 `/health`
       (둘의 차이는 `app/routers/health.py` 설명 참고 — /ready는 DB 상태까지 본다)
+- [ ] ALB 리스너 규칙에서 `/metrics` 를 고정 404로 돌려 외부 노출 차단
+      (nginx가 하던 차단의 이관 — 수집기는 VPC 내부에서 8000으로 직접 접근)
+- [ ] TLS는 ALB에서 종단(ACM 인증서를 443 리스너에) — 백엔드는 수정 불필요

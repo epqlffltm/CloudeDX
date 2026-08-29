@@ -35,7 +35,7 @@
 
 | | |
 |---|---|
-| 실행 단위 | 백엔드(564MB) · 크롤러(3.59GB) · nginx 세 이미지 |
+| 실행 단위 | 백엔드(564MB) · 크롤러(3.59GB) 두 이미지 |
 | 구성 | 개발 단일 compose · 배포 계층별 compose 3종(웹 / 크롤러 / 마이그레이션) |
 | 스키마 | Alembic 마이그레이션 |
 | 테스트 | 실제 Postgres 위에서 실행 (`uv run pytest`) |
@@ -49,16 +49,6 @@ docker compose up -d --build
 ```
 
 화면 http://localhost:8000 · 문서 http://localhost:8000/docs
-
-AWS 없이 배포 구성 전체를 한 대에서 확인하려면:
-
-```
-copy .env.prod.example .env.prod
-docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
-```
-
-이쪽은 http://localhost 로 접근한다 — 8000 포트는 외부에 열리지 않고 nginx 만
-80 을 연다.
 
 실제 배포는 서버 역할이 갈리므로 compose 를 셋으로 나눈다(웹 / 크롤러 /
 마이그레이션). 자세한 것은 아래 "배포 구성"과 "인프라 인계" 절에 있다.
@@ -431,10 +421,9 @@ docker compose -f docker-compose.yml up -d
 
 | 파일 | 어디서 | 무엇이 |
 |---|---|---|
-| `docker-compose.web.yml` | 웹서버 3대(AZ당 1대) | nginx + 백엔드 1대 |
+| `docker-compose.web.yml` | 웹서버 3대(AZ당 1대) | 백엔드 1대 (ALB 직결) |
 | `docker-compose.crawler.yml` | 크롤링 인스턴스 1대 | 크롤러만 |
 | `docker-compose.migrate.yml` | 운영 서버 | 배포 스크립트가 1회 호출 |
-| `docker-compose.prod.yml` | 로컬 | 전체를 한 대에서 확인 |
 
 DB 는 어느 파일에도 없다. 별도 인스턴스(주/대기 스트리밍 복제)에 있고 `DATABASE_URL`
 로만 붙는다.
@@ -451,15 +440,10 @@ docker compose -f docker-compose.migrate.yml --env-file .env.migrate run --rm mi
 
 #### 백엔드는 서버당 1대다
 
-로컬 검증용 `docker-compose.prod.yml` 은 한 호스트에 백엔드 3대를 띄우지만, 실제
-배포는 3개 AZ 에 EC2 1대씩이고 분산은 ALB 가 한다. 서버 안에서 또 3대를 띄우면
-t3.small(2GB) 에서 메모리가 빠듯하고, ALB 분산 위에 nginx 분산이 겹쳐 어느 쪽이
-문제인지 가리기 어려워진다.
-
-`deploy.replicas` 를 쓸 때 알아둘 것: **`ports` 매핑과 공존할 수 없다.** 세 대가 같은
-호스트 포트를 잡으려 들어 두 번째부터 바인딩에 실패한다. `expose` 로 바꾸면 호스트에
-열리지 않고 같은 도커 네트워크의 다른 컨테이너에게만 포트가 보인다. 결과적으로 외부에
-열리는 포트는 nginx 의 80 하나뿐이다.
+실제 배포는 3개 AZ 에 EC2 1대씩이고 분산은 ALB 가 한다. 서버 안에서 여러 대를
+띄우면 t3.small(2GB) 에서 메모리가 빠듯하고, 분산 계층이 겹쳐 어느 쪽이 문제인지
+가리기 어려워진다. 백엔드가 8000 을 직접 열고(웹 SG 인바운드 8000 = ALB SG 에서만),
+ALB 가 그 포트로 직결한다.
 
 #### 마이그레이션을 웹 compose 에서 뺀 이유
 
@@ -514,71 +498,45 @@ error while interpolating services.backend.environment.SESSION_SECRET:
 `:-` 로 기본값을 주면 `.env` 를 빠뜨렸을 때 개발용 값으로 조용히 떠버린다. 그런 실수는
 뜨는 순간이 아니라 한참 뒤에 발견된다.
 
-### nginx — upstream 블록을 쓰지 않는 이유
+### nginx — 제거함
 
-로컬 검증 구성(`docker-compose.prod.yml`)에서 백엔드 3대 앞에 설 때의 이야기다. 실제
-배포에서는 서버당 백엔드가 1대지만, 컨테이너가 재시작하면 IP 가 바뀌는 문제는 같다.
+ALB 와 백엔드 사이에 nginx 를 한 겹 두는 구성을 만들었었지만, 배포를 ECS/EKS
+컨테이너 오케스트레이션 + **ALB → 백엔드 직결**로 확정하면서 2026-08 에 걷어냈다.
+분산은 어차피 ALB 가 하고 있었고, 중간 홉 하나는 설정·이미지·장애 지점 하나다.
 
-```nginx
-resolver 127.0.0.11 valid=10s ipv6=off;
-...
-set $upstream http://backend:8000;
-proxy_pass $upstream;
-```
+nginx 가 하던 일의 행방:
 
-흔한 방식은 `upstream` 블록에 서버를 나열하는 것이다. 그런데 nginx 는 그 호스트명을
-**기동할 때 한 번만** 해석하고 그 IP 를 계속 쓴다. 컨테이너가 재시작해 IP 가 바뀌면
-nginx 는 사라진 IP 로 계속 보내다 502 를 뱉는다.
+- **보안 헤더·gzip**: `main.py` 미들웨어가 대체 — 응답 경로가 하나로 모이는 자리가
+  프록시에서 앱으로 옮겨졌을 뿐, "한 곳에서 붙인다"는 원칙은 같다.
+- **요청 단위 액세스 로그**: ALB 액세스 로그가 정본이 된다.
+- **백엔드 재시작 시 대기**: ALB 헬스체크(`/ready`)가 죽은 대상을 뺐다가 복귀시킨다.
+- **`/metrics` 외부 차단**: ALB 리스너 규칙에서 `/metrics` 를 고정 404 로 돌린다.
+  수집기는 VPC 내부에서 8000 으로 직접 붙는다.
 
-`proxy_pass` 에 변수를 쓰면 요청마다 DNS 를 다시 묻는다. `127.0.0.11` 은 도커 내장
-DNS 이고, 여러 대가 있으면 IP 를 돌아가며 돌려준다 — 분배를 도커 DNS 가 담당하는
-셈이다. 트레이드오프로 `least_conn` 같은 분배 알고리즘과 keepalive 커넥션 풀을 못 쓴다.
+걷어낸 것: `nginx/` 디렉토리, CI 의 web 이미지 빌드·ECR 푸시,
+`docker-compose.prod.yml`(한 호스트에서 nginx 분산으로 백엔드 3대를 검증하던
+파일 — nginx 없이는 존재 이유가 없다), `.env.prod.example`.
 
-분배가 실제로 도는지는 액세스 로그로 확인한다. 기본 포맷에는 `$upstream_addr` 가 없어
-어디로 갔는지 알 수 없으므로 포맷을 따로 정의했다:
-
-```
-172.28.0.1 -> 172.28.0.5:8000 "GET /health HTTP/1.1" 200 0.001s
-172.28.0.1 -> 172.28.0.3:8000 "GET /health HTTP/1.1" 200 0.001s
-172.28.0.1 -> 172.28.0.6:8000 "GET /health HTTP/1.1" 200 0.001s
-```
-
-`log_format` 은 http 컨텍스트 지시어라 `server` 블록 안에 두면 기동에 실패한다
-(`[emerg] "log_format" directive is not allowed here`). 이 파일은 `conf.d/` 로 들어가
-http 안에서 include 되므로 `server` 바깥이 곧 http 컨텍스트다.
-
-**설정은 바인드 마운트하지 않고 이미지에 굽는다**(`nginx/Dockerfile`). Windows 에서
-단일 파일 마운트가 실패하면 도커가 그 경로에 빈 디렉토리를 만들어 두는데, 호스트 파일을
-고쳐도 컨테이너 안에서는 계속 디렉토리로 보인다. 컨테이너를 지우고 다시 만들어도 남아
-있어 원인을 찾기 어렵다. 배포에서 이미지 하나만 옮기면 되고 설정에도 코드와 같은 버전이
-붙는다는 이점도 있다.
-
-보안 헤더도 여기서 붙인다 — 응답 경로가 하나로 모이므로 라우터마다 빠뜨릴 일이 없고,
-정책이 바뀌어도 애플리케이션 코드를 건드리지 않는다. `always` 를 붙이는 이유는 이
-지시어가 기본적으로 2xx·3xx 응답에만 적용되기 때문이다. 오류 페이지야말로 클릭재킹이나
-MIME 스니핑의 표적이 되기 쉽다.
+요청마다 DNS 를 다시 묻는 변수 `proxy_pass`, 설정을 이미지에 굽는 이유 같은
+nginx 시절의 설계 기록은 git 이력(2026-08 이전)에 있다.
 
 ### 프록시 뒤의 클라이언트 IP
 
 `X-Forwarded-For` 는 누구나 붙일 수 있는 헤더다. 아무나 믿으면 클라이언트가 자기 IP 를
 위조할 수 있어 접속 로그가 오염되고 IP 기반 제한도 무의미해진다.
 
-배포에서는 체인이 두 단계다:
+배포에서는 체인이 한 단계다 (nginx 를 걷어내면서 한 홉 줄었다):
 
 ```
-클라이언트 → ALB → nginx → uvicorn
+클라이언트 → ALB → uvicorn
 ```
 
-ALB 가 `X-Forwarded-For` 에 클라이언트 IP 를 넣고, nginx 가 거기에 ALB 의 사설 IP 를
-이어 붙인다. uvicorn 이 원래 클라이언트를 찾으려면 중간 홉을 건너뛰어야 하므로 도커
-대역과 VPC 대역을 **둘 다** 신뢰해야 한다.
+ALB 가 `X-Forwarded-For` 에 클라이언트 IP 를 넣어 주므로, uvicorn 은 ALB 의 사설
+IP(VPC 대역)가 보낸 헤더만 신뢰하면 된다.
 
 ```
-FORWARDED_ALLOW_IPS=172.28.0.0/16,10.0.0.0/16
+FORWARDED_ALLOW_IPS=10.0.0.0/16
 ```
-
-도커가 네트워크 대역을 알아서 잡게 두면 172.17~172.31 중 어디가 될지 몰라 이 값을 쓸
-수 없다. 배포 구성에서 서브넷을 고정한 것은 이 때문이다.
 
 `Dockerfile` 의 `CMD` 는 셸 형식으로 써서 `FORWARDED_ALLOW_IPS` 를 읽는다. exec
 형식(JSON 배열)에서는 `$VAR` 가 치환되지 않고 문자 그대로 전달된다. 기본값은 로컬 개발
@@ -672,7 +630,7 @@ CloudeDX/0.1 (+https://github.com/epqlffltm/CloudeDX)
 | `POSTGRES_DB` | `cloudedx` | 위와 같음 |
 | `SESSION_SECRET` | (프로세스마다 랜덤) | 세션 쿠키 서명 키. `APP_ENV=production` 이면 미설정 시 기동 거부 |
 | `SESSION_MAX_AGE_SECONDS` | `43200` | 로그인 유지 시간(초). 기본 12시간 |
-| `MAX_UPLOAD_BYTES` | `5242880` | CSV 업로드 최대 바이트. nginx 의 `client_max_body_size` 와 맞춰야 한다 |
+| `MAX_UPLOAD_BYTES` | `5242880` | CSV 업로드 최대 바이트 (ALB 는 본문 크기를 제한하지 않으므로 이 값이 유일한 상한이다) |
 | `FORWARDED_ALLOW_IPS` | `*` (배포 `172.28.0.0/16`) | `X-Forwarded-For` 를 믿어줄 프록시 대역 |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | `admin` / `admin1234` | 시연용 고정 계정 |
 | `CLIENT_USERNAME` / `CLIENT_PASSWORD` | `client` / `client1234` | 시연용 고정 계정 |
@@ -1524,7 +1482,7 @@ uv run pytest
 
 ```
 lint  ─┐
-       ├─> build (backend, crawler, web 병렬) ─> ECR 푸시 (main 에서만)
+       ├─> build (backend, crawler 병렬) ─> ECR 푸시 (main 에서만)
 test  ─┘
 ```
 
@@ -1532,7 +1490,7 @@ test  ─┘
 |---|---|
 | `lint` | `ruff check .` (크롤러 코드까지 검사하므로 `--extra crawler`로 설치) |
 | `test` | Postgres 서비스 컨테이너 → `alembic upgrade head` → `alembic check` → `pytest` |
-| `build` | 이미지 세 개 빌드 · 백엔드는 실행해 임포트 확인 · nginx 는 `nginx -t` |
+| `build` | 이미지 두 개 빌드(백엔드·크롤러) · 백엔드는 실행해 임포트 확인 |
 
 ### ECR 푸시
 
@@ -1554,15 +1512,10 @@ main 브랜치 푸시에서만 올린다. PR 에서는 빌드와 스모크 테�
 
 | 항목 | 값 |
 |---|---|
-| ECR 리포지토리 | `reluxe-web` · `reluxe-backend` · `reluxe-crawler` |
+| ECR 리포지토리 | `reluxe-backend` · `reluxe-crawler` |
 | OIDC 공급자 | `token.actions.githubusercontent.com` |
 | IAM 역할 조건 | `repo:epqlffltm/CloudeDX:ref:refs/heads/main` |
 | 저장소 Secret | `AWS_ROLE_ARN` |
-
-**nginx 도 빌드 대상이다.** 설정을 이미지에 굽기 때문에, CI 에서 만들지 않으면 배포된
-설정이 저장소와 조용히 어긋난다. `nginx -t` 문법 검사도 함께 돌린다 — `log_format` 을
-`server` 블록 안에 두는 것 같은 실수는 배포 후에야 `[emerg]` 로 발견되고, 그때는
-컨테이너가 재시작 루프를 돈다.
 
 ### 설계상 노린 것 셋
 
@@ -1736,7 +1689,6 @@ DB 는 이 저장소가 다루지 않는다. 앱은 `DATABASE_URL` 로만 붙는
 | 구성요소 | 대략 |
 |---|---|
 | 백엔드 1대 | ~150MB |
-| nginx | ~20MB |
 
 **크롤링 — t3.medium(4GB)**
 
@@ -1744,7 +1696,7 @@ DB 는 이 저장소가 다루지 않는다. 앱은 `DATABASE_URL` 로만 붙는
 64MB 뿐이라 그대로 두면 페이지를 열다 죽는다. `--disable-dev-shm-usage` 로 우회할 수도
 있지만 디스크를 대신 쓰게 되어 느려진다.
 
-디스크는 이미지 세 개(백엔드 564MB + 크롤러 3.59GB + nginx)만으로 4GB 를 넘으므로
+디스크는 이미지 두 개(백엔드 564MB + 크롤러 3.59GB)만으로 4GB 를 넘으므로
 **20GB 이상**을 잡는다. 컨테이너 로그는 compose 에 로테이션(`max-size: 10m`,
 `max-file: 3`)이 걸려 있어 쌓이지 않는다.
 
@@ -1754,12 +1706,13 @@ DB 는 이 저장소가 다루지 않는다. 앱은 `DATABASE_URL` 로만 붙는
 
 | SG | 인바운드 | compose 쪽 대응 |
 |---|---|---|
-| 웹 | 80 (ALB SG 에서만) | nginx 만 `ports: 80:80` |
+| 웹 | 8000 (ALB SG 에서만) | 백엔드가 `ports: 8000:8000` |
 | 크롤링 | 없음 | 크롤러는 HTTP 를 열지 않는다 |
 | DB | 5432 (웹·배치·DB SG) | 앱이 `DATABASE_URL` 로 나간다 |
 
-백엔드(8000)는 `expose` 만 하므로 호스트에 열리지 않는다. 보안그룹에서 실수로
-열어두더라도 그 포트에서 듣는 프로세스가 호스트에 없다 — 방어가 두 겹이다.
+백엔드가 8000 을 직접 연다(nginx 를 걷어내면서 바뀐 점). 그 포트로 들어올 수 있는
+것은 보안그룹 규칙상 ALB 뿐이고, `/metrics` 는 ALB 리스너 규칙에서 고정 404 로 돌려
+외부 노출을 막는다.
 
 SSH 22 는 열지 않는다(SSM Session Manager). 컨테이너는 non-root(uid 10001)로 실행되며
 Dockerfile 에 이미 적용돼 있다.
@@ -1845,18 +1798,18 @@ docker compose -f docker-compose.migrate.yml --env-file .env.migrate run --rm mi
 각 웹서버에서:
 
 ```bash
-curl http://localhost/nginx-health     # ok    — nginx 자체
-curl http://localhost/ready            # 200   — DB·스키마까지
+curl http://localhost:8000/health      # 200   — 프로세스 생존
+curl http://localhost:8000/ready       # 200   — DB·스키마까지
 ```
 
 `ps` 의 기대 상태:
 
 | 컨테이너 | 상태 | 포트 |
 |---|---|---|
-| `nginx` | Up | `0.0.0.0:80->80/tcp` |
-| `backend` | Up (healthy) | `8000/tcp` — **화살표 없음** |
+| `backend` | Up (healthy) | `0.0.0.0:8000->8000/tcp` |
 
-포트에 `->` 가 없어야 정상이다. 있으면 호스트에 노출된 것이다.
+8000 이 호스트에 열리는 것이 맞다(nginx 를 걷어내면서 바뀐 점) — ALB 가 이 포트로
+직결하며, 외부 접근은 보안그룹(ALB SG 에서만)이 막는다.
 
 ALB 헬스체크 대상은 `/ready` 로 잡는다(설계도대로 10초 간격, 2회 실패 시 제외).
 `/health` 가 아닌 이유는 아래 "상태 확인" 절에 있다 — 요약하면 `/health` 는 프로세스가
@@ -1901,8 +1854,8 @@ DB 에 못 붙는 경우가 대부분이다. 같은 compose 안에 있을 때는
 ### 운영
 
 ```bash
-# 로그 (요청 단위 기록은 nginx 가 정본이다 — uvicorn 액세스 로그는 꺼져 있다)
-docker compose -f docker-compose.web.yml --env-file .env.web logs -f nginx
+# 로그 (요청 단위 기록은 ALB 액세스 로그가 정본이다 — uvicorn 액세스 로그는 꺼져 있다)
+docker compose -f docker-compose.web.yml --env-file .env.web logs -f backend
 docker compose -f docker-compose.crawler.yml --env-file .env.crawler logs -f crawler
 
 # DB 접속 (호스트 포트가 없으므로 DB 인스턴스에서 컨테이너 안으로)
@@ -1924,14 +1877,10 @@ docker compose exec db psql -U cloudedx -d cloudedx
 
 ### TLS
 
-현재 nginx 는 80 만 연다. 종단 위치는 인프라 구성에 달렸다.
-
-- **ALB 에서 종단** — nginx 설정을 건드릴 필요가 없다. 다만 `X-Forwarded-For` 체인이
-  한 단계 길어지므로 `.env.web` 의 `FORWARDED_ALLOW_IPS` 에 VPC 대역을 포함한다.
-  기본값 `172.28.0.0/16,10.0.0.0/16` 의 뒤쪽을 실제 VPC 대역으로 바꾼다.
-- **nginx 에서 종단** — 인증서를 받고 `nginx/nginx.conf` 에 443 server 블록을 추가한 뒤
-  **이미지를 다시 빌드**한다. 설정이 이미지에 구워져 있어 서버에서 파일만 고치는 방식은
-  통하지 않는다.
+TLS 는 **ALB 에서 종단**한다 (nginx 를 걷어내면서 다른 선택지가 없어졌고, 애초에
+권장이던 방식이다). ACM 인증서를 ALB 리스너(443)에 붙이면 백엔드 쪽은 건드릴 것이
+없다 — uvicorn 은 `--proxy-headers` 로 `X-Forwarded-Proto` 를 읽으므로,
+`FORWARDED_ALLOW_IPS` 가 VPC 대역으로 잡혀 있으면 쿠키 `Secure` 판정도 맞게 동작한다.
 
 ### 확인이 필요한 값
 

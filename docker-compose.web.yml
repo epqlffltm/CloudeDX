@@ -1,7 +1,9 @@
 # docker-compose.web.yml
 name: reluxe-web
 #
-# 웹 계층. 웹서버 3대(AZ당 1대)에 **동일하게** 배포된다.
+# 웹 계층. EC2 로 갈 경우 웹서버 3대(AZ당 1대)에 **동일하게** 배포된다.
+# (1순위 배포는 ECS/EKS 태스크 데피니션이다 — docs/deploy-env.md 가 그 계약이고,
+#  이 파일은 로컬 검증과 EC2 폴백용이다. 환경변수 목록도 그 문서가 정본이다.)
 #
 #     docker compose -f docker-compose.web.yml --env-file .env.web up -d
 #
@@ -12,21 +14,11 @@ name: reluxe-web
 #   migrate  운영 서버에서 배포 스크립트가 한 번만 돌린다.
 #            docker-compose.migrate.yml 참고 — 웹서버 3대가 각자 마이그레이션을
 #            돌리면 같은 리비전을 두고 락 경합이 일어난다.
-#
-# 로컬에서 전체를 한 번에 띄워보려면 docker-compose.prod.yml 을 쓴다.
-
-# ---------------------------------------------------------------------------
-# 컨테이너 네트워크 대역 고정.
-#
-# uvicorn 의 --forwarded-allow-ips 에 "신뢰할 프록시 대역"을 적어야 하는데,
-# 도커가 알아서 잡게 두면 172.17~172.31 중 어디가 될지 모른다. 못 박아두면
-# 백엔드가 "이 대역에서 온 nginx 만 믿는다"고 선언할 수 있다.
-# ---------------------------------------------------------------------------
-networks:
-  reluxe:
-    ipam:
-      config:
-        - subnet: 172.28.0.0/16
+#   nginx    **걷어냈다.** ALB 가 백엔드 컨테이너에 직결한다. 분산은 ALB 가 하고,
+#            nginx 가 하던 일은 이미 앱으로 옮겨져 있다 — 보안 헤더·gzip 은
+#            main.py 미들웨어, 액세스 로그는 ALB 액세스 로그가 정본.
+#            중간 홉이 하나 줄어 X-Forwarded-For 신뢰 대역도 ALB(VPC 대역)
+#            하나로 단순해졌다.
 
 x-logging: &default-logging
   driver: json-file
@@ -35,39 +27,16 @@ x-logging: &default-logging
     max-file: "3"
 
 services:
-  # ---------------------------------------------------------------------------
-  # nginx — ALB 와 백엔드 사이.
-  #
-  # 분산은 ALB 가 3대에 대해 하고, 이 nginx 는 자기 서버의 백엔드 1대 앞에 선다.
-  # 그래도 두는 이유:
-  #   - 보안 헤더를 한 곳에서 붙인다
-  #   - 요청 단위 액세스 로그의 정본 (uvicorn 액세스 로그는 꺼져 있다)
-  #   - 백엔드가 재시작 중일 때 502 대신 짧게 대기시킬 수 있다
-  #   - 나중에 정적 파일을 nginx 가 직접 내보내도록 바꿀 여지
-  # ---------------------------------------------------------------------------
-  nginx:
-    build:
-      context: ./nginx
-    image: ${WEB_IMAGE:-reluxe-web:latest}
-    ports:
-      # ALB 만 이 포트로 들어온다(웹 SG 인바운드 80 = ALB SG 에서만).
-      # 웹서버에는 공인 IP 가 없으므로 인터넷에서 직접 닿을 경로가 없다.
-      - "80:80"
-    depends_on:
-      backend:
-        condition: service_healthy
-    networks:
-      - reluxe
-    logging: *default-logging
-    restart: unless-stopped
-
   backend:
     image: ${BACKEND_IMAGE:-reluxe-backend:latest}
     # 이 서버에서는 1대다. 수평 확장은 ASG 가 인스턴스 단위로 한다.
-    # 한 호스트에 여러 대를 띄우면 t3.small(2GB) 에서 메모리가 빠듯하고,
-    # ALB 분산 위에 nginx 분산이 겹쳐 어느 쪽이 문제인지 가리기 어려워진다.
-    expose:
-      - "8000"
+    # 한 호스트에 여러 대를 띄우면 t3.small(2GB) 에서 메모리가 빠듯하다.
+    ports:
+      # ALB 만 이 포트로 들어온다(웹 SG 인바운드 8000 = ALB SG 에서만).
+      # 웹서버에는 공인 IP 가 없으므로 인터넷에서 직접 닿을 경로가 없다.
+      # /metrics 노출도 같은 원리로 막는다 — ALB 리스너 규칙에서 /metrics 를
+      # 고정 404 로 돌리고, 수집기는 VPC 내부에서 8000 으로 직접 접근한다.
+      - "8000:8000"
     environment:
       # -----------------------------------------------------------------
       # DB 접속.
@@ -111,24 +80,22 @@ services:
       # -----------------------------------------------------------------
       # X-Forwarded-For 를 믿어줄 대역.
       #
-      # 체인이 두 단계다:  클라이언트 → ALB → nginx → uvicorn
-      # ALB 가 X-Forwarded-For 에 클라이언트 IP 를 넣고, nginx 가 거기에 ALB 의
-      # 사설 IP 를 이어 붙인다. uvicorn 이 원래 클라이언트를 찾으려면 중간 홉을
-      # 건너뛰어야 하므로, 도커 대역(nginx)과 VPC 대역(ALB) 둘 다 신뢰해야 한다.
+      # 체인이 한 단계다:  클라이언트 → ALB → uvicorn
+      # ALB 가 X-Forwarded-For 에 클라이언트 IP 를 넣어 주므로, uvicorn 은
+      # ALB 의 사설 IP(VPC 대역)에서 온 헤더만 믿으면 된다.
+      # nginx 를 걷어내면서 도커 대역을 신뢰할 필요가 없어졌다.
       #
       # 이 헤더는 누구나 붙일 수 있다. 대역을 좁히지 않으면 클라이언트가 자기 IP 를
       # 위조할 수 있어 접속 로그가 오염되고 IP 기반 제한도 무의미해진다.
       # -----------------------------------------------------------------
-      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-172.28.0.0/16,10.0.0.0/16}
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-10.0.0.0/16}
     healthcheck:
-      # nginx 의 depends_on 기준. DB 와 스키마까지 확인하는 /ready 를 본다.
+      # DB 와 스키마까지 확인하는 /ready 를 본다.
       # ALB 의 헬스체크 대상도 /ready 다(10초 간격, 2회 실패 시 제외).
       test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/ready').status==200 else 1)\""]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 20s
-    networks:
-      - reluxe
     logging: *default-logging
     restart: unless-stopped
