@@ -162,19 +162,19 @@ jobs:
       # 포크에서 온 PR 은 OIDC 토큰을 받을 수 없기도 하다.
       # -------------------------------------------------------------------
       - name: AWS 인증 (OIDC)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+                if: github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.AWS_ROLE_ARN != ''
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: ECR 로그인
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+                if: github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.AWS_ROLE_ARN != ''
         id: ecr
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: ECR 푸시
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+                if: github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.AWS_ROLE_ARN != ''
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
           REPO: ${{ env[matrix.repo_var] }}
@@ -197,7 +197,7 @@ jobs:
           echo "푸시 완료: $REPO:$SHA_TAG"
 
       - name: 배포용 이미지 주소 출력
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+                if: github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.AWS_ROLE_ARN != ''
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
           REPO: ${{ env[matrix.repo_var] }}
