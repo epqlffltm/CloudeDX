@@ -306,9 +306,22 @@ Instrumentator(
 #
 # 디렉토리는 없으면 만든다. 볼륨을 새로 붙인 직후에는 비어 있고, StaticFiles는
 # 없는 디렉토리를 마운트하면 기동 시점에 예외를 올린다.
+#
+# 만들 수 없으면 mount만 건너뛰고 계속 뜬다. 임포트 시점의 mkdir이라 여기서
+# 예외가 올라가면 앱도 테스트도 전부 못 돈다 — 실제로 CI 러너는 /srv 쓰기
+# 권한이 없어 test 잡 전체가 죽었다. 그런 환경은 업로드 파일을 서빙할 일이
+# 없고, S3 모드는 애초에 이 경로를 쓰지 않는다.
 # ---------------------------------------------------------------------------
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+try:
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+except OSError as exc:
+    logger.warning(
+        "업로드 디렉토리를 만들 수 없어 /uploads 서빙을 건너뜁니다 (%s): %s",
+        UPLOAD_DIR,
+        exc,
+    )
+else:
+    app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 _WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
