@@ -26,7 +26,12 @@ APP_ROOT = pathlib.Path(__file__).resolve().parents[1]
 BACKEND_PACKAGES = ("db", "domain", "routers", "schemas")
 
 # Playwright를 끌고 오지 않는 크롤러 모듈. 여기는 백엔드가 참조해도 안전하다.
-CRAWLER_SAFE_MODULES = {"app.crawler.runner"}
+# 번개장터는 유일한 API 크롤러라(브라우저 없음) 실시간 검색(routers/live.py)이 직접 쓴다.
+CRAWLER_SAFE_MODULES = {
+    "app.crawler.runner",
+    "app.crawler.bunjang.config",
+    "app.crawler.bunjang.crawler",
+}
 
 
 def iter_python_files(package: str):

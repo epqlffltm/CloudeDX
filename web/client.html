@@ -3,118 +3,240 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>매물 등록 - Reverdi 기업고객</title>
+  <title>기업고객 포털 - Reverdi</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,400..900&family=Noto+Sans+KR:wght@300..700&family=Noto+Serif+KR:wght@400..700&family=Plus+Jakarta+Sans:wght@400..800&display=swap" />
-  <link rel="stylesheet" href="css/tokens.css" />
-  <link rel="stylesheet" href="css/app.css" />
-  <link rel="stylesheet" href="css/account.css" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;1,9..144,500&family=Noto+Serif+KR:wght@500;600;700&display=swap" />
+  <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" />
+  <link rel="stylesheet" href="css/client.css" />
 </head>
 <body>
 
+<!-- 아이콘. 외부 아이콘 폰트 대신 인라인 SVG. -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <defs>
-    <linearGradient id="goldGrad" x1="15%" y1="0%" x2="85%" y2="100%">
-      <stop offset="0%" stop-color="#F7ECC9" /><stop offset="20%" stop-color="#E5CB8E" />
-      <stop offset="45%" stop-color="#D4B776" /><stop offset="70%" stop-color="#BE9D59" />
-      <stop offset="100%" stop-color="#8C6E33" />
-    </linearGradient>
-    <g id="i-crown"><path d="M 16 58 L 14 26 C 24 38, 36 46, 50 14 C 64 46, 76 38, 86 26 L 84 58 Z" fill="url(#goldGrad)" stroke="#8A6D33" stroke-width=".8" stroke-linejoin="round"/><rect x="13" y="58" width="74" height="8.5" rx="1" fill="url(#goldGrad)" stroke="#8A6D33" stroke-width=".8"/><circle cx="50" cy="10.5" r="4.2" fill="none" stroke="url(#goldGrad)" stroke-width="2.2"/><circle cx="14" cy="24" r="3.2" fill="url(#goldGrad)"/><circle cx="86" cy="24" r="3.2" fill="url(#goldGrad)"/></g>
+    <g id="i-box" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8v8l9 5 9-5V8Z"/><path d="m3 8 9 5 9-5M12 13v8"/></g>
+    <g id="i-plus" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="17" height="17" rx="2"/><path d="M12 8v8M8 12h8"/></g>
+    <g id="i-cloud" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5A4.5 4.5 0 0 1 7 8.3a6 6 0 0 1 11.6 1.9A4 4 0 0 1 18 18h-1.5"/><path d="M12 12v9M8.5 15.5 12 12l3.5 3.5"/></g>
+    <g id="i-store" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10.5 5.5 4h13L20 10.5M4 10.5V20h16v-9.5M4 10.5a2.6 2.6 0 0 0 5.3 0 2.6 2.6 0 0 0 5.4 0 2.6 2.6 0 0 0 5.3 0M9.5 20v-5.5h5V20"/></g>
+    <g id="i-search" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></g>
+    <g id="i-file-up" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3H6a1.5 1.5 0 0 0-1.5 1.5v15A1.5 1.5 0 0 0 6 21h12a1.5 1.5 0 0 0 1.5-1.5V9.5L13 3Z"/><path d="M13 3v6.5h6.5M12 17v-5M9.8 14.2 12 12l2.2 2.2"/></g>
+    <g id="i-down" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7.5 10.5 12 15l4.5-4.5M4 20h16"/></g>
   </defs>
 </svg>
 
-<header class="topbar">
-  <div class="wrap topbar__inner">
-    <a class="logo logo--sm" href="./" aria-label="Reverdi 홈">
-      <svg class="logo__crown" viewBox="0 0 100 80"><use href="#i-crown"/></svg><span class="logo__mark">Reverdi</span>
-    </a>
-    <div class="topbar__right" id="accountBar"></div>
-  </div>
-</header>
-
-<main class="wrap console">
-  <div class="console__head">
-    <div>
-      <span class="badge-result">기업고객</span>
-      <h1 class="console__title">매물 일괄 등록</h1>
-      <p class="console__sub">CSV 파일을 올리면 검색 목록에 바로 반영됩니다</p>
-    </div>
-    <a class="btn-reset" href="./">검색 화면 보기</a>
+<!-- ── 사이드바 ─────────────────────────────────────────────── -->
+<aside class="side">
+  <div class="side__head">
+    <a class="side__logo" href="./">Reverdi</a>
+    <p class="side__sub">기업고객 포털</p>
   </div>
 
-  <section class="panel">
-    <h2 class="panel__title">CSV 파일</h2>
+  <!-- 해시 라우트(#inventory, #register, #bulk). admin과 같은 방식으로
+       한 HTML 안에서 화면(.view)을 전환한다. 시안의 Settings 는 저장할
+       API 가 없어 넣지 않는다. -->
+  <nav class="side__nav" aria-label="기업고객 화면">
+    <a href="#inventory" data-nav="inventory"><svg viewBox="0 0 24 24"><use href="#i-box"/></svg>내 매물</a>
+    <a href="#register" data-nav="register"><svg viewBox="0 0 24 24"><use href="#i-plus"/></svg>매물 등록</a>
+    <a href="#bulk" data-nav="bulk"><svg viewBox="0 0 24 24"><use href="#i-cloud"/></svg>CSV 일괄 등록</a>
 
-    <div class="drop" id="drop">
-      <input type="file" id="fileInput" accept=".csv,text/csv" hidden />
-      <p class="drop__title">파일을 여기에 끌어다 놓으세요</p>
-      <p class="drop__sub">또는</p>
-      <button class="btn-dark" id="pickBtn" type="button">파일 선택</button>
-      <p class="drop__file" id="fileName" hidden></p>
-    </div>
+    <p class="side__group">바로가기</p>
+    <a href="./?view=list&source=직접등록"><svg viewBox="0 0 24 24"><use href="#i-store"/></svg>내 매물 스토어 보기</a>
+  </nav>
 
-    <div class="drop__actions">
-      <button class="auth-submit" id="uploadBtn" type="button" disabled>업로드</button>
-      <button class="btn-reset" id="sampleBtn" type="button">예시 CSV 내려받기</button>
-    </div>
+  <!-- auth.js renderAccountBar 가 사용자 칩 + 로그아웃 버튼을 그린다 -->
+  <div class="side__foot" id="accountBar"></div>
+</aside>
+
+<!-- ── 본문 ─────────────────────────────────────────────────── -->
+<div class="main">
+  <main class="main__inner">
 
     <p class="console__error" id="errorBox" role="alert" hidden></p>
-  </section>
 
-  <section class="panel" id="resultPanel" hidden>
-    <h2 class="panel__title">처리 결과</h2>
-    <div class="kpi-grid kpi-grid--tight" id="resultKpi"></div>
-    <div id="resultErrors"></div>
-    <a class="btn-dark" id="viewLink" href="./?source=%EC%A7%81%EC%A0%91%EB%93%B1%EB%A1%9D" style="margin-top:16px;display:inline-block">등록된 매물 보러가기</a>
-  </section>
+    <!-- ═══ 내 매물 ═══ -->
+    <section class="view" data-view="inventory">
+      <div class="view-head">
+        <div>
+          <h1 class="view-title">My Inventory</h1>
+          <p class="view-sub">직접 등록한 매물입니다. 사진이 없는 매물은 여기서 파일로 올릴 수 있습니다</p>
+        </div>
+        <div class="view-actions">
+          <button class="btn-line" id="exportBtn" type="button" disabled>
+            <svg width="14" height="14" viewBox="0 0 24 24"><use href="#i-down"/></svg>CSV 내보내기
+          </button>
+          <a class="btn-fill" href="#register">+ 매물 등록</a>
+        </div>
+      </div>
 
-  <section class="panel">
-    <h2 class="panel__title">매물 사진</h2>
-    <p class="panel__note">
-      CSV에 <code>image_url</code>을 적지 않았거나 사진 주소가 없다면, 여기서 파일을
-      직접 올릴 수 있습니다. 올린 사진은 서버에서 다시 인코딩되어 저장되므로
-      촬영 위치 정보(EXIF)는 남지 않고, 긴 변이 1600px로 줄어듭니다.
-    </p>
+      <div class="inv-toolbar">
+        <label class="inv-search">
+          <svg viewBox="0 0 24 24"><use href="#i-search"/></svg>
+          <span class="visually-hidden" hidden>매물 검색</span>
+          <input id="invSearch" type="search" placeholder="제목·브랜드로 검색" autocomplete="off" />
+        </label>
+        <span class="inv-spacer"></span>
+        <button class="btn-line" id="photoReload" type="button">새로고침</button>
+      </div>
 
-    <div class="table-wrap">
-      <table class="table">
-        <thead><tr><th style="width:88px">사진</th><th>매물</th><th style="width:260px">올리기</th></tr></thead>
-        <tbody id="photoRows"></tbody>
-      </table>
-    </div>
+      <div class="table-wrap">
+        <table class="inv">
+          <thead>
+            <tr><th>사진</th><th>매물</th><th>인증</th><th>사진 등록</th></tr>
+          </thead>
+          <tbody id="invRows"></tbody>
+        </table>
+      </div>
+      <div class="pager" id="invPager"></div>
+    </section>
 
-    <button class="btn-reset" id="photoReload" type="button" style="margin-top:12px">목록 새로고침</button>
-  </section>
+    <!-- ═══ 매물 등록 (단건) ═══ -->
+    <section class="view" data-view="register" hidden>
+      <div class="view-head">
+        <div>
+          <h1 class="view-title">Register Item</h1>
+          <p class="view-sub">매물 한 건을 등록합니다. CSV 일괄 등록과 같은 저장 경로를 거치므로
+            제목 정제·브랜드 판정 규칙이 똑같이 적용됩니다</p>
+        </div>
+      </div>
 
-  <section class="panel">
-    <h2 class="panel__title">파일 형식</h2>
-    <p class="panel__note">
-      첫 줄은 헤더입니다. <b>title, price, url</b> 세 개는 반드시 있어야 하고,
-      brand · image_url · region 은 선택입니다.
-      한글 헤더(제목 · 가격 · 링크 · 브랜드 · 이미지 · 지역)도 그대로 인식합니다.
-    </p>
+      <form id="regForm" class="form-grid" novalidate>
+        <div>
+          <div class="panel">
+            <h2 class="panel__title">필수 정보</h2>
 
-    <div class="table-wrap">
-      <table class="table">
-        <thead><tr><th>컬럼</th><th>필수</th><th>설명</th><th>예시</th></tr></thead>
-        <tbody>
-          <tr><td><code>title</code></td><td>필수</td><td>상품명. 브랜드와 카테고리를 여기서 판정합니다</td><td>샤넬 클래식 미디움 캐비어</td></tr>
-          <tr><td><code>price</code></td><td>필수</td><td>가격. 980만원 / 9,800,000 / 9800000 모두 인식</td><td>980만원</td></tr>
-          <tr><td><code>url</code></td><td>필수</td><td>원본 상품 링크. 중복 판정 기준입니다</td><td>https://example.com/1</td></tr>
-          <tr><td><code>brand</code></td><td>선택</td><td>비워도 제목에서 판정합니다</td><td>샤넬</td></tr>
-          <tr><td><code>image_url</code></td><td>선택</td><td>썸네일 주소. 비워 두고 위 "매물 사진"에서 직접 올려도 됩니다</td><td>https://example.com/1.jpg</td></tr>
-          <tr><td><code>region</code></td><td>선택</td><td>지역</td><td>서울 강남구</td></tr>
-        </tbody>
-      </table>
-    </div>
+            <label class="field">
+              <span class="field__label">제목 <span class="req">*</span></span>
+              <input type="text" id="regTitle" placeholder="예: 샤넬 클래식 플랩백 미디움 캐비어" required />
+              <p class="field__hint">제목에 브랜드명과 품목(가방·시계 등)이 함께 있어야 검색 목록에 노출됩니다 —
+                제목에서 브랜드와 카테고리를 판정하기 때문입니다.</p>
+            </label>
 
-    <p class="panel__note">
-      같은 <code>url</code>을 다시 올리면 새 매물이 생기지 않고 기존 매물의 가격·상태가 갱신됩니다.
-      파일은 UTF-8 또는 CP949(엑셀 기본)로 저장하세요. 한 번에 5,000행까지 처리합니다.
-    </p>
-  </section>
-</main>
+            <div class="field-row">
+              <label class="field">
+                <span class="field__label">가격 <span class="req">*</span></span>
+                <input type="text" id="regPrice" placeholder="예: 5,980,000 또는 598만원" required />
+              </label>
+              <label class="field">
+                <span class="field__label">지역</span>
+                <input type="text" id="regRegion" placeholder="예: 서울 강남구" />
+              </label>
+            </div>
+
+            <label class="field">
+              <span class="field__label">상품 링크 <span class="req">*</span></span>
+              <input type="url" id="regUrl" placeholder="https://…" required />
+              <p class="field__hint">매물의 고유 식별자입니다. 같은 링크로 다시 등록하면 새로 생기지 않고
+                기존 매물이 갱신됩니다. 자사 사이트가 없다면 자체 관리 번호를 붙인 주소를 쓰세요.</p>
+            </label>
+          </div>
+
+          <div class="panel">
+            <h2 class="panel__title">선택 정보</h2>
+
+            <div class="field-row">
+              <label class="field">
+                <span class="field__label">브랜드</span>
+                <input type="text" id="regBrand" placeholder="예: 샤넬" />
+                <p class="field__hint">비워도 됩니다 — 화면에 뜨는 브랜드는 제목에서 판정한 값입니다.</p>
+              </label>
+              <label class="field">
+                <span class="field__label">이미지 주소</span>
+                <input type="url" id="regImage" placeholder="https://… (선택)" />
+                <p class="field__hint">주소가 없으면 등록 후 '내 매물'에서 사진 파일을 직접 올릴 수 있습니다.</p>
+              </label>
+            </div>
+
+            <div class="auth-row">
+              <div class="auth-row__text">
+                <p class="auth-row__title">정품 인증 표시</p>
+                <p class="auth-row__desc">보증서·감정서 등 증빙을 확인한 매물에만 켜 주세요.
+                  화면의 매물 카드에 인증 뱃지가 붙습니다.</p>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="regAuth" />
+                <i aria-hidden="true"></i>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="panel">
+            <h2 class="panel__title">등록</h2>
+            <p class="panel__note">등록 즉시 검색 목록에 반영됩니다(정제 통과 시).
+              저장은 CSV 일괄 등록과 같은 문을 거칩니다.</p>
+            <div class="form-actions">
+              <button class="btn-fill" id="regSubmit" type="submit">매물 등록 →</button>
+              <button class="btn-line" id="regClear" type="button">입력 지우기</button>
+            </div>
+            <div class="reg-result" id="regResult" hidden></div>
+          </div>
+        </div>
+      </form>
+    </section>
+
+    <!-- ═══ CSV 일괄 등록 ═══ -->
+    <section class="view" data-view="bulk" hidden>
+      <div class="view-head">
+        <div>
+          <h1 class="view-title">Bulk Upload</h1>
+          <p class="view-sub">CSV 한 장으로 매물을 일괄 등록합니다. 필수 컬럼은 title · price · url이고
+            한글 헤더(제목·가격·링크)도 받습니다</p>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="sec__head">
+          <span class="sec__title">Upload Interface</span>
+          <button class="sec__link" id="sampleBtn" type="button">Download Template</button>
+        </div>
+
+        <div class="drop" id="drop">
+          <div class="drop__icon"><svg viewBox="0 0 24 24"><use href="#i-file-up"/></svg></div>
+          <h2 class="drop__title">CSV를 끌어다 놓으세요</h2>
+          <p class="drop__sub">또는 버튼으로 파일을 선택하세요</p>
+          <button class="btn-fill" id="pickBtn" type="button">Select File</button>
+          <input type="file" id="fileInput" accept=".csv,text/csv" hidden />
+          <p class="drop__file" id="fileName" hidden></p>
+        </div>
+        <div class="drop-meta">
+          <span>지원 형식: .CSV (UTF-8 · CP949)</span>
+          <span>최대 5MB · 5,000행</span>
+        </div>
+
+        <div class="upload-actions">
+          <button class="btn-fill" id="uploadBtn" type="button" disabled>업로드</button>
+        </div>
+      </div>
+
+      <div class="sec" id="resultPanel" hidden>
+        <div class="sec__head"><span class="sec__title">업로드 결과</span></div>
+        <div class="kpi-grid" id="resultKpi"></div>
+        <div id="resultErrors"></div>
+      </div>
+
+      <div class="sec">
+        <div class="sec__head">
+          <span class="sec__title">업로드 기록</span>
+          <span class="sec__note">이번 브라우저 세션에 한함 — 서버는 업로드 이력을 따로 저장하지 않습니다</span>
+        </div>
+        <div class="table-wrap">
+          <table class="hist">
+            <thead><tr><th>파일</th><th>시각</th><th class="num">행</th><th class="num">저장</th><th class="num">노출</th><th class="num">제외</th></tr></thead>
+            <tbody id="histRows"><tr><td colspan="6" class="hist-empty">아직 이 세션에서 올린 파일이 없습니다.</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="main-foot">
+    <span class="main-foot__logo">Reverdi</span>
+    <span class="main-foot__meta">Reverdi Partner Portal · CloudeDX</span>
+  </footer>
+</div>
 
 <script type="module" src="js/client.js"></script>
 <script type="module" src="js/client_photos.js"></script>

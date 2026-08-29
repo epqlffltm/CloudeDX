@@ -31,7 +31,7 @@ async def test_static_assets_served(client):
     화면이 참조하는 자산이 실제로 서빙된다.
 
     프론트는 번들러를 거치지 않고 소스를 그대로 내보낸다. index.html이
-    <script type="module" src="js/main.js"> 로 ES 모듈을 직접 부르고, 페이지마다
+    <script type="module" src="js/home.js"> 로 ES 모듈을 직접 부르고, 페이지마다
     필요한 스크립트(admin.js, login.js)만 로드하는 구조다.
 
     파일명을 테스트에 박아두면 프론트를 손볼 때마다 함께 깨지므로, index.html이
@@ -66,7 +66,7 @@ async def test_module_entrypoint_is_served(client):
     아무것도 못 잡아도) 조용히 넘어갈 수 있는 구조는 아니다 — assert refs 가
     막는다. 다만 진입점만은 이름이 바뀌면 화면 전체가 죽으므로 따로 못 박는다.
     """
-    res = await client.get("/js/main.js")
+    res = await client.get("/js/home.js")
 
     assert res.status_code == 200
     assert "javascript" in res.headers["content-type"]
