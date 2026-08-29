@@ -19,6 +19,7 @@ from enum import StrEnum
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
@@ -297,3 +298,27 @@ class Seller(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+class AdminMemoRecord(Base):
+    """
+    관리자 공용 메모 — 항상 한 행(id=1)이다.
+
+    원래 서버의 텍스트 파일 한 장이었는데, 배포가 백엔드 여러 대로 확정되면서
+    성립하지 않게 됐다 — A 서버에 저장한 메모를 B 서버가 모르고, 컨테이너가
+    교체되면 메모가 사라진다. 모든 인스턴스가 공유하는 저장소는 이미 하나 있다:
+    DB다. 그래서 한 줄짜리 테이블로 옮겼다.
+
+    CHECK(id = 1)로 한 행짜리임을 스키마에 박는다. 버그로 두 번째 행이 들어가면
+    "어느 행이 진짜 메모인가"라는, 답이 없는 질문이 생기기 때문이다.
+    """
+
+    __tablename__ = "admin_memo"
+    __table_args__ = (CheckConstraint("id = 1", name="single_row"),)
+
+    # autoincrement가 아니다 — 항상 1을 명시해서 넣는다(upsert 키).
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # 파일 시절의 mtime을 대신한다. 화면이 "마지막 저장 시각"으로 보여준다.
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

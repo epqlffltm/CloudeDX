@@ -3,19 +3,26 @@
 """
 관리자 메모(/api/admin/memo) — 게시판을 걷어낸 자리의 텍스트 한 장.
 
-저장이 파일이라 DB 픽스처는 필요 없지만, 경로는 반드시 tmp_path로 바꾼다.
-바꾸지 않으면 테스트가 리포의 data/admin_memo.txt 를 실제로 덮어쓴다.
+저장이 파일에서 DB(admin_memo, 한 행짜리 테이블)로 바뀌었지만 API 계약은
+그대로다 — 이 파일의 테스트가 파일 시절과 거의 같은 이유이자, 같아야 하는
+이유다(화면 코드는 저장소가 바뀐 것을 모른다).
+
+격리는 conftest의 DB 픽스처가 아니라 여기서 직접 한다. conftest의 session
+픽스처는 items·crawl_runs만 비우므로, 메모 테이블은 이 파일의 autouse
+픽스처가 비운다 — 메모를 아는 것은 이 테스트뿐이라 격리 책임도 여기 둔다.
 """
 
-import pytest
+import pytest_asyncio
+from sqlalchemy import text as sql
 
-from app.routers import memo as memo_module
+from app.db.models import AdminMemoRecord  # noqa: F401 — 모델 등록 확인을 겸한다
 
 
-@pytest.fixture(autouse=True)
-def isolated_memo(monkeypatch, tmp_path):
-    """모든 테스트가 자기만의 메모 파일을 본다."""
-    monkeypatch.setattr(memo_module, "MEMO_PATH", tmp_path / "admin_memo.txt")
+@pytest_asyncio.fixture(autouse=True)
+async def clean_memo(session):
+    """모든 테스트가 빈 메모에서 시작한다."""
+    await session.execute(sql("TRUNCATE admin_memo"))
+    await session.commit()
 
 
 async def _login(client, username: str, password: str):
@@ -69,6 +76,24 @@ async def test_memo_overwrites_whole_text(client):
     await client.put("/api/admin/memo", content="두 번째".encode())
 
     assert (await client.get("/api/admin/memo")).json()["text"] == "두 번째"
+
+
+async def test_memo_stays_single_row(client, session):
+    """
+    몇 번을 저장해도 행은 하나다(id=1 upsert).
+
+    이게 깨지면 GET이 "어느 행이 진짜 메모인가"를 정할 수 없게 된다.
+    스키마의 CHECK(id = 1)와 함께 이 성질을 양쪽에서 지킨다.
+    """
+    await _login(client, "admin", "admin1234")
+
+    await client.put("/api/admin/memo", content=b"one")
+    await client.put("/api/admin/memo", content=b"two")
+    await client.put("/api/admin/memo", content=b"three")
+
+    count = (await session.execute(sql("SELECT count(*) FROM admin_memo"))).scalar()
+
+    assert count == 1
 
 
 async def test_memo_size_cap(client):

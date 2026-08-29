@@ -32,7 +32,7 @@ from app.config import MAX_UPLOAD_BYTES, WRITE_TIMEOUT_SECONDS
 from app.domain.image_security import MAX_UPLOAD_BYTES as MAX_IMAGE_BYTES
 from app.domain.image_security import ImageRejected, sanitize_image
 from app.domain.sources import UPLOAD
-from app.domain.storage import delete_image, public_url, save_image
+from app.domain.storage import delete_image, object_name_from_url, public_url, save_image
 from app.db import repository
 from app.db.engine import get_session
 from app.db.models import ItemRecord
@@ -305,8 +305,9 @@ async def upload_item_image(
     #
     # 우리가 저장한 파일만 지운다. CSV에 적어 올린 외부 주소는 남의 파일이라
     # 지울 수도 없고 지울 대상도 아니다.
-    if previous and previous.startswith("/uploads/"):
-        delete_image(previous.removeprefix("/uploads/"))
+    prev_name = object_name_from_url(previous)
+    if prev_name:
+        delete_image(prev_name)
 
     logger.info(
         "매물 %s 사진 등록: %dx%d, %d바이트 (%s)",
