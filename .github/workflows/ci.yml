@@ -28,6 +28,9 @@ env:
   AWS_REGION: ap-northeast-2
   ECR_BACKEND: reluxe-backend
   ECR_CRAWLER: reluxe-crawler
+  # AWS_ROLE_ARN Secret 등록 여부. 미등록이면 ECR 단계를 건너뛴다 —
+  # 인프라 준비 전에 CI가 빨간불로 고정되면 진짜 실패가 묻힌다.
+  HAS_AWS_ROLE: ${{ secrets.AWS_ROLE_ARN != '' }}
 
 jobs:
   lint:
@@ -162,19 +165,19 @@ jobs:
       # 포크에서 온 PR 은 OIDC 토큰을 받을 수 없기도 하다.
       # -------------------------------------------------------------------
       - name: AWS 인증 (OIDC)
-                if: github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.AWS_ROLE_ARN != ''
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && env.HAS_AWS_ROLE == 'true'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: ECR 로그인
-                if: github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.AWS_ROLE_ARN != ''
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && env.HAS_AWS_ROLE == 'true'
         id: ecr
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: ECR 푸시
-                if: github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.AWS_ROLE_ARN != ''
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && env.HAS_AWS_ROLE == 'true'
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
           REPO: ${{ env[matrix.repo_var] }}
@@ -197,7 +200,7 @@ jobs:
           echo "푸시 완료: $REPO:$SHA_TAG"
 
       - name: 배포용 이미지 주소 출력
-                if: github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.AWS_ROLE_ARN != ''
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && env.HAS_AWS_ROLE == 'true'
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
           REPO: ${{ env[matrix.repo_var] }}
