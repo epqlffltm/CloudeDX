@@ -133,28 +133,43 @@ async def lifespan(app: FastAPI):
     # 테이블을 만들지는 않는다 — 스키마는 Alembic이 관리한다. 여기서는 DB가 응답하는지만
     # 확인하고, 컨테이너가 아직 기동 중이면 잠깐 기다린다.
     #
-    # 기동을 막는 기준은 **읽기 경로**다. 조회가 이 서비스 트래픽의 대부분이고,
-    # 그것조차 안 되는 파드는 떠 봐야 할 일이 없다.
+    # 기동 원칙: **읽기든 쓰기든 하나라도 붙으면 뜬다.**
+    #
+    # 런타임에는 복제본이 죽으면 주 DB로 넘어가는 폴백 서킷이 있다(engine.py의
+    # _open_read_session). 그런데 기동에서 복제본만 하드 요구하면 그 폴백이
+    # 무력해진다 — 복제본 장애 중에 새로 뜨는 파드(노드 교체, 스케일 아웃, 재시작)가
+    # 전부 CrashLoopBackOff로 빠져서, 주 DB가 멀쩡한데도 떠 있는 파드 수가 줄어든다.
+    # 둘 다 안 붙을 때만 예외로 죽는다 — 그 파드는 떠 봐야 할 일이 없다.
     logger.info("연결 확인 중... (%s)", mask_url(DATABASE_RO_URL))
-    await wait_for_db(read_engine)
-    logger.info("연결 확인 완료")
 
-    # 주 DB는 확인하되 기동을 막지 않는다.
-    #
-    # 페일오버 중에 파드가 새로 뜨는 경우가 있다 — 노드 교체, 스케일 아웃, 앞선
-    # 파드의 재시작. 여기서 예외를 올리면 그 파드는 CrashLoopBackOff 로 빠지고,
-    # 복제본이 멀쩡한데도 조회를 서빙하지 못한다. 읽기/쓰기를 나눠놓고 기동에서
-    # 다시 묶어버리는 셈이다.
-    #
-    # 주 DB가 없는 상태는 /ready 의 database_write 와 업로드 요청의 실패로 드러난다.
-    if read_engine is not engine:
-        try:
-            await wait_for_db(engine, retries=2)
-        except RuntimeError:
-            logger.warning(
-                "주 DB에 연결하지 못했습니다 (%s). 조회는 계속하고 쓰기만 실패합니다.",
-                mask_url(DATABASE_URL),
-            )
+    try:
+        await wait_for_db(read_engine)
+    except RuntimeError:
+        if read_engine is engine:
+            raise  # 복제본이 없는 구성 — 이 실패는 곧 유일한 DB의 실패다.
+
+        logger.warning(
+            "읽기 복제본에 연결하지 못했습니다 (%s). 주 DB 폴백으로 기동합니다.",
+            mask_url(DATABASE_RO_URL),
+        )
+        await wait_for_db(engine)  # 이것마저 없으면 뜰 이유가 없다.
+    else:
+        logger.info("연결 확인 완료")
+
+        # 주 DB는 확인하되 기동을 막지 않는다.
+        #
+        # 페일오버 중에 파드가 새로 뜨는 경우가 있다. 여기서 예외를 올리면 그 파드는
+        # 복제본이 멀쩡한데도 조회를 서빙하지 못한다 — 읽기/쓰기를 나눠놓고 기동에서
+        # 다시 묶어버리는 셈이다. 주 DB가 없는 상태는 /ready 의 database_write 와
+        # 업로드 요청의 실패로 드러난다.
+        if read_engine is not engine:
+            try:
+                await wait_for_db(engine, retries=2)
+            except RuntimeError:
+                logger.warning(
+                    "주 DB에 연결하지 못했습니다 (%s). 조회는 계속하고 쓰기만 실패합니다.",
+                    mask_url(DATABASE_URL),
+                )
 
     crawler_task: asyncio.Task | None = None
 
