@@ -72,11 +72,11 @@ from app.routers.auth import router as auth_router
 from app.routers.crawled import router as crawled_router
 from app.routers.health import router as health_router
 from app.routers.live import router as live_router
+from app.routers.memo import router as memo_router
 from app.routers.meta import router as meta_router
 from app.routers.products import router as products_router
 from app.routers.sellers import router as sellers_router
 from app.routers.uploads import router as uploads_router
-from app.routers.memo import router as memo_router
 from app.version import __version__
 
 logger = logging.getLogger(__name__)

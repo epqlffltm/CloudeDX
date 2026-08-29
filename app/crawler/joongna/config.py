@@ -7,7 +7,6 @@ daangn/config.py와 동일한 방침 — DB나 FastAPI와 독립적인 설정만
 
 from dataclasses import dataclass
 
-
 # 받지 않을 리소스 종류. base.EngineConfig의 기본값과 같은 값을 여기 두는 이유는
 # 이 모듈이 Playwright에 의존하지 않게 하기 위해서다 — base를 임포트하면 순수 설정
 # 파일이 Chromium을 딸고 들어온다. 중복 세 줄이 그 경계보다 싸다.
