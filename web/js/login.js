@@ -23,6 +23,22 @@ async function init() {
     return;
   }
 
+  // 비밀번호 표시 토글. input의 type을 password <-> text로 바꾸는 것이 전부다.
+  // aria-pressed는 CSS가 눈/빗금눈 아이콘을 고르는 기준이자, 스크린리더에
+  // "지금 보이는 상태인가"를 알리는 값이다.
+  const toggle = $('pwToggle');
+
+  if (toggle) {
+    toggle.addEventListener('click', () => {
+      const pw = $('password');
+      const show = pw.type === 'password';
+
+      pw.type = show ? 'text' : 'password';
+      toggle.setAttribute('aria-pressed', String(show));
+      pw.focus();
+    });
+  }
+
   // 시연 계정 칸을 누르면 입력칸이 채워진다. 발표 중에 오타로 막히지 않게.
   for (const row of document.querySelectorAll('[data-fill]')) {
     row.addEventListener('click', () => {

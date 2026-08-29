@@ -1,0 +1,338 @@
+/* web/css/admin.css
+ *
+ * 관리자 대시보드 전용 (에디토리얼 리디자인 — index/login과 같은 디자인 언어).
+ * account.css 는 client.html 이 계속 쓰므로 건드리지 않고 분리한다.
+ *
+ * 시안과 다르게 간 것 — 없는 데이터는 그리지 않는다:
+ *   Uptime 99.98%   가동률 집계가 없다. 대신 브라우저에서 잰 실제 응답 시간을 쓴다.
+ *   Conn: 42/100    커넥션 풀 지표를 앱이 내보내지 않는다. /ready의 읽기·쓰기·
+ *                   마이그레이션 상태로 대체한다.
+ *   Req/Min         분당 요청률 계산은 두 시점 스냅숏이 필요하다. /metrics 의
+ *                   누적 요청 수를 그대로 보여준다(기동 이후 누적).
+ */
+
+:root {
+  --bg: #F7F6F3;
+  --panel: #FFFFFF;
+  --sidebar: #F1EFEC;
+  --ink: #1A1A1A;
+  --ink-soft: #78716C;
+  --ink-faint: #A8A29E;
+  --line: #E7E5E4;
+  --line-soft: #F0EEEC;
+
+  --gold: #8C6D2D;          /* 상태 점(정상) — 시안의 골드 도트 */
+  --ok: #16A34A;
+  --warn: #B45309;
+  --danger: #B4423A;
+
+  --term-bg: #161412;       /* 터미널 로그 */
+  --term-ink: #E9E5DF;
+  --term-info: #D9B36A;
+  --term-dim: #7C766E;
+
+  --font-display: 'Fraunces', Georgia, serif;
+  --font-kr-serif: 'Noto Serif KR', serif;
+  --font-body: 'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --track-wide: .28em;
+  --track-label: .16em;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0; min-height: 100vh;
+  display: flex;
+  background: var(--bg); color: var(--ink);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+button { font-family: inherit; cursor: pointer; border: none; background: none; color: inherit; }
+a { color: inherit; text-decoration: none; }
+h1, h2, h3 { margin: 0; }
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+
+/* ── 사이드바 ──────────────────────────────────────────────────────── */
+
+.side {
+  width: 256px; flex-shrink: 0;
+  background: var(--sidebar); border-right: 1px solid var(--line);
+  display: flex; flex-direction: column;
+  position: sticky; top: 0; height: 100vh;
+}
+
+.side__head { padding: 30px 26px 24px; border-bottom: 1px solid var(--line); }
+.side__logo {
+  display: inline-block;
+  font-family: var(--font-display); font-weight: 500;
+  font-size: 21px; letter-spacing: .26em; text-transform: uppercase;
+}
+.side__sub { margin: 8px 0 0; font-size: 12px; color: var(--ink-soft); letter-spacing: .06em; }
+
+.side__nav { flex: 1; padding: 20px 14px; overflow-y: auto; }
+.side__nav a {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px; margin-bottom: 4px;
+  font-size: 13.5px; color: var(--ink-soft);
+  border-radius: 4px;
+  transition: color .15s, background .15s;
+}
+.side__nav a:hover { color: var(--ink); background: rgba(26, 26, 26, .05); }
+.side__nav a.is-active { background: var(--ink); color: #fff; font-weight: 600; }
+.side__nav a svg { width: 17px; height: 17px; flex-shrink: 0; }
+
+.side__group {
+  margin: 18px 14px 8px; padding-top: 16px;
+  border-top: 1px solid var(--line);
+  font-size: 10px; font-weight: 700;
+  letter-spacing: var(--track-label); text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.side__foot { padding: 18px 22px 22px; border-top: 1px solid var(--line); }
+
+/* auth.js renderAccountBar 가 그리는 요소들 */
+.account-chip { display: block; font-size: 13px; margin-bottom: 12px; }
+.account-chip strong { display: block; font-weight: 700; }
+.account-chip__role { font-size: 11.5px; color: var(--ink-soft); }
+.btn-reset {
+  display: inline-flex; align-items: center;
+  border: 1px solid var(--ink); padding: 7px 16px;
+  font-size: 11px; font-weight: 700;
+  letter-spacing: var(--track-label); text-transform: uppercase;
+  transition: background .2s, color .2s;
+}
+.btn-reset:hover { background: var(--ink); color: #fff; }
+
+/* ── 본문 ──────────────────────────────────────────────────────────── */
+
+.main { flex: 1; min-width: 0; }
+.main__inner { max-width: 1180px; margin: 0 auto; padding: 48px 44px 72px; }
+
+/* ── 뷰(화면) 전환 ─────────────────────────────────────────────────
+ * 사이드바 항목마다 .view 하나. admin.js가 해시(#api 등)에 맞는 뷰만
+ * 보여준다. 별도 HTML 페이지를 늘리지 않는 이유: 화면들이 같은 데이터
+ * 로드(loadAll)를 공유하므로, 페이지로 쪼개면 요청과 코드가 중복된다. */
+.view[hidden] { display: none; }
+
+.view-head {
+  margin-bottom: 38px; padding-bottom: 26px;
+  border-bottom: 1px solid var(--line);
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap;
+}
+/* 시안의 대형 세리프 타이틀 */
+.view-title {
+  font-family: var(--font-display); font-weight: 400;
+  font-size: clamp(34px, 4vw, 52px); letter-spacing: -.01em; line-height: 1.1;
+}
+.view-sub { margin: 12px 0 0; font-size: 13.5px; color: var(--ink-soft); }
+
+.console__error {
+  margin: 0 0 22px; padding: 13px 16px;
+  border: 1px solid var(--danger); color: var(--danger);
+  font-size: 13px; background: #fff;
+}
+.console__error[hidden] { display: none; }
+
+/* 섹션 헤더 (표·로그 위) */
+.sec { margin-bottom: 52px; }
+.sec__head {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: 12px; padding-bottom: 12px; margin-bottom: 20px;
+  border-bottom: 1px solid var(--line);
+}
+.sec__title { font-size: 17px; font-weight: 700; letter-spacing: .01em; }
+.sec__title .en { font-family: var(--font-display); font-weight: 500; }
+.sec__note { font-size: 11.5px; color: var(--ink-faint); }
+
+.btn-line {
+  border: 1px solid var(--ink); padding: 8px 18px;
+  font-size: 11px; font-weight: 700;
+  letter-spacing: var(--track-label); text-transform: uppercase;
+  transition: background .2s, color .2s;
+}
+.btn-line:hover:not(:disabled) { background: var(--ink); color: #fff; }
+.btn-line:disabled { opacity: .4; cursor: default; }
+
+/* ── 상태 카드 ─────────────────────────────────────────────────────── */
+
+.status-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 20px; margin-bottom: 52px;
+}
+.status-grid--4 { grid-template-columns: repeat(4, 1fr); }
+.scard {
+  position: relative; background: var(--panel);
+  border: 1px solid var(--line); padding: 22px 24px 20px;
+  min-height: 148px; display: flex; flex-direction: column;
+}
+.scard--lead::before {
+  content: ''; position: absolute; top: -1px; left: -1px; right: -1px;
+  height: 3px; background: var(--ink);
+}
+.scard__head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: auto;
+}
+.scard__label {
+  font-size: 10.5px; font-weight: 700;
+  letter-spacing: var(--track-label); text-transform: uppercase;
+  color: var(--ink-soft);
+}
+.scard__state {
+  font-family: var(--font-kr-serif); font-size: 25px; font-weight: 700;
+  margin: 14px 0 8px;
+}
+.scard__meta {
+  display: flex; justify-content: space-between; gap: 10px;
+  font-size: 12px; color: var(--ink-faint);
+}
+
+/* 상태 점 */
+.dot {
+  display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+  margin-right: 7px; background: var(--ink-faint); flex-shrink: 0;
+}
+.dot--ok   { background: var(--gold); }
+.dot--good { background: var(--ok); }
+.dot--warn { background: var(--warn); }
+.dot--bad  { background: var(--danger); }
+.dot--pulse { animation: dot-pulse 1.4s ease-in-out infinite; }
+@keyframes dot-pulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .dot--pulse { animation: none; } }
+
+/* KPI (매물 수) */
+.kpi-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 20px; margin-bottom: 52px;
+}
+.kpi { background: var(--panel); border: 1px solid var(--line); padding: 20px 22px; }
+.kpi__label {
+  font-size: 10.5px; font-weight: 700;
+  letter-spacing: var(--track-label); text-transform: uppercase;
+  color: var(--ink-soft); margin-bottom: 12px;
+}
+.kpi__value { font-family: var(--font-display); font-size: 30px; font-weight: 500; }
+.kpi__hint { margin-top: 8px; font-size: 11.5px; color: var(--ink-faint); }
+
+/* ── API 모니터링 표 ───────────────────────────────────────────────── */
+
+.table-wrap { background: var(--panel); border: 1px solid var(--line); overflow-x: auto; }
+table.mon { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.mon th {
+  padding: 13px 18px; text-align: left;
+  font-size: 10px; font-weight: 700;
+  letter-spacing: var(--track-label); text-transform: uppercase;
+  color: var(--ink-soft); background: var(--bg);
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+table.mon td {
+  padding: 13px 18px; border-bottom: 1px solid var(--line-soft);
+  white-space: nowrap;
+}
+table.mon tr:last-child td { border-bottom: none; }
+table.mon tr:hover td { background: var(--bg); }
+table.mon .num { text-align: right; font-variant-numeric: tabular-nums; }
+table.mon .path { font-family: var(--font-mono); font-size: 12px; }
+.method-badge {
+  display: inline-block; padding: 3px 8px;
+  border: 1px solid var(--line); background: var(--bg);
+  font-size: 10.5px; font-weight: 700; letter-spacing: .06em;
+}
+.st { display: inline-flex; align-items: center; font-weight: 600; }
+.st--ok { color: var(--gold); }
+.st--bad { color: var(--danger); }
+.table__empty { padding: 40px; text-align: center; color: var(--ink-soft); font-size: 13px; }
+
+/* 트래픽 스파크라인 — 화면을 열어 둔 동안 10초 간격 증가분 막대 */
+.spark { display: flex; align-items: flex-end; gap: 2px; height: 22px; min-width: 76px; }
+.spark i { display: block; width: 4px; min-height: 2px; background: var(--ink-faint); }
+.spark i.hot { background: var(--ink); }
+.spark--empty { font-size: 11px; color: var(--ink-faint); }
+
+/* 상세 사실 목록 (데이터베이스 뷰) */
+.facts {
+  display: grid; grid-template-columns: 180px 1fr;
+  gap: 13px 20px; margin: 0;
+}
+.facts dt {
+  font-size: 11px; font-weight: 700;
+  letter-spacing: var(--track-label); text-transform: uppercase;
+  color: var(--ink-faint); align-self: center;
+}
+.facts dd { margin: 0; font-size: 13.5px; }
+.facts dd code { font-family: var(--font-mono); font-size: 12px; background: var(--bg); padding: 2px 7px; border: 1px solid var(--line-soft); }
+@media (max-width: 620px) { .facts { grid-template-columns: 1fr; gap: 4px; } .facts dd { margin-bottom: 10px; } }
+
+/* ── 크롤링 로그 (터미널) ──────────────────────────────────────────── */
+
+.term {
+  background: var(--term-bg); color: var(--term-ink);
+  font-family: var(--font-mono); font-size: 12.5px; line-height: 1.9;
+  padding: 22px 26px; max-height: 340px; overflow-y: auto;
+}
+.term__row { display: flex; gap: 14px; white-space: nowrap; }
+.term__row > span:last-child { white-space: normal; }
+.term__time { color: var(--term-dim); flex-shrink: 0; }
+.term__tag { font-weight: 700; flex-shrink: 0; }
+.term__tag--info { color: var(--term-info); }
+.term__tag--warn { color: #E08A4C; }
+.term__tag--err  { color: #E06C5F; }
+.term__empty { color: var(--term-dim); }
+
+/* ── 분포 막대 ─────────────────────────────────────────────────────── */
+
+.panel-row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+.panel { background: var(--panel); border: 1px solid var(--line); padding: 24px 26px; }
+.panel__title {
+  font-size: 10.5px; font-weight: 700;
+  letter-spacing: var(--track-label); text-transform: uppercase;
+  color: var(--ink-soft); margin: 0 0 18px;
+}
+.panel__title + .panel__title { margin-top: 26px; }
+
+.bar { display: grid; grid-template-columns: 96px 1fr 64px; gap: 12px; align-items: center; margin-bottom: 10px; }
+.bar__label { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar__track { height: 6px; background: var(--line-soft); overflow: hidden; }
+.bar__fill { display: block; height: 100%; background: var(--ink); }
+.bar__value { font-size: 12px; text-align: right; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.bars__empty { margin: 0; font-size: 12.5px; color: var(--ink-faint); }
+
+/* ── 하단 ──────────────────────────────────────────────────────────── */
+
+.main-foot {
+  border-top: 1px solid var(--line);
+  padding: 26px 44px 34px;
+  display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
+}
+.main-foot__logo {
+  font-family: var(--font-display); font-weight: 500;
+  font-size: 16px; letter-spacing: .26em; text-transform: uppercase;
+}
+.main-foot__meta {
+  font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+/* ── 반응형 ────────────────────────────────────────────────────────── */
+
+@media (max-width: 1080px) {
+  .status-grid { grid-template-columns: 1fr; }
+  .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+  .panel-row { grid-template-columns: 1fr; }
+}
+@media (max-width: 860px) {
+  body { flex-direction: column; }
+  .side { width: 100%; height: auto; position: static; }
+  .side__nav { display: flex; padding: 10px 14px; overflow-x: auto; }
+  .side__nav a { flex-shrink: 0; }
+  .side__group { display: none; }
+  .side__foot { display: flex; align-items: center; justify-content: space-between; }
+  .account-chip { margin-bottom: 0; }
+  .main__inner { padding: 30px 20px 48px; }
+}

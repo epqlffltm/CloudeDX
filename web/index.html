@@ -44,19 +44,22 @@
   </defs>
 </svg>
 
+<!-- 상단 띠 배너. 사실만 적는다 — 크롤링 매물은 검증 대상이 아니므로
+     "100% Verified" 같은 문구는 쓰지 않는다. -->
+<div class="announce">Curated Pre-loved Luxury &middot; 당근마켓 · 중고나라 · 번개장터 통합검색</div>
+
 <header class="site">
   <div class="wrap header-row">
-    <button class="logo" type="button" data-home aria-label="Reverdi 홈">rev<em>e</em>rdi</button>
+    <form class="search-pill" id="searchForm" role="search">
+      <button type="submit" aria-label="검색"><svg viewBox="0 0 24 24"><use href="#i-search"/></svg></button>
+      <label class="visually-hidden" for="searchInput">브랜드, 모델명 검색</label>
+      <input id="searchInput" type="search" autocomplete="off" enterkeyhint="search"
+             placeholder="브랜드, 모델명 검색" />
+    </form>
 
-    <div class="header-actions">
-      <form class="search-pill" id="searchForm" role="search">
-        <button type="submit" aria-label="검색"><svg viewBox="0 0 24 24"><use href="#i-search"/></svg></button>
-        <label class="visually-hidden" for="searchInput">브랜드, 모델명 검색</label>
-        <input id="searchInput" type="search" autocomplete="off" enterkeyhint="search"
-               placeholder="브랜드, 모델명 검색" />
-      </form>
-      <a class="icon-btn" href="login.html" aria-label="기업고객 로그인"><svg viewBox="0 0 24 24"><use href="#i-user"/></svg></a>
-    </div>
+    <button class="logo" type="button" data-home aria-label="Reverdi 홈">Reverdi</button>
+
+    <a class="login-btn" href="login.html" aria-label="기업고객 로그인">Login</a>
   </div>
 
   <div class="wrap">
@@ -85,13 +88,33 @@
 
   <section class="section">
     <div class="wrap">
+      <h2 class="home-h">Explore Categories</h2>
       <div class="cat-grid" id="catGrid"></div>
     </div>
   </section>
 
   <section class="section section--flush">
     <div class="wrap">
+      <h2 class="home-h">Maisons</h2>
       <div class="brand-scroll" id="brandScroll"></div>
+    </div>
+  </section>
+
+  <!-- 브랜드 스포트라이트. data-brand는 home.js의 이벤트 위임을 그대로 타므로
+       버튼을 누르면 에르메스 필터로 검색 결과 화면이 열린다 — JS 추가 없음.
+       비주얼은 외부 이미지 없이 CSS 모노그램으로 그린다. -->
+  <section class="section section--flush">
+    <div class="wrap">
+      <div class="spotlight">
+        <div class="spotlight-copy">
+          <p class="spotlight-eyebrow">Brand Spotlight</p>
+          <h2 class="spotlight-title">이달의 브랜드,<br><span class="en">HERMÈS</span></h2>
+          <p class="spotlight-sub">세 수집처에 흩어진 에르메스 매물을 한 화면에 모았습니다.
+            같은 모델의 가격과 판매처를 가로질러 비교해 보세요.</p>
+          <button class="spotlight-link" type="button" data-brand="에르메스">Discover More →</button>
+        </div>
+        <div class="spotlight-visual" aria-hidden="true"><span>H</span></div>
+      </div>
     </div>
   </section>
 
@@ -155,7 +178,7 @@
 <footer class="site">
   <div class="wrap footer-top">
     <div class="footer-brand">
-      <div class="logo">rev<em>e</em>rdi</div>
+      <div class="logo">Reverdi</div>
       <p>국내 중고 거래 플랫폼의 명품 매물을 모아 한 화면에서 비교합니다. 거래는 각 플랫폼에서 이루어집니다.</p>
     </div>
     <div class="footer-col">
