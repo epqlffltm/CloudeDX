@@ -474,44 +474,97 @@ async function refreshLive(query) {
  * 매장이 없는 판매자는 지도를 아예 그리지 않는다. has_store가 false면 주소와
  * 좌표가 없는 것이 정상이고, 빈 지도를 띄우면 "위치를 못 찾았다"로 읽힌다.
  */
-function renderSellerPanel(seller) {
+function renderSellerPanel(seller, goods) {
   const panel = $('sellerPanel');
 
-  const map = seller.has_store && seller.latitude && seller.longitude
-    ? `
-      <div class="seller-map">
-        <img src="${VWORLD_STATIC}?key=${VWORLD_KEY}&center=${seller.longitude},${seller.latitude}&crs=EPSG:4326&zoom=16&size=560,240&format=png&basemap=GRAPHIC&marker=point:${seller.longitude},${seller.latitude}"
-             alt="${esc(seller.name)} 매장 위치" loading="lazy"
-             onerror="this.closest('.seller-map').remove()">
-        <p class="seller-map-note">지도 제공: 국토교통부 브이월드</p>
-      </div>`
+  const hasMap = seller.has_store && seller.latitude && seller.longitude;
+  const all = goods ?? [];
+
+  // 시안의 우측 매장 사진 자리. 판매자 사진 데이터는 없으므로 이 판매자의
+  // 첫 매물 사진이 대신 선다 — 없으면 칸을 그리지 않고 정보가 전체 폭을 쓴다.
+  const photoItem = all.find((g) => g.image_url) ?? null;
+  const photo = photoItem
+    ? `<div class="seller-photo"><img src="${esc(photoItem.image_url)}" alt="" loading="lazy"></div>`
     : '';
 
   const store = seller.has_store
-    ? `<dt>매장 주소</dt><dd>${esc(seller.address ?? '등록되지 않음')}</dd>`
-    : '<dt>매장</dt><dd>매장 없이 온라인으로만 판매합니다.</dd>';
+    ? `<div class="sf"><dt>주소</dt><dd>${esc(seller.address ?? '등록되지 않음')}</dd></div>`
+    : '<div class="sf"><dt>매장</dt><dd>매장 없이 온라인으로만 판매합니다.</dd></div>';
+
+  // 대표 제품 — 이 판매자가 등록한 실제 매물. 위 사진으로 쓴 매물은 빼고 최대 4개.
+  const products = all.filter((g) => g !== photoItem).slice(0, 4);
+  const cards = products.map((g) => `
+      <figure class="sg-card">
+        ${g.image_url
+          ? `<img src="${esc(g.image_url)}" alt="" loading="lazy">`
+          : `<div class="sg-noimg" aria-hidden="true">${esc(toDisplayBrand(g.brand))}</div>`}
+        <figcaption>
+          <span class="sg-title">${esc(g.title)}</span>
+          <span class="sg-price">${priceText(g.price)}</span>
+        </figcaption>
+      </figure>`).join('');
+
+  const goodsSection = cards
+    ? `
+      <section class="seller-goods" aria-label="대표 제품">
+        <h3 class="seller-h">대표 제품</h3>
+        <div class="sg-grid">${cards}</div>
+      </section>`
+    : '';
+
+  // 시안의 "찾아오시는 길" — 넓은 지도 + 주소 + VIEW DIRECTIONS.
+  const directions = hasMap
+    ? `
+      <section class="seller-way" aria-label="찾아오시는 길">
+        <h3 class="seller-h">찾아오시는 길</h3>
+        <div class="seller-map">
+          <img src="${VWORLD_STATIC}?key=${VWORLD_KEY}&center=${seller.longitude},${seller.latitude}&crs=EPSG:4326&zoom=16&size=640,300&format=png&basemap=GRAPHIC" 
+               alt="${esc(seller.name)} 매장 위치" loading="lazy"
+               onerror="this.closest('.seller-way').remove()">
+          <span class="seller-pin" aria-hidden="true"></span>
+        </div>
+        <div class="seller-map-foot">
+          <span class="seller-map-addr">${esc(seller.address ?? '')}</span>
+          <a class="seller-map-link" target="_blank" rel="noopener"
+             href="https://map.kakao.com/link/map/${encodeURIComponent(seller.name)},${seller.latitude},${seller.longitude}">View Directions</a>
+        </div>
+        <p class="seller-map-note">지도 제공: 국토교통부 브이월드</p>
+      </section>`
+    : '';
 
   panel.innerHTML = `
     <div class="seller-sheet" role="dialog" aria-modal="true" aria-labelledby="sellerName">
       <button class="seller-close" type="button" data-seller-close aria-label="닫기">&times;</button>
 
-      <p class="seller-eyebrow">입점 판매자</p>
-      <h2 class="seller-name" id="sellerName">${esc(seller.name)}</h2>
-      ${seller.description ? `<p class="seller-desc">${esc(seller.description)}</p>` : ''}
+      <header class="seller-head">
+        <p class="seller-eyebrow">입점 판매자 정보</p>
+        <h2 class="seller-name" id="sellerName">${esc(seller.name)}</h2>
+        ${seller.description ? `<p class="seller-desc">“${esc(seller.description)}”</p>` : ''}
+      </header>
 
-      <dl class="seller-facts">
-        <dt>사업자등록번호</dt><dd>${esc(seller.business_number)}</dd>
-        <dt>연락처</dt><dd><a href="tel:${esc(seller.phone)}">${esc(seller.phone)}</a></dd>
-        ${store}
-        <dt>등록 매물</dt><dd>${won.format(seller.item_count)}건</dd>
-      </dl>
+      <div class="seller-body">
+        <div class="seller-grid${photo ? '' : ' seller-grid--solo'}">
+          <dl class="seller-facts">
+            <div class="sf"><dt>사업자 등록번호</dt><dd>${esc(seller.business_number)}</dd></div>
+            <div class="sf"><dt>연락처</dt><dd><a href="tel:${esc(seller.phone)}">${esc(seller.phone)}</a></dd></div>
+            ${store}
+            <div class="sf"><dt>등록 매물</dt><dd>${won.format(seller.item_count)}건</dd></div>
+          </dl>
+          ${photo}
+        </div>
 
-      ${map}
+        ${goodsSection}
+        ${directions}
 
-      <p class="seller-disclaimer">
-        사업자등록번호는 형식만 확인한 값입니다. 국세청 진위확인을 거치지 않았으며,
-        거래 전 직접 확인하시기 바랍니다.
-      </p>
+        <p class="seller-disclaimer">
+          사업자등록번호는 형식만 확인한 값입니다. 국세청 진위확인을 거치지 않았으며,
+          거래 전 직접 확인하시기 바랍니다.
+        </p>
+      </div>
+
+      <footer class="seller-foot">
+        <a class="seller-cta" href="tel:${esc(seller.phone)}">연락하기 (Contact Seller)</a>
+      </footer>
     </div>`;
 
   panel.hidden = false;
@@ -524,6 +577,27 @@ function closeSellerPanel() {
   panel.innerHTML = '';
 }
 
+/**
+ * 판매자의 매물을 "대표 제품"과 사진 칸에 쓸 재료로 가져온다.
+ *
+ * 전용 API 없이 목록 API를 재사용한다 — ListingOut에 seller_id가 이미 실려
+ * 있어서, 직접등록 매물을 받아 이 판매자 것만 고르면 된다. 시연 규모에서
+ * 직접등록은 수십 건이라 첫 페이지로 충분하다. 사진 있는 매물을 앞세운다.
+ */
+async function fetchSellerGoods(sellerId) {
+  try {
+    const page = await fetchListings(
+      { category: 'all', sort: 'latest', source: '직접등록' }, 0, 60,
+    );
+    // dataset에서 온 id는 문자열이라 숫자로 맞춘다.
+    const mine = page.items.filter((it) => it.seller_id === Number(sellerId));
+
+    return [...mine.filter((it) => it.image_url), ...mine.filter((it) => !it.image_url)];
+  } catch {
+    return null; // 실패는 절 생략으로 — 판매자 정보 자체를 가릴 이유가 없다.
+  }
+}
+
 async function openSeller(sellerId) {
   const panel = $('sellerPanel');
 
@@ -531,7 +605,11 @@ async function openSeller(sellerId) {
   panel.innerHTML = '<div class="seller-sheet"><p class="seller-loading">판매자 정보를 불러오는 중…</p></div>';
 
   try {
-    renderSellerPanel(await fetchSeller(sellerId));
+    const [seller, goods] = await Promise.all([
+      fetchSeller(sellerId),
+      fetchSellerGoods(sellerId),
+    ]);
+    renderSellerPanel(seller, goods);
   } catch {
     panel.innerHTML = `
       <div class="seller-sheet">

@@ -607,49 +607,124 @@ footer.site {
 
 .seller-sheet {
   position: relative;
-  width: min(600px, 100%); max-height: 86vh; overflow-y: auto;
-  background: #fff; padding: 40px 40px 32px;
+  width: min(780px, 100%); max-height: 88vh; overflow-y: auto;
+  background: #fff; border: 1px solid var(--line);
 }
 
 .seller-close {
-  position: absolute; top: 14px; right: 16px;
+  position: absolute; top: 14px; right: 16px; z-index: 2;
   width: 36px; height: 36px;
   font-size: 22px; line-height: 1; color: var(--ink-soft);
 }
 .seller-close:hover { background: var(--bg-alt); color: var(--ink); }
 
+/* 헤더 밴드 — 시안: 중앙 정렬, 옅은 배경, 아래 경계선 */
+.seller-head {
+  padding: 46px 48px 32px; text-align: center;
+  background: var(--bg-alt); border-bottom: 1px solid var(--line);
+}
 .seller-eyebrow {
-  margin: 0 0 10px; font-size: 10.5px; font-weight: 700;
-  letter-spacing: var(--track-wide); text-transform: uppercase; color: var(--ink-faint);
+  margin: 0 0 14px; font-size: 10.5px; font-weight: 700;
+  letter-spacing: var(--track-wide); text-transform: uppercase;
+  color: #8a6a42; /* 시안의 골드 아이브로우 */
 }
 .seller-name {
-  font-family: var(--font-kr-serif); font-size: 25px; font-weight: 700;
-  margin-bottom: 12px;
+  font-family: var(--font-kr-serif); font-size: 27px; font-weight: 700;
+  margin: 0 0 12px;
 }
 .seller-desc {
-  margin: 0 0 24px; font-size: 13.5px; font-weight: 300;
+  margin: 0 auto; max-width: 420px;
+  font-size: 13.5px; font-weight: 300; font-style: italic;
   line-height: 1.8; color: var(--ink-soft);
 }
 
-.seller-facts {
-  display: grid; grid-template-columns: 112px 1fr;
-  gap: 11px 16px; margin: 0 0 24px;
-  padding: 22px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+.seller-body { padding: 40px 48px 28px; }
+
+/* 시안: 정보(좌) + 매장 사진(우). 사진 재료가 없으면 1단 */
+.seller-grid {
+  display: grid; grid-template-columns: 1fr 1.1fr; gap: 32px 48px;
+  margin-bottom: 48px; align-items: start;
 }
-.seller-facts dt {
-  font-size: 11.5px; font-weight: 700; color: var(--ink-faint);
-  letter-spacing: .04em;
+.seller-grid--solo { grid-template-columns: 1fr; }
+
+.seller-photo img {
+  width: 100%; aspect-ratio: 5 / 4; object-fit: cover;
+  border: 1px solid var(--line); background: var(--bg-alt);
 }
-.seller-facts dd { margin: 0; font-size: 13.5px; color: var(--ink); }
+
+/* 라벨 위·값 아래 스택형 정보 목록 (시안 좌측 열) */
+.seller-facts { margin: 0; display: flex; flex-direction: column; gap: 22px; }
+.seller-facts .sf dt {
+  margin: 0 0 6px; font-size: 10.5px; font-weight: 700;
+  letter-spacing: var(--track-wide); text-transform: uppercase; color: var(--ink-faint);
+}
+.seller-facts .sf dd { margin: 0; font-size: 15.5px; color: var(--ink); }
 .seller-facts a { color: var(--ink); text-decoration: underline; }
 
-.seller-map { margin-bottom: 20px; }
+/* 절 제목 — 시안: 세리프, 중앙, 아래 헤어라인 */
+.seller-h {
+  margin: 0 0 26px; padding-bottom: 16px;
+  font-family: var(--font-kr-serif); font-size: 22px; font-weight: 700;
+  text-align: center; border-bottom: 1px solid var(--line);
+}
+
+/* 대표 제품 — 이 판매자의 실제 매물 */
+.seller-goods { margin-bottom: 48px; }
+.sg-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
+.sg-card { margin: 0; }
+.sg-card img, .sg-noimg {
+  width: 100%; aspect-ratio: 4 / 5; object-fit: cover;
+  border: 1px solid var(--line); background: var(--bg-alt);
+}
+.sg-noimg {
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-kr-serif); font-size: 13px; color: var(--ink-faint);
+}
+.sg-card figcaption { margin-top: 10px; text-align: center; }
+.sg-title {
+  display: block; font-size: 12.5px; color: var(--ink-soft);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sg-price {
+  display: block; margin-top: 3px;
+  font-family: var(--font-kr-serif); font-size: 12.5px; font-style: italic; color: var(--ink);
+}
+
+/* 찾아오시는 길 — 시안: 넓은 흑백 지도 + 중앙 핀 + 주소·VIEW DIRECTIONS */
+.seller-way { margin-bottom: 36px; }
+.seller-map { position: relative; }
 .seller-map img {
-  width: 100%; height: auto; border: 1px solid var(--line);
+  width: 100%; height: 280px; object-fit: cover;
+  border: 1px solid var(--line);
+  filter: grayscale(1) opacity(.9); transition: filter .5s;
 }
-.seller-map-note {
-  margin: 6px 0 0; font-size: 11px; color: var(--ink-faint);
+.seller-map:hover img { filter: none; }
+.seller-pin {
+  position: absolute; top: 50%; left: 50%;
+  width: 44px; height: 44px; margin: -22px 0 0 -22px;
+  background: var(--ink); border-radius: 50%;
+  box-shadow: 0 4px 14px rgba(0,0,0,.3); pointer-events: none;
 }
+.seller-pin::after {
+  content: ''; position: absolute; top: 50%; left: 50%;
+  width: 10px; height: 10px; margin: -8px 0 0 -5px;
+  background: #fff; border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+}
+.seller-map-foot {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-top: 14px; gap: 16px;
+}
+.seller-map-addr { font-size: 13.5px; color: var(--ink-soft); }
+.seller-map-link {
+  flex-shrink: 0;
+  font-size: 10.5px; font-weight: 700; letter-spacing: var(--track-wide);
+  text-transform: uppercase; color: var(--ink);
+  border: 1px solid var(--ink); padding: 9px 16px;
+  transition: background .2s, color .2s;
+}
+.seller-map-link:hover { background: var(--ink); color: #fff; }
+.seller-map-note { margin: 8px 0 0; font-size: 11px; color: var(--ink-faint); }
 
 /* 검증 범위를 명확히 알리는 자리. 사업자등록번호는 형식만 확인한 값이라,
  * 그 이상으로 읽히지 않게 화면에서 직접 말한다. */
@@ -658,9 +733,32 @@ footer.site {
   background: var(--bg-alt); font-size: 12px; line-height: 1.7; color: var(--ink-soft);
 }
 
+/* CTA 밴드 — 시안: 옅은 배경 위 검정 블록 버튼 */
+.seller-foot {
+  padding: 24px 48px; text-align: center;
+  border-top: 1px solid var(--line); background: var(--bg-alt);
+}
+.seller-cta {
+  display: inline-block; min-width: 240px; padding: 16px 36px;
+  background: var(--ink); color: #fff;
+  font-size: 11.5px; font-weight: 700; letter-spacing: var(--track-wide);
+  text-transform: uppercase; transition: opacity .2s;
+}
+.seller-cta:hover { opacity: .85; }
+
 .seller-loading {
   margin: 0; padding: 40px 0; text-align: center;
   font-size: 14px; color: var(--ink-soft);
+}
+
+@media (max-width: 680px) {
+  .seller-head { padding: 36px 22px 24px; }
+  .seller-body { padding: 28px 22px 22px; }
+  .seller-foot { padding: 18px 22px; }
+  .seller-grid { grid-template-columns: 1fr; gap: 26px; }
+  .sg-grid { grid-template-columns: repeat(2, 1fr); }
+  .seller-map img { height: 200px; }
+  .seller-map-foot { flex-direction: column; align-items: flex-start; }
 }
 
 /* 카드가 <button>일 때도 <a>와 같게 보이게 한다. */

@@ -59,7 +59,7 @@
 
     <button class="logo" type="button" data-home aria-label="Reverdi 홈">Reverdi</button>
 
-    <a class="login-btn" href="login.html" aria-label="기업고객 로그인">Login</a>
+    <a class="login-btn" href="login.html" aria-label="기업고객 로그인" id="loginBtn">Login</a>
   </div>
 
   <div class="wrap">
@@ -205,5 +205,22 @@
 </footer>
 
 <script type="module" src="js/home.js"></script>
+<script type="module">
+  // 로그인 상태면 헤더의 Login 버튼을 자기 콘솔 바로가기로 바꾼다.
+  // 로그인한 사람에게 다시 Login을 보여주는 것은 "이미 됐는데 안 된 것처럼
+  // 보이는" 혼란이라서다. 비로그인·네트워크 실패는 조용히 무시 — 버튼은
+  // 원래의 Login으로 남고, 화면의 다른 기능은 이 스크립트와 무관하게 돈다.
+  import { fetchMe } from './js/auth.js';
+
+  fetchMe().then((me) => {
+    if (!me) return;
+    const btn = document.getElementById('loginBtn');
+    if (!btn) return;
+    const isAdmin = me.role === 'admin';
+    btn.textContent = isAdmin ? 'Console' : 'My Page';
+    btn.href = isAdmin ? 'admin.html' : 'client.html';
+    btn.setAttribute('aria-label', isAdmin ? '관리자 콘솔로 이동' : '내 매물 관리로 이동');
+  }).catch(() => {});
+</script>
 </body>
 </html>
