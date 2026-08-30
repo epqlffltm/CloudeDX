@@ -491,36 +491,76 @@ function sketchMap(seed) {
   };
   const W = 640; const H = 300;
   const parts = [];
+  const label = (x, y, text, size = 12, fill = '#6b655c', weight = 500, anchor = 'middle') =>
+    `<text x="${x}" y="${y}" font-family="'Noto Sans KR',sans-serif" font-size="${size}" font-weight="${weight}" fill="${fill}" text-anchor="${anchor}">${text}</text>`;
 
-  // 강 — 화면 한쪽을 지나는 완만한 곡선
-  const rx = W * (0.62 + rng() * 0.28);
-  parts.push(`<path d="M ${rx} -20 C ${rx - 40 + rng() * 80} ${H * 0.35}, ${rx + 40 - rng() * 80} ${H * 0.65}, ${rx - 30 + rng() * 60} ${H + 20}" stroke="#d7dcd9" stroke-width="26" fill="none" stroke-linecap="round"/>`);
+  // ── 도로망 ──────────────────────────────────────────────
+  // 처음 버전은 무작위 선만 흩었더니 "지도"로 읽히지 않았다. 약도가 약도로
+  // 보이는 것은 선의 양이 아니라 **읽을 수 있는 표지** 덕분이다 — 그래서
+  // 큰길 두 개의 교차 + 이름표 + 랜드마크라는 고정 문법 위에, 난수는
+  // 위치를 조금씩 흔드는 데만 쓴다(판매자마다 다른 동네처럼 보이게).
 
-  // 골목(가는 길) — 옅게 여러 개
-  for (let i = 0; i < 7; i += 1) {
-    const y = H * (0.08 + rng() * 0.84);
-    const tilt = (rng() - 0.5) * 40;
-    parts.push(`<line x1="-10" y1="${y}" x2="${W + 10}" y2="${y + tilt}" stroke="#ddd6cb" stroke-width="4"/>`);
+  // 골목 — 옅게 몇 개만(질감용). 라벨을 덮지 않게 수를 줄였다.
+  for (let i = 0; i < 3; i += 1) {
+    const y = H * (0.1 + rng() * 0.8);
+    parts.push(`<line x1="-10" y1="${y}" x2="${W + 10}" y2="${y + (rng() - 0.5) * 24}" stroke="#e3dccf" stroke-width="3"/>`);
   }
-  for (let i = 0; i < 6; i += 1) {
-    const x = W * (0.06 + rng() * 0.88);
-    const tilt = (rng() - 0.5) * 40;
-    parts.push(`<line x1="${x}" y1="-10" x2="${x + tilt}" y2="${H + 10}" stroke="#ddd6cb" stroke-width="4"/>`);
+  for (let i = 0; i < 3; i += 1) {
+    const x = W * (0.08 + rng() * 0.84);
+    parts.push(`<line x1="${x}" y1="-10" x2="${x + (rng() - 0.5) * 24}" y2="${H + 10}" stroke="#e3dccf" stroke-width="3"/>`);
   }
 
-  // 간선도로 — 굵고 진하게, 가로 둘·세로 둘·사선 하나
-  for (let i = 0; i < 2; i += 1) {
-    const y = H * (0.2 + rng() * 0.6);
-    parts.push(`<line x1="-10" y1="${y}" x2="${W + 10}" y2="${y + (rng() - 0.5) * 60}" stroke="#8e8880" stroke-width="9" stroke-linecap="round"/>`);
-  }
-  for (let i = 0; i < 2; i += 1) {
-    const x = W * (0.15 + rng() * 0.7);
-    parts.push(`<line x1="${x}" y1="-10" x2="${x + (rng() - 0.5) * 60}" y2="${H + 10}" stroke="#8e8880" stroke-width="9" stroke-linecap="round"/>`);
-  }
-  parts.push(`<line x1="${W * rng() * 0.3}" y1="-10" x2="${W * (0.7 + rng() * 0.3)}" y2="${H + 10}" stroke="#a49d93" stroke-width="6"/>`);
+  // 하천 — 오른쪽 가장자리를 지나는 곡선 (있어도 시선을 뺏지 않게 연하게)
+  const rx = W * (0.86 + rng() * 0.1);
+  parts.push(`<path d="M ${rx} -20 C ${rx - 30 + rng() * 60} ${H * 0.35}, ${rx + 30 - rng() * 60} ${H * 0.65}, ${rx - 20 + rng() * 40} ${H + 20}" stroke="#d3ddd8" stroke-width="22" fill="none" stroke-linecap="round"/>`);
 
-  // 중심 구역 — 핀 주변을 살짝 밝혀 "여기"라는 시선을 만든다
-  parts.push(`<rect x="${W / 2 - 90}" y="${H / 2 - 62}" width="180" height="124" rx="16" fill="rgba(255,255,255,.4)" stroke="#c9c2b6" stroke-width="1.5"/>`);
+  // 큰길(가로) — 흰 점선 중앙선을 넣어 도로임이 바로 읽히게
+  const roadY = H * (0.71 + (rng() - 0.5) * 0.07);
+  const roadTilt = (rng() - 0.5) * 24;
+  parts.push(`<line x1="-10" y1="${roadY}" x2="${W + 10}" y2="${roadY + roadTilt}" stroke="#8e8880" stroke-width="16" stroke-linecap="round"/>`);
+  parts.push(`<line x1="-10" y1="${roadY}" x2="${W + 10}" y2="${roadY + roadTilt}" stroke="#f6f3ec" stroke-width="2" stroke-dasharray="14 10"/>`);
+
+  // 큰길(세로)
+  const roadX = W * (0.34 + (rng() - 0.5) * 0.1);
+  parts.push(`<line x1="${roadX}" y1="-10" x2="${roadX + (rng() - 0.5) * 24}" y2="${H + 10}" stroke="#9b958c" stroke-width="12" stroke-linecap="round"/>`);
+
+  // 도로 이름 — 시연용 가상 지명. 실제 지명을 쓰면 "진짜 지도"로 오해된다.
+  parts.push(label(W * 0.75, roadY - 12, '중앙대로', 12, '#7a736a', 600));
+  parts.push(label(roadX + 14, H * 0.14, '시장길', 11, '#8a8378', 500, 'start'));
+
+  // ── 랜드마크 ────────────────────────────────────────────
+  // 지하철역 — 큰길 교차점 곁. 약도에서 가장 힘이 센 기준점이라 항상 넣는다.
+  // 세로길 왼쪽·매장 구역 바깥에 둔다 — 중앙 상자와 겹치면 서로를 가린다.
+  const stX = roadX - 36 - rng() * 8;
+  const stY = roadY - 34 - rng() * 8;
+  parts.push(`<circle cx="${stX}" cy="${stY}" r="13" fill="#fff" stroke="#4b5a6b" stroke-width="3.5"/>`);
+  parts.push(label(stX, stY + 4.5, '역', 12, '#4b5a6b', 700));
+  parts.push(label(stX, stY - 20, '3번 출구', 10.5, '#8a8378'));
+
+  // 공원 — 왼쪽/오른쪽 위 중 난수로 한 곳
+  const parkX = rng() < 0.5 ? W * 0.12 : W * 0.56;
+  const parkY = H * (0.12 + rng() * 0.08);
+  parts.push(`<rect x="${parkX}" y="${parkY}" width="92" height="54" rx="14" fill="#dde6d3" stroke="#b9c9ab" stroke-width="1.5"/>`);
+  parts.push(label(parkX + 46, parkY + 32, '공원', 12, '#5d7050', 600));
+
+  // 작은 건물 두 개 — 은행·카페. "매장 옆 무엇"이라고 말할 거리를 만든다.
+  const bankX = W * (0.68 + rng() * 0.08);
+  const bankY = roadY + 18 + rng() * 6;
+  parts.push(`<rect x="${bankX}" y="${bankY}" width="56" height="34" rx="6" fill="#eae3d4" stroke="#c9c2b6" stroke-width="1.5"/>`);
+  parts.push(label(bankX + 28, bankY + 22, '은행', 11.5, '#6b655c', 600));
+
+  const cafeX = W * (0.14 + rng() * 0.06);
+  const cafeY = roadY + 18 + rng() * 6;
+  parts.push(`<rect x="${cafeX}" y="${cafeY}" width="50" height="32" rx="6" fill="#eae3d4" stroke="#c9c2b6" stroke-width="1.5"/>`);
+  parts.push(label(cafeX + 25, cafeY + 21, '카페', 11.5, '#6b655c', 600));
+
+  // ── 매장 구역 ───────────────────────────────────────────
+  // 핀(.seller-pin 오버레이)이 정중앙에 오므로 그 아래 이름표를 깐다.
+  parts.push(`<rect x="${W / 2 - 74}" y="${H / 2 - 50}" width="148" height="100" rx="14" fill="rgba(255,255,255,.55)" stroke="#b7ae9e" stroke-width="2"/>`);
+  parts.push(label(W / 2, H / 2 + 40, '매장', 13.5, '#3a352e', 700));
+
+  // 나침반 — 오른쪽 위. 이게 있으면 "지도"라는 신호가 한 번 더 간다.
+  parts.push(`<g transform="translate(${W - 44}, 40)"><circle r="15" fill="#fff" stroke="#c9c2b6" stroke-width="1.5"/><path d="M 0 -9 L 4 5 L 0 2 L -4 5 Z" fill="#3a352e"/><text y="-20" font-family="sans-serif" font-size="11" font-weight="700" fill="#6b655c" text-anchor="middle">N</text></g>`);
 
   return `<svg class="seller-sketch" viewBox="0 0 ${W} ${H}" role="img" aria-label="매장 위치 약도" preserveAspectRatio="xMidYMid slice"><rect width="${W}" height="${H}" fill="#f2efe9"/>${parts.join('')}</svg>`;
 }

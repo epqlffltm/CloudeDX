@@ -50,6 +50,7 @@ RuntimeError → CrashLoopBackOff). 버그가 아니라 설계다 — 기본 비
 | `READ_FALLBACK_COOLDOWN_SECONDS` | `30` | 복제본 장애 시 주 DB로 보내는 시간 |
 | `ADMIN_USERNAME` / `CLIENT_USERNAME` | `admin` / `client` | 계정 아이디를 바꾸고 싶을 때만 |
 | `FORWARDED_ALLOW_IPS` | `*` | ALB 뒤에서는 VPC 대역(예: `10.0.0.0/16`)으로 좁힌다 — X-Forwarded-For 위조 방지. nginx 제거로 체인이 클라이언트→ALB→uvicorn 한 단계다 |
+| `CLIENT_SELLER_ID` | `0` (연결 안 함) | client 계정이 올린 매물을 연결할 판매자 id. 시연에서만 의미 있는 임시 다리 — 지정한 판매자가 없으면 경고만 남기고 업로드는 성공한다 |
 
 지정하지 않는 변수: `UPLOAD_DIR` — S3 모드에서는 안 쓴다. `ADMIN_MEMO_PATH` —
 **폐기됨** (메모가 DB 테이블 `admin_memo`로 옮겨져서 변수 자체가 사라졌다).
