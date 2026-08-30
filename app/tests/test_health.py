@@ -22,7 +22,13 @@ async def test_health_is_ok(client):
     assert response.json() == {"status": "ok"}
 
 
-async def test_ready_when_everything_is_fine(client):
+async def test_ready_when_everything_is_fine(client, monkeypatch, tmp_path):
+    # 저장소 프로브를 기본 경로에 맡기면 러너 환경에 따라 결과가 갈린다 — CI는
+    # /srv에 못 써서 이 테스트가 503으로 깨졌다. "모든 게 정상"이라는 조건도
+    # 환경에서 얻어걸리는 게 아니라 테스트가 직접 만든다(CLIENT_SELLER_ID 때와
+    # 같은 교훈).
+    monkeypatch.setattr(storage, "UPLOAD_DIR", tmp_path / "uploads")
+
     response = await client.get("/ready")
     body = response.json()
 
