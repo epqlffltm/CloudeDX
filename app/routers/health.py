@@ -55,7 +55,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.engine import check_write_connection, get_read_session
 from app.db.migrations import get_current_revision, get_head_revisions
-from app.schemas.responses import DatabaseCheck, MigrationCheck, ReadyResponse
+from app.domain.storage import check_storage, storage_mode
+from app.schemas.responses import (
+    DatabaseCheck,
+    MigrationCheck,
+    ReadyResponse,
+    StorageCheck,
+)
 
 router = APIRouter(tags=["health"])
 
@@ -107,6 +113,19 @@ async def ready(
 
     write_error = await check_write_connection()
 
+    # 저장소(이미지 업로드) 쓰기 확인. 로컬 모드에서만 실제로 써 본다.
+    #
+    # 이건 위의 "쓰기 DB 실패는 ready 판정에 안 넣는다"와 결이 다르다: 주 DB는
+    # 외부 의존성이라 파드를 빼도 장애가 낫지 않지만, 로컬 디스크는 이 컨테이너
+    # 자신의 일부다. 못 쓰면 볼륨 권한 같은 배포 설정 오류이고, compose/오케스트레이터가
+    # 기동 직후 빨간불로 알려주는 것이 첫 업로드에서 500을 만나는 것보다 낫다.
+    # (실제 사례: 업로드 볼륨이 root 소유로 만들어져 사진 업로드가 500 — 테스트는
+    # 개발자 PC 권한으로 돌아 잡을 수 없었다.)
+    #
+    # S3 모드는 검사하지 않으므로 항상 통과다 — 운영(S3) readiness 의미는 변하지 않는다.
+    storage_error = check_storage()
+    storage_ok = storage_error is None
+
     # 마이그레이션 검사도 읽기 경로로 한다. 주 DB가 죽어 있어도 스키마 버전은
     # 확인할 수 있어야 하고, 복제본은 같은 스키마를 복제하고 있다.
     #
@@ -121,7 +140,7 @@ async def ready(
     # 마이그레이션 항목은 통과로 본다. DB 연결만으로 판단한다.
     up_to_date = not heads or (current is not None and current in heads)
 
-    is_ready = read_ok and up_to_date
+    is_ready = read_ok and up_to_date and storage_ok
 
     if not is_ready:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
@@ -130,6 +149,7 @@ async def ready(
         ready=is_ready,
         database=DatabaseCheck(connected=read_ok, error=read_error),
         database_write=DatabaseCheck(connected=write_error is None, error=write_error),
+        storage=StorageCheck(mode=storage_mode(), ok=storage_ok, error=storage_error),
         migration=MigrationCheck(
             current=current,
             head=heads[0] if len(heads) == 1 else None,

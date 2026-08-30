@@ -53,8 +53,6 @@ const ALL = '전체';
 //
 // 키가 비어 있으면 이미지 요청이 실패하고, onerror가 지도 블록을 통째로 지운다.
 // 그래서 키를 넣지 않아도 화면은 깨지지 않는다.
-const VWORLD_STATIC = 'https://api.vworld.kr/req/image';
-const VWORLD_KEY = document.querySelector('meta[name="vworld-key"]')?.content ?? '';
 
 const categoryLabel = (id) => CATEGORY_LABELS[id] ?? id;
 const categoryIcon = (id) => CATEGORY_ICONS[id] ?? 'i-sparkles';
@@ -474,25 +472,80 @@ async function refreshLive(query) {
  * 매장이 없는 판매자는 지도를 아예 그리지 않는다. has_store가 false면 주소와
  * 좌표가 없는 것이 정상이고, 빈 지도를 띄우면 "위치를 못 찾았다"로 읽힌다.
  */
+/**
+ * 약도처럼 보이는 SVG를 그린다 — 실제 지도가 아니다.
+ *
+ * 시안의 지도 자리는 "그 동네 같은 분위기"가 목적이지 길찾기가 아니다. 진짜
+ * 지도를 붙이면 API 키·외부망·타일 로딩이 전부 이 모달의 의존성이 되는데,
+ * 약도라는 목적에는 과하다. 대신 판매자 id를 시드로 쓴 결정적 난수로 도로를
+ * 배치한다 — 같은 판매자는 늘 같은 약도, 다른 판매자는 다른 약도가 나온다.
+ */
+function sketchMap(seed) {
+  // mulberry32 — 시드 고정 난수. Math.random()이면 열 때마다 약도가 바뀐다.
+  let s = (seed * 2654435761) >>> 0;
+  const rng = () => {
+    s = (s + 0x6D2B79F5) >>> 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const W = 640; const H = 300;
+  const parts = [];
+
+  // 강 — 화면 한쪽을 지나는 완만한 곡선
+  const rx = W * (0.62 + rng() * 0.28);
+  parts.push(`<path d="M ${rx} -20 C ${rx - 40 + rng() * 80} ${H * 0.35}, ${rx + 40 - rng() * 80} ${H * 0.65}, ${rx - 30 + rng() * 60} ${H + 20}" stroke="#d7dcd9" stroke-width="26" fill="none" stroke-linecap="round"/>`);
+
+  // 골목(가는 길) — 옅게 여러 개
+  for (let i = 0; i < 7; i += 1) {
+    const y = H * (0.08 + rng() * 0.84);
+    const tilt = (rng() - 0.5) * 40;
+    parts.push(`<line x1="-10" y1="${y}" x2="${W + 10}" y2="${y + tilt}" stroke="#ddd6cb" stroke-width="4"/>`);
+  }
+  for (let i = 0; i < 6; i += 1) {
+    const x = W * (0.06 + rng() * 0.88);
+    const tilt = (rng() - 0.5) * 40;
+    parts.push(`<line x1="${x}" y1="-10" x2="${x + tilt}" y2="${H + 10}" stroke="#ddd6cb" stroke-width="4"/>`);
+  }
+
+  // 간선도로 — 굵고 진하게, 가로 둘·세로 둘·사선 하나
+  for (let i = 0; i < 2; i += 1) {
+    const y = H * (0.2 + rng() * 0.6);
+    parts.push(`<line x1="-10" y1="${y}" x2="${W + 10}" y2="${y + (rng() - 0.5) * 60}" stroke="#8e8880" stroke-width="9" stroke-linecap="round"/>`);
+  }
+  for (let i = 0; i < 2; i += 1) {
+    const x = W * (0.15 + rng() * 0.7);
+    parts.push(`<line x1="${x}" y1="-10" x2="${x + (rng() - 0.5) * 60}" y2="${H + 10}" stroke="#8e8880" stroke-width="9" stroke-linecap="round"/>`);
+  }
+  parts.push(`<line x1="${W * rng() * 0.3}" y1="-10" x2="${W * (0.7 + rng() * 0.3)}" y2="${H + 10}" stroke="#a49d93" stroke-width="6"/>`);
+
+  // 중심 구역 — 핀 주변을 살짝 밝혀 "여기"라는 시선을 만든다
+  parts.push(`<rect x="${W / 2 - 90}" y="${H / 2 - 62}" width="180" height="124" rx="16" fill="rgba(255,255,255,.4)" stroke="#c9c2b6" stroke-width="1.5"/>`);
+
+  return `<svg class="seller-sketch" viewBox="0 0 ${W} ${H}" role="img" aria-label="매장 위치 약도" preserveAspectRatio="xMidYMid slice"><rect width="${W}" height="${H}" fill="#f2efe9"/>${parts.join('')}</svg>`;
+}
+
 function renderSellerPanel(seller, goods) {
   const panel = $('sellerPanel');
 
   const hasMap = seller.has_store && seller.latitude && seller.longitude;
   const all = goods ?? [];
 
-  // 시안의 우측 매장 사진 자리. 판매자 사진 데이터는 없으므로 이 판매자의
-  // 첫 매물 사진이 대신 선다 — 없으면 칸을 그리지 않고 정보가 전체 폭을 쓴다.
-  const photoItem = all.find((g) => g.image_url) ?? null;
-  const photo = photoItem
-    ? `<div class="seller-photo"><img src="${esc(photoItem.image_url)}" alt="" loading="lazy"></div>`
+  // 시안의 우측 매장 사진 자리 — 판매자의 매장 사진(간판·가게 내부)이다.
+  // 매물 사진을 대신 세우지 않는다: 가게 소개 칸에 파는 물건이 걸리면 이상하다.
+  // 사진이 없으면(온라인 전용 판매자 등) 칸을 그리지 않고 정보가 전체 폭을 쓰고,
+  // 경로는 있는데 파일이 빠진 경우에도 onerror가 같은 레이아웃으로 되돌린다.
+  const photo = seller.photo_url
+    ? `<div class="seller-photo"><img src="${esc(seller.photo_url)}" alt="${esc(seller.name)} 매장 사진" loading="lazy"
+         onerror="this.closest('.seller-grid').classList.add('seller-grid--solo'); this.closest('.seller-photo').remove()"></div>`
     : '';
 
   const store = seller.has_store
     ? `<div class="sf"><dt>주소</dt><dd>${esc(seller.address ?? '등록되지 않음')}</dd></div>`
     : '<div class="sf"><dt>매장</dt><dd>매장 없이 온라인으로만 판매합니다.</dd></div>';
 
-  // 대표 제품 — 이 판매자가 등록한 실제 매물. 위 사진으로 쓴 매물은 빼고 최대 4개.
-  const products = all.filter((g) => g !== photoItem).slice(0, 4);
+  // 대표 제품 — 이 판매자가 등록한 실제 매물, 최대 4개.
+  const products = all.slice(0, 4);
   const cards = products.map((g) => `
       <figure class="sg-card">
         ${g.image_url
@@ -512,23 +565,26 @@ function renderSellerPanel(seller, goods) {
       </section>`
     : '';
 
-  // 시안의 "찾아오시는 길" — 넓은 지도 + 주소 + VIEW DIRECTIONS.
-  const directions = hasMap
+  // 시안의 "찾아오시는 길" — 약도 + 주소 + VIEW DIRECTIONS.
+  // 지도는 정확한 지도가 아니라 **약도처럼 보이는 생성 그림**이다(아래 sketchMap).
+  // 외부 지도 API가 필요 없고, 정확한 위치가 필요한 사람은 View Directions로
+  // 실제 지도(카카오맵)에 간다. 좌표가 없으면 링크만 빠진다.
+  const directions = seller.has_store
     ? `
       <section class="seller-way" aria-label="찾아오시는 길">
         <h3 class="seller-h">찾아오시는 길</h3>
         <div class="seller-map">
-          <img src="${VWORLD_STATIC}?key=${VWORLD_KEY}&center=${seller.longitude},${seller.latitude}&crs=EPSG:4326&zoom=16&size=640,300&format=png&basemap=GRAPHIC" 
-               alt="${esc(seller.name)} 매장 위치" loading="lazy"
-               onerror="this.closest('.seller-way').remove()">
+          ${sketchMap(seller.id)}
           <span class="seller-pin" aria-hidden="true"></span>
         </div>
         <div class="seller-map-foot">
           <span class="seller-map-addr">${esc(seller.address ?? '')}</span>
-          <a class="seller-map-link" target="_blank" rel="noopener"
-             href="https://map.kakao.com/link/map/${encodeURIComponent(seller.name)},${seller.latitude},${seller.longitude}">View Directions</a>
+          ${seller.latitude && seller.longitude
+            ? `<a class="seller-map-link" target="_blank" rel="noopener"
+                 href="https://map.kakao.com/link/map/${encodeURIComponent(seller.name)},${seller.latitude},${seller.longitude}">View Directions</a>`
+            : ''}
         </div>
-        <p class="seller-map-note">지도 제공: 국토교통부 브이월드</p>
+        <p class="seller-map-note">위치를 표현한 약도입니다 — 실제 지형·축척과 다릅니다.</p>
       </section>`
     : '';
 

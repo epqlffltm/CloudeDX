@@ -7,8 +7,8 @@
 서빙 경로는 이렇게 나뉜다.
     /health, /ready     운영용 상태 확인 (app/routers/health.py의 설명 참고)
     /metrics            Prometheus 지표 (클러스터 내부 수집용)
-    /board              Jinja2로 그린 게시판 화면 (목록 -> 제목 클릭 -> 상세)
-    /api/crawled-items  같은 데이터를 주는 JSON API
+    /                   웹 화면 (web/ 정적 파일 — StaticFiles mount)
+    /api/crawled-items  수집 데이터 JSON API
     /api/meta           필터 선택지와 수집 현황
     /api/products       프론트엔드(ReLuxe)가 소비하는 상품 모양
 조회 경로는 모두 app.db.repository를 통하므로 필터/정렬 동작이 갈라지지 않는다.
@@ -26,7 +26,7 @@
     docker compose up -d
     uv run alembic upgrade head    # 스키마 반영. 모델을 고쳤다면 반드시 먼저 실행한다
     uv run uvicorn app.main:app
-게시판:           http://127.0.0.1:8000/board
+화면:             http://127.0.0.1:8000/
 문서(Swagger UI): http://127.0.0.1:8000/docs
 
 서버 시작에 대해:
@@ -270,7 +270,7 @@ app.include_router(sellers_router, prefix=API_PREFIX)
 # 여기서 붙이는 이유는 등록 순서 때문이다. 아래 StaticFiles mount 가 "/" 를 통째로
 # 가져가므로, /metrics 는 반드시 그 앞에서 등록돼야 한다.
 #
-# 경로 라벨은 raw path 가 아니라 라우트 템플릿으로 나간다(/board/{item_id}).
+# 경로 라벨은 raw path 가 아니라 라우트 템플릿으로 나간다(/api/products/{item_id}).
 # raw path 로 두면 매물 id 하나마다 시계열이 하나씩 생겨서 카디널리티가 터진다.
 #
 # 읽기/쓰기 구분은 여기가 아니라 app/db/engine.py 의 cloudedx_db_session_total 이
@@ -293,10 +293,10 @@ Instrumentator(
 # 교차 출처 자체가 발생하지 않는다. ALLOWED_ORIGINS는 프론트를 다른 곳에서
 # 호스팅하는 경우에만 쓰는 선택지가 됐다.
 #
-# 등록 순서가 곧 우선순위다: /api·/board·/docs 같은 등록된 라우트가 먼저
+# 등록 순서가 곧 우선순위다: /api·/docs 같은 등록된 라우트가 먼저
 # 매칭되고, 남는 경로만 이 mount로 떨어진다. 그래서 mount는 반드시 맨 뒤다.
-# html=True는 "/" 요청에 index.html을 돌려준다 — 예전의 /board 리다이렉트를
-# 대체한다. 이제 루트가 곧 서비스 화면이고, 게시판은 /board 직행으로 남는다.
+# html=True는 "/" 요청에 index.html을 돌려준다 — 루트가 곧 서비스 화면이다.
+# (한때 있던 Jinja2 게시판(/board)은 웹 화면과 역할이 겹쳐 제거했다 — README 참고.)
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # 업로드 이미지 서빙.

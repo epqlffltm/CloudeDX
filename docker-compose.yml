@@ -83,6 +83,10 @@ services:
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
 
+      # 기업고객 계정이 올린 매물에 연결할 판매자 id (0 = 연결 안 함).
+      # 시연: seed --sellers-only로 판매자를 깔고 1(청담 명품관)로 지정한다.
+      CLIENT_SELLER_ID: ${CLIENT_SELLER_ID:-0}
+
       # -----------------------------------------------------------------------
       # 세션 쿠키 서명 키를 고정한다.
       #

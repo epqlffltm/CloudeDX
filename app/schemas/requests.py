@@ -7,9 +7,9 @@ API 요청(쿼리 파라미터)에 쓰이는 Pydantic 모델.
 길어지고, 같은 검증 규칙(limit 범위 등)이 엔드포인트마다 복사된다. 그래서 필터 묶음을
 모델 하나로 만들어 Annotated[..., Query()]로 주입한다 (FastAPI 0.115+ 지원).
 
-JSON API(/crawled-items)와 HTML 게시판(/board)이 같은 모델을 공유한다. 두 화면의
-필터 조건이 갈라지지 않게 하려는 것이고, 조건이 어긋나면 "API로는 나오는데 화면에는
-안 나오는" 상황이 생긴다.
+/api/crawled-items와 /api/products가 같은 모델을 공유한다. 두 경로의 필터 조건이
+갈라지지 않게 하려는 것이고, 조건이 어긋나면 "API로는 나오는데 화면에는 안 나오는"
+상황이 생긴다.
 
 검증도 여기서 끝낸다 — min_price > max_price 같은 모순은 repository까지 내려가기 전에
 422로 걸러진다.
@@ -28,7 +28,7 @@ class PaginationParams(BaseModel):
 
 
 class CrawledItemFilterParams(PaginationParams):
-    """매물 목록 필터. /crawled-items(JSON)와 /board(HTML)가 공유한다."""
+    """매물 목록 필터. /api/crawled-items와 /api/products가 공유한다."""
 
     source: str | None = Field(
         default=None,

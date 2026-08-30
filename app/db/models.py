@@ -295,6 +295,11 @@ class Seller(Base):
     # 판매자 소개. 상세 화면 상단에 짧게 보여준다.
     description: Mapped[str | None] = mapped_column(Text)
 
+    # 매장 사진(간판·가게 내부) URL. 웹 정적 경로(img/sellers/…)나 S3 URL이 들어온다.
+    # 매물 사진과는 별개의 컬럼이다 — 가게 소개 칸에 파는 물건 사진이 대신 걸리면
+    # 안 되기 때문이다. 없으면 화면이 사진 칸 자체를 그리지 않는다.
+    photo_url: Mapped[str | None] = mapped_column(String(300))
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

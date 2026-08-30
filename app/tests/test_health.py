@@ -12,6 +12,7 @@ DB 장애가 전체 컨테이너 재시작 폭풍으로 번진다.
 from sqlalchemy.exc import OperationalError
 
 from app.db import migrations
+from app.domain import storage
 
 
 async def test_health_is_ok(client):
@@ -28,6 +29,7 @@ async def test_ready_when_everything_is_fine(client):
     assert response.status_code == 200
     assert body["ready"] is True
     assert body["database"]["connected"] is True
+    assert body["storage"]["ok"] is True
     assert body["migration"]["up_to_date"] is True
     assert body["migration"]["current"] == body["migration"]["head"]
 
@@ -95,3 +97,48 @@ async def test_root_serves_web(client):
 
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
+
+async def test_ready_fails_when_upload_dir_is_not_writable(client, monkeypatch, tmp_path):
+    """
+    (로컬 모드) 업로드 디렉터리에 못 쓰면 NotReady다.
+
+    실제 사례에서 나온 검사다: 컨테이너의 업로드 볼륨이 root 소유로 만들어져
+    앱 계정이 못 쓰는데, 코드 테스트로는 못 잡고(테스트는 개발자 PC 권한으로 돈다)
+    시연 준비 중 사진 업로드 500으로야 드러났다. /ready가 기동 직후 알려줬어야 했다.
+
+    권한 없는 디렉터리는 OS마다 만들기 다르므로, 대신 "디렉터리 자리에 파일이 있는"
+    경로를 쓴다 — mkdir가 어느 OS에서든 실패한다(FileExistsError ⊂ OSError).
+    """
+    blocker = tmp_path / "not-a-directory"
+    blocker.write_bytes(b"")
+    monkeypatch.setattr(storage, "UPLOAD_DIR", blocker)
+
+    response = await client.get("/ready")
+    body = response.json()
+
+    assert response.status_code == 503
+    assert body["ready"] is False
+    assert body["storage"] == {"mode": "local", "ok": False, "error": "FileExistsError"}
+    # 저장소 문제일 뿐 DB는 멀쩡하다 — 원인이 응답에서 구분돼야 조치할 수 있다.
+    assert body["database"]["connected"] is True
+
+
+async def test_ready_skips_storage_probe_in_s3_mode(client, monkeypatch, tmp_path):
+    """
+    S3 모드에서는 저장소 프로브를 돌리지 않는다 — 항상 통과.
+
+    프로브마다 실제 put/delete가 나가면 비용·로그 소음이 생기고, put 권한은
+    IAM 역할의 문제라 기동 후 바뀌는 일도 드물다. 로컬 디스크가 못 쓰는 상태여도
+    S3 모드에서는 그 디스크를 안 쓰므로 ready여야 한다.
+    """
+    blocker = tmp_path / "not-a-directory"
+    blocker.write_bytes(b"")
+    monkeypatch.setattr(storage, "UPLOAD_DIR", blocker)
+    monkeypatch.setattr(storage, "S3_BUCKET", "demo-bucket")
+
+    response = await client.get("/ready")
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["ready"] is True
+    assert body["storage"] == {"mode": "s3", "ok": True, "error": None}

@@ -219,6 +219,22 @@ class MigrationCheck(BaseModel):
     up_to_date: bool = Field(description="DB 스키마가 코드가 기대하는 버전인지")
 
 
+class StorageCheck(BaseModel):
+    """/ready의 저장소(이미지 업로드) 쓰기 확인 결과."""
+
+    mode: str = Field(description='저장 모드. "local"(디스크) 또는 "s3"')
+    ok: bool = Field(
+        description=(
+            "저장소에 쓸 수 있는지. local 모드는 실제로 파일을 써보고 판단하고, "
+            "s3 모드는 검사하지 않아 항상 true다(권한은 IAM 역할의 문제라 프로브 "
+            "비용 대비 얻는 것이 없다)"
+        )
+    )
+    error: str | None = Field(
+        default=None, description="실패했다면 예외 타입 이름(메시지는 경로가 섞여 나올 수 있어 타입만)"
+    )
+
+
 class ReadyResponse(BaseModel):
     """
     /ready 응답.
@@ -235,6 +251,12 @@ class ReadyResponse(BaseModel):
         description=(
             "쓰기 경로(주 DB) 확인 결과. 참고용이며 ready 판정에는 넣지 않는다 — "
             "주 DB가 죽어도 조회는 복제본으로 계속되므로 파드를 뺄 이유가 없다"
+        )
+    )
+    storage: StorageCheck = Field(
+        description=(
+            "저장소 쓰기 확인 결과. local 모드에서는 ready 판정에 들어간다 — "
+            "디스크는 이 컨테이너 자신의 일부라, 못 쓰면 배포 설정 오류다"
         )
     )
     migration: MigrationCheck

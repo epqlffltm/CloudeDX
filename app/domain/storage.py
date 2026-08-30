@@ -146,6 +146,38 @@ def save_image(data: bytes, extension: str) -> str:
     return object_name
 
 
+def storage_mode() -> str:
+    """지금 저장 모드. /ready 응답에 실린다 — 어느 경로가 검사됐는지 알 수 있게."""
+    return "s3" if S3_BUCKET else "local"
+
+
+def check_storage() -> str | None:
+    """
+    저장소에 실제로 쓸 수 있는지 확인한다. 문제면 예외 타입 이름, 정상이면 None.
+
+    로컬 모드만 검사한다. 이 버그의 실제 사례가 이유다: 컨테이너의 업로드 볼륨이
+    root 소유로 만들어져 앱 계정이 못 쓰는데, 코드 테스트로는 잡을 수 없고(테스트는
+    개발자 PC 권한으로 돈다) 사진 업로드를 눌러보고서야 500으로 드러났다. 디스크
+    권한은 환경의 속성이라, 떠 있는 컨테이너에서 직접 써봐야만 안다.
+
+    S3 모드는 검사하지 않는다 — 프로브마다 실제 put/delete 요청이 나가면 비용과
+    로그 소음이 생기고, put 권한은 IAM 역할의 문제라 기동 후 바뀌는 일도 드물다.
+    첫 업로드 실패가 지표(5xx)로 바로 드러나는 것으로 충분하다.
+    """
+    if S3_BUCKET:
+        return None
+
+    try:
+        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        probe = UPLOAD_DIR / f".readycheck-{secrets.token_hex(8)}"
+        probe.write_bytes(b"ok")
+        probe.unlink()
+    except OSError as exc:
+        return type(exc).__name__
+
+    return None
+
+
 def public_url(object_name: str | None) -> str | None:
     """저장 이름을 화면이 쓸 URL로 바꾼다. S3 모드는 절대 주소, 로컬 모드는 /uploads/ 상대 주소."""
     if not object_name:

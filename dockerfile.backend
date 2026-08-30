@@ -38,7 +38,14 @@ COPY web ./web
 ENV PATH="/srv/.venv/bin:$PATH"
 
 # root로 돌리지 않는다. 컨테이너가 뚫렸을 때 피해 범위를 줄인다.
-RUN useradd --create-home --uid 10001 appuser && chown -R appuser:appuser /srv
+#
+# /srv/uploads 를 여기서 만들어 두는 이유: compose 가 이 경로에 이름 있는 볼륨을
+# 붙이는데, 이미지에 디렉터리가 없으면 도커가 마운트 지점을 root 소유로 만들어
+# appuser 가 쓰지 못한다(사진 업로드가 500). 이미지에 appuser 소유로 존재하면
+# 빈 볼륨의 첫 마운트 때 소유권까지 복사된다.
+RUN useradd --create-home --uid 10001 appuser \
+    && mkdir -p /srv/uploads \
+    && chown -R appuser:appuser /srv
 USER appuser
 
 EXPOSE 8000

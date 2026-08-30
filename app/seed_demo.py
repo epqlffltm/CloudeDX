@@ -45,6 +45,10 @@ SOURCE = "직접등록"
 
 # 판매자 8명. 매장 있음 5, 없음 3.
 #
+# photo_url은 매장 사진(간판·내부)이다. web/img/sellers/ 의 정적 파일을 가리키며,
+# 시연 전에 같은 이름의 실제 사진으로 갈아끼우면 코드 수정 없이 반영된다.
+# 온라인 전용 판매자는 찍을 매장이 없으므로 None — 화면이 사진 칸을 그리지 않는다.
+#
 # 좌표는 해당 지역의 대략적인 값이다. 주소가 가짜라 정확할 수 없고, 정확할 필요도
 # 없다 — 지도에 핀이 그 동네에 찍히면 된다.
 SELLERS = [
@@ -57,6 +61,7 @@ SELLERS = [
         "latitude": 37.5251,
         "longitude": 127.0530,
         "description": "청담동 매장에서 직접 검수한 상품만 취급합니다.",
+        "photo_url": "img/sellers/chungdam.jpg",
     },
     {
         "name": "명동 럭셔리",
@@ -67,6 +72,7 @@ SELLERS = [
         "latitude": 37.5636,
         "longitude": 126.9827,
         "description": "1998년부터 명동에서 영업 중인 중고 명품 전문점입니다.",
+        "photo_url": "img/sellers/myeongdong.jpg",
     },
     {
         "name": "해운대 빈티지",
@@ -77,6 +83,7 @@ SELLERS = [
         "latitude": 35.1631,
         "longitude": 129.1636,
         "description": "빈티지 라인 위주로 소량만 들여옵니다.",
+        "photo_url": "img/sellers/haeundae.jpg",
     },
     {
         "name": "대구 로데오 상사",
@@ -87,6 +94,7 @@ SELLERS = [
         "latitude": 35.8688,
         "longitude": 128.5952,
         "description": "지역 최대 규모 재고를 보유하고 있습니다.",
+        "photo_url": "img/sellers/daegu.jpg",
     },
     {
         "name": "판교 컬렉터스",
@@ -97,6 +105,7 @@ SELLERS = [
         "latitude": 37.3948,
         "longitude": 127.1112,
         "description": "시계와 주얼리 중심으로 취급합니다.",
+        "photo_url": "img/sellers/pangyo.jpg",
     },
     # 매장 없이 온라인으로만 파는 판매자. address와 좌표가 없는 것이 정상이고,
     # 화면은 이 경우 지도를 아예 그리지 않는다.
@@ -109,6 +118,7 @@ SELLERS = [
         "latitude": None,
         "longitude": None,
         "description": "매장 없이 온라인으로만 판매합니다. 택배 거래만 가능합니다.",
+        "photo_url": None,
     },
     {
         "name": "리셀 아카이브",
@@ -119,6 +129,7 @@ SELLERS = [
         "latitude": None,
         "longitude": None,
         "description": "개인 컬렉션을 정리해 판매합니다.",
+        "photo_url": None,
     },
     {
         "name": "프리미엄 트레이드",
@@ -129,6 +140,7 @@ SELLERS = [
         "latitude": None,
         "longitude": None,
         "description": "해외 구매대행 및 위탁 판매를 병행합니다.",
+        "photo_url": None,
     },
 ]
 
@@ -235,7 +247,7 @@ BRAND_LATIN = {
 }
 
 
-async def seed() -> None:
+async def seed(sellers_only: bool = False) -> None:
     async with async_session() as session:
         seller_ids: list[int] = []
 
@@ -264,6 +276,11 @@ async def seed() -> None:
             ).scalar_one_or_none()
 
             if existing is not None:
+                # 매장 사진 컬럼이 판매자보다 나중에 생겼다. 이미 깔린 행에도
+                # 사진이 따라가게, 값이 다르면 여기서 채워 넣는다(멱등).
+                if existing.photo_url != spec.get("photo_url"):
+                    existing.photo_url = spec.get("photo_url")
+                    logger.info("판매자 갱신: %s (매장 사진)", existing.name)
                 seller_ids.append(existing.id)
                 continue
 
@@ -274,6 +291,12 @@ async def seed() -> None:
             logger.info("판매자 추가: %s (id=%s)", seller.name, seller.id)
 
         await session.commit()
+
+        # 시연을 "손으로 올리는 모습"으로 보여줄 때는 판매자만 깔고 매물은 만들지
+        # 않는다 — 매물은 시연 중에 CSV 일괄 등록으로 직접 들어간다.
+        if sellers_only:
+            logger.info("판매자 %d명 (--sellers-only: 매물은 만들지 않음)", len(seller_ids))
+            return
 
         # ── 매물 ────────────────────────────────────────────────────
         created = 0
@@ -342,4 +365,6 @@ async def seed() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(seed())
+    import sys
+
+    asyncio.run(seed(sellers_only="--sellers-only" in sys.argv))

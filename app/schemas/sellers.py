@@ -37,6 +37,10 @@ class SellerOut(BaseModel):
     )
     longitude: float | None = None
     description: str | None = None
+    photo_url: str | None = Field(
+        default=None,
+        description="매장 사진(간판·내부) URL. 매물 사진과 별개다 — 없으면 화면이 사진 칸을 그리지 않는다",
+    )
     item_count: int = Field(
         default=0, description="이 판매자가 등록한 매물 중 지금 목록에 보이는 건수"
     )

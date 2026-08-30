@@ -23,15 +23,15 @@ import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import User, require_role
-from app.config import MAX_UPLOAD_BYTES, WRITE_TIMEOUT_SECONDS
+from app.config import CLIENT_SELLER_ID, MAX_UPLOAD_BYTES, WRITE_TIMEOUT_SECONDS
 from app.db import repository
 from app.db.engine import get_session
-from app.db.models import ItemRecord
+from app.db.models import ItemRecord, Seller
 from app.domain.csv_import import REQUIRED_COLUMNS, parse_csv
 from app.domain.image_security import MAX_UPLOAD_BYTES as MAX_IMAGE_BYTES
 from app.domain.image_security import ImageRejected, sanitize_image
@@ -151,6 +151,30 @@ async def upload_csv(
             # 세션을 넘겨 커넥션을 한 번만 맺는다. 여기서 또 열면 DB가 죽어 있을 때
             # connect timeout 을 두 배로 기다린다(app/db/repository.py 설명 참고).
             saved = await repository.upsert_items(report.items, session=session)
+
+            # 이 배포의 client 계정이 특정 판매자로 선언돼 있으면(CLIENT_SELLER_ID),
+            # 방금 저장한 매물을 그 판매자와 연결한다. 이 연결이 있어야 화면에서
+            # 매물을 눌렀을 때 판매자 시트(연락처·약도)가 열린다.
+            #
+            # upsert 계약(CrawledItem)에 seller_id를 넣지 않는 이유: 그 계약은
+            # 크롤러와 공유하는 것이고, 판매자 연결은 업로드 경로만의 사실이다.
+            # 저장 뒤 한 번의 UPDATE가 계약 확장보다 싸다.
+            if CLIENT_SELLER_ID:
+                if await session.get(Seller, CLIENT_SELLER_ID) is not None:
+                    await session.execute(
+                        update(ItemRecord)
+                        .where(ItemRecord.url.in_(urls), ItemRecord.source == UPLOAD)
+                        .values(seller_id=CLIENT_SELLER_ID)
+                    )
+                    # upsert_items가 자체 커밋한 뒤라 이 UPDATE는 별도 트랜잭션이다.
+                    # 여기서 커밋하지 않으면 세션이 닫히며 조용히 롤백된다.
+                    await session.commit()
+                else:
+                    logger.warning(
+                        "CLIENT_SELLER_ID=%d 판매자가 없어 연결을 건너뜁니다. "
+                        "seed(--sellers-only)를 먼저 돌렸는지 확인하세요.",
+                        CLIENT_SELLER_ID,
+                    )
 
             hidden = (
                 (

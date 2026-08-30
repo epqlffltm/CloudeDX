@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Reverdi 파비콘 — 먹색 바탕에 세리프 R 모노그램 -->
+  <rect width="64" height="64" fill="#1a1a1a"/>
+  <rect x="6" y="6" width="52" height="52" fill="none" stroke="#f5f2ec" stroke-width="1.5"/>
+  <text x="32" y="44" font-family="Georgia, 'Times New Roman', serif" font-size="36"
+        font-weight="bold" fill="#f5f2ec" text-anchor="middle">R</text>
+</svg>

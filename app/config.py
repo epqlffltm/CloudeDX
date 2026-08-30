@@ -215,8 +215,8 @@ ALLOWED_ORIGINS = [
     if origin.strip()
 ]
 
-# API 경로 접두어. 화면(/board)과 분리해 두면 리버스 프록시에서 /api만 백엔드로
-# 넘기는 구성이 쉬워지고, 나중에 /api/v2를 병행하는 것도 가능해진다.
+# API 경로 접두어. 화면(정적 파일)과 분리해 두면 ALB 리스너 규칙에서 /api만
+# 따로 다루기 쉬워지고, 나중에 /api/v2를 병행하는 것도 가능해진다.
 API_PREFIX = "/api"
 
 
@@ -296,3 +296,13 @@ MAX_UPLOAD_BYTES = _int_env("MAX_UPLOAD_BYTES", 5 * 1024 * 1024, minimum=1024)
 # connect timeout(10초)보다는 넉넉해야 한다 — 그보다 짧게 잡으면 정상적인
 # 재연결까지 잘라내서, DB가 멀쩡한데도 업로드가 실패한다.
 WRITE_TIMEOUT_SECONDS = _int_env("WRITE_TIMEOUT_SECONDS", 15, minimum=1)
+
+# 기업고객(client) 계정이 올린 매물에 연결할 입점 판매자 id. 0이면 연결하지 않는다.
+#
+# 계정 체계가 설정 기반(단일 client 계정)이라 계정과 sellers 행을 잇는 정식 연결이
+# 아직 없다. 그 자리를 메우는 임시 다리다 — "이 배포의 client 계정은 이 판매자다"를
+# 운영자가 선언한다. 매물 화면에서 판매자 시트(연락처·약도)가 열리려면 이 연결이
+# 있어야 한다. 판매자별 계정이 생기면 이 설정은 계정-판매자 매핑으로 대체된다.
+#
+# 지정한 id의 판매자가 없으면 연결을 건너뛰고 경고만 남긴다(업로드는 성공한다).
+CLIENT_SELLER_ID = _int_env("CLIENT_SELLER_ID", 0, minimum=0)

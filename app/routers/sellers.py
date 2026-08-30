@@ -71,5 +71,6 @@ async def get_seller(
         latitude=seller.latitude,
         longitude=seller.longitude,
         description=seller.description,
+        photo_url=seller.photo_url,
         item_count=item_count,
     )
