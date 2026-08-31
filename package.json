@@ -1,0 +1,12 @@
+{
+  "name": "cloudedx-web-tests",
+  "private": true,
+  "description": "web/ 프론트 스모크 테스트 실행용. 앱 자체는 Python(uv)이고, 여기는 jsdom 하나뿐이다.",
+  "type": "module",
+  "scripts": {
+    "test:web": "node web/test/smoke_home.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "^30.0.1"
+  }
+}
