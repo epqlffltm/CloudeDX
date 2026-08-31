@@ -97,7 +97,15 @@ async def session() -> AsyncGenerator[AsyncSession]:
     from app.db.engine import async_session, engine
 
     async with async_session() as s:
-        await s.execute(text("TRUNCATE items, crawl_runs RESTART IDENTITY CASCADE"))
+        # live_search_runs 는 items 와 FK 로 엮여 있지 않아 CASCADE 로 딸려오지
+        # 않는다. 명시하지 않으면 실시간 검색 쿨다운 기록이 테스트 사이로 새어
+        # 나가서, 앞 테스트가 남긴 시각 때문에 뒤 테스트가 cooldown 을 받는다.
+        await s.execute(
+            text(
+                "TRUNCATE items, crawl_runs, live_search_runs "
+                "RESTART IDENTITY CASCADE"
+            )
+        )
         await s.commit()
 
         yield s

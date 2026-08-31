@@ -4,7 +4,7 @@
 검색어를 실시간 수집 잡으로 바꾸는 규칙.
 
 사용자가 검색창에 친 문자열은 자유 텍스트다. 번개장터 API에 그대로 넘겨도 결과는
-나오지만, 그러면 같은 뜻의 검색어가 서로 다른 잡으로 취급되어 락과 캐시가 무력해진다.
+나오지만, 그러면 같은 뜻의 검색어가 서로 다른 잡으로 취급되어 쿨다운이 무력해진다.
 "샤넬 클래식", "샤넬클래식", "  샤넬 클래식 "이 각각 API를 한 번씩 치게 된다.
 
 그래서 검색어를 정규형으로 접는다. 접는 규칙은 새로 만들지 않고 이미 있는 것을 쓴다 —
@@ -30,12 +30,25 @@ from app.domain.product_type import classify_category
 # 크롤러의 keyword_suffix 기본값과 같은 값이다(daangn/joongna config).
 DEFAULT_SUFFIX = "가방"
 
-# 위 서픽스가 뜻하는 카테고리. lock_key를 만들 때 쓴다 — 서픽스 문자열("가방")과
+# 위 서픽스가 뜻하는 카테고리. search_key를 만들 때 쓴다 — 서픽스 문자열("가방")과
 # 카테고리 키("bag")를 섞어 쓰면 "샤넬"과 "샤넬 가방"이 다른 키가 된다.
 DEFAULT_CATEGORY = "bag"
 
 # 실시간 조회를 걸 최소 길이. 한 글자로는 의미 있는 검색이 되지 않고 API만 두드린다.
 MIN_QUERY_LENGTH = 2
+
+# 최대 길이. 이 값을 넘는 입력은 실시간 조회를 걸지 않는다(DB 결과는 그대로 나간다).
+#
+# search_key 가 쿨다운 표(live_search_runs)의 기본키로 들어가기 때문이다. search_key 는
+# 입력을 정규화만 한 문자열이라 길이 제한이 없는데, btree 인덱스 행에는 상한이 있어서
+# (약 2704바이트, 한글로 900자쯤) 아주 긴 검색어에서 INSERT 자체가 실패한다. 예전
+# 어드바이저리 락은 키를 32비트 정수로 접어서 이 문제가 없었으므로, 쿨다운으로 옮기며
+# 새로 생긴 경계다.
+#
+# 60자는 검색어로서 이미 과하다 — 실제 입력은 대개 20자 안쪽이다. 넘는 값을 422로
+# 올리지 않고 조용히 건너뛰는 것은 이 엔드포인트의 "실패해도 200" 계약을 지키기
+# 위해서다(라우터 설명 참고).
+MAX_QUERY_LENGTH = 60
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,7 +56,7 @@ class LiveQuery:
     """
     실시간 수집 한 번의 정의.
 
-    lock_key는 중복 요청 방지와 캐시의 기준이다. 표기가 달라도 같은 뜻이면 같은 키가
+    search_key는 중복 요청 방지와 캐시의 기준이다. 표기가 달라도 같은 뜻이면 같은 키가
     나와야 "샤넬클래식"과 "샤넬 클래식"이 API를 두 번 치지 않는다.
     """
 
@@ -53,13 +66,13 @@ class LiveQuery:
     keyword: str
 
     @property
-    def lock_key(self) -> str:
+    def search_key(self) -> str:
         """
-        락과 캐시의 기준 키.
+        중복 요청 판정(쿨다운)의 기준 키. live_search_runs 의 기본키로 그대로 들어간다.
 
         브랜드를 판정했으면 **원문이 아니라 정규 브랜드명**으로 만든다. 그래야
         "루이뷔통 가방"과 "루이비통 가방"이 같은 키가 된다 — 원문을 그대로 접으면
-        별칭마다 API를 따로 치게 되어 락의 의미가 없어진다.
+        별칭마다 API를 따로 치게 되어 쿨다운의 의미가 없어진다.
 
         API에 보내는 keyword는 원문을 유지한다. 별칭으로 검색해도 결과가 나오고,
         사용자가 친 표기가 그 사이트에서 더 잘 걸리는 경우도 있기 때문이다.
@@ -76,9 +89,9 @@ def build_live_query(raw: str) -> LiveQuery | None:
     """
     검색어를 실시간 수집 잡으로 바꾼다. 실시간 조회를 걸 값이 못 되면 None.
 
-    None을 돌려주는 경우는 둘뿐이다 — 너무 짧거나, 정규화하면 빈 문자열이 되는 경우
-    (공백·기호만 입력). 라우터는 None을 오류가 아니라 "실시간 조회 없이 DB 결과만
-    준다"로 다룬다.
+    None을 돌려주는 경우는 셋이다 — 너무 짧거나, 정규화하면 빈 문자열이 되거나
+    (공백·기호만 입력), MAX_QUERY_LENGTH를 넘도록 긴 경우. 라우터는 None을 오류가
+    아니라 "실시간 조회 없이 DB 결과만 준다"로 다룬다.
 
     **브랜드를 판정하지 못해도 None이 아니다.** 우리가 모르는 브랜드를 찾는 사람도
     결과를 봐야 한다. 대신 그 결과가 목록에 뜰지는 저장 단계의 정제 규칙이 정한다 —
@@ -86,7 +99,7 @@ def build_live_query(raw: str) -> LiveQuery | None:
     """
     text = (raw or "").strip()
 
-    if len(text) < MIN_QUERY_LENGTH or not normalize(text):
+    if len(text) < MIN_QUERY_LENGTH or len(text) > MAX_QUERY_LENGTH or not normalize(text):
         return None
 
     brand = detect_brand(text)

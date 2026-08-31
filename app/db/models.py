@@ -60,9 +60,14 @@ class ItemRecord(Base):
     source: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     brand: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
 
-    # 상품 분류. 지금은 크롤러가 가방만 수집하므로 전 행이 'bag'이고, DB 기본값이
-    # 그 사실을 대신 채운다 — 크롤러와 upsert는 이 컬럼을 모른 채로 동작한다.
-    # 시계 등 두 번째 카테고리를 열 때 CrawledItem에 필드를 추가하고 여기로 흘린다.
+    # 상품 분류 — bag / watch / jewelry / apparel / shoes, 판정 실패는 'unknown'.
+    #
+    # **검색 잡의 카테고리가 아니라 제목에서 다시 판정한 값이다**(upsert_items →
+    # clean_title → classify_category). brand를 검색어가 아닌 제목으로 판정하는 것과
+    # 같은 이유다 — "시계"로 검색해도 결과에 가방이 섞여 들어온다.
+    #
+    # server_default가 'bag'인 것은 이 컬럼이 생기기 전 행들 때문이고, 지금 들어오는
+    # 행은 전부 판정값을 명시해서 넣는다.
     category: Mapped[str] = mapped_column(
         String(20), nullable=False, server_default="bag", index=True
     )
@@ -223,6 +228,48 @@ class ItemClickEvent(Base):
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class LiveSearchRun(Base):
+    """
+    실시간 검색을 마지막으로 시도한 시각 — 검색어(정규형) 하나에 한 행.
+
+    이 표 하나가 세 가지를 한꺼번에 막는다.
+
+    1. **동시 호출**: 같은 검색어가 같은 순간에 여러 번 들어와도, 행을 갱신할 수
+       있는 요청 하나만 통과한다. 나머지는 유니크 충돌로 대기했다가 갱신된 시각을
+       기준으로 다시 판단해 걸린다.
+    2. **연타·반복**: 쿨다운(LIVE_SEARCH_COOLDOWN_SECONDS) 동안 들어오는 순차
+       요청도 같은 조건에 걸린다. 예전 어드바이저리 락은 이걸 못 막았다.
+    3. **파드 여러 대**: 판단 근거가 DB 한 행이라 프로세스 메모리와 무관하다.
+
+    키는 사용자가 친 원문이 아니라 `LiveQuery.search_key`(정규형)다. "루이뷔통 가방"과
+    "루이비통 가방"이 같은 키로 접혀야 별칭마다 API를 따로 치지 않는다.
+    `last_keyword`는 로그·디버그용으로 마지막 원문을 남기는 자리이고 판정에 쓰지 않는다.
+
+    행은 검색어 수만큼만 늘고 지우지 않는다. 시연 규모에서 수백 행이라 정리 대상이
+    아니다 — 오래된 행은 다음 요청이 그 자리에서 갱신한다.
+    """
+
+    __tablename__ = "live_search_runs"
+
+    # 길이를 못 박는 이유가 있다. search_key 는 사용자 입력을 정규화만 한 문자열이라
+    # 그대로 두면 입력 길이가 곧 인덱스 행 크기가 되는데, btree 인덱스 행에는 상한이
+    # 있어서(약 2704바이트) 아주 긴 검색어에서 INSERT 자체가 실패한다.
+    # app.domain.live_search.MAX_QUERY_LENGTH 가 입력 쪽에서 먼저 걸러내고,
+    # 이 길이는 그보다 넉넉하게 잡은 두 번째 방어선이다.
+    search_key: Mapped[str] = mapped_column(String(120), primary_key=True)
+
+    # 실제로 번개장터에 보낸 마지막 검색어. 로그에서 "이 키가 무슨 검색어였나"를
+    # 되짚기 위한 값이라 판정에는 쓰지 않는다.
+    last_keyword: Mapped[str] = mapped_column(String(200), nullable=False)
+
+    # 성공·실패와 무관하게 **시도한** 시각이다. 실패를 안 남기면 실패한 검색어만
+    # 무한히 재시도할 수 있게 된다 — 상대 사이트가 막고 있을 때 가장 세게 두드리는
+    # 셈이라, 실패야말로 기록해야 한다.
+    last_attempt_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
     )
 
 

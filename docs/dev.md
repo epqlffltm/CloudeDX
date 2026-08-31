@@ -89,6 +89,9 @@ uv run python -m app.crawler.daangn.debug_cards --query "냉장고"
 | `BACKEND_PORT` | `8000` | 백엔드 컨테이너를 호스트에 노출할 포트 |
 | `TEST_DATABASE_URL` | `...@127.0.0.1:5432/cloudedx_test` | 테스트 전용 DB. 개발용과 분리해야 안전하다 |
 | `BUNJANG_PAGES_PER_JOB` | `3` | 번개장터 검색 잡당 API 페이지 수 |
+| `LIVE_SEARCH_MAX_PAGES` | `1` | 실시간 검색이 볼 페이지 수. 응답 시간이 곧 사용자 경험이라 스케줄 수집보다 적다 |
+| `LIVE_SEARCH_TIMEOUT_SECONDS` | `8` | 실시간 검색 전체 제한시간. 넘으면 `failed` |
+| `LIVE_SEARCH_COOLDOWN_SECONDS` | `120` | 같은 검색어를 다시 칠 수 있기까지의 간격. `0`이면 끔(개발·테스트용) |
 | `ALLOWED_ORIGINS` | (비어 있음) | CORS 허용 출처. 쉼표로 구분. 비우면 미들웨어를 붙이지 않는다 |
 | `LOG_LEVEL` | `INFO` | DEBUG / INFO / WARNING / ERROR |
 | `LOG_FORMAT` | `text` | `json`이면 한 줄 JSON. 컨테이너 이미지는 `json`이 기본 |
@@ -241,21 +244,25 @@ uv run pytest
 `.github/workflows/ci.yml`. 푸시와 PR마다 돈다.
 
 ```
-lint      ─┐
-test      ─┼─> build (backend, crawler 병렬) ─> ECR 푸시 (main 에서만)
-web-test  ─┘
+lint  ─┐
+      ├─> build (backend, crawler 병렬) ─> ECR 푸시 (main 에서만)
+test  ─┘
 ```
 
 | 잡 | 하는 일 |
 |---|---|
 | `lint` | `ruff check .` (크롤러 코드까지 검사하므로 `--extra crawler`로 설치) |
-| `test` | Postgres 서비스 컨테이너 → `alembic upgrade head` → `alembic check` → `pytest` |
-| `web-test` | Node 22 → `npm ci` → `npm run test:web` (web/test/smoke_home.mjs, jsdom) |
+| `test` | Postgres 서비스 컨테이너 → `alembic upgrade head` → `alembic check` → `pytest` → 프론트 스모크 |
 | `build` | 이미지 두 개 빌드(백엔드·크롤러) · 백엔드는 실행해 임포트 확인 |
 
-`web-test`는 pytest가 보지 않는 `web/`을 지킨다. jsdom 위에서 home.js를 실제로
-실행해 드로어·인기 탭·클릭 전송·판매자 시트가 API 응답으로 그려지는지 보고,
-하나라도 FAIL이면 종료 코드 1로 잡이 빨간불이 된다. 로컬에서는 `npm i` 한 번 뒤
+**프론트 스모크는 별도 잡이 아니라 `test` 잡의 마지막 단계다.** Node 22 를 깔고
+`npm ci && npm run test:web` (web/test/smoke_home.mjs, jsdom)을 pytest 뒤에 이어서
+돌린다. 잡을 나누면 러너를 하나 더 쓰면서 얻는 것이 없어서다 — jsdom 하나라 몇 초면
+끝나고, 서버도 DB 도 필요 없다(스모크가 fetch 를 가짜로 바꾼다).
+
+이 단계가 pytest 가 보지 않는 `web/`을 지킨다. jsdom 위에서 home.js를 실제로 실행해
+드로어·인기 탭·클릭 전송·판매자 시트가 API 응답으로 그려지는지 보고, 하나라도
+FAIL이면 종료 코드 1로 잡이 빨간불이 된다. 로컬에서는 `npm i` 한 번 뒤
 `npm run test:web`.
 
 ### ECR 푸시
@@ -389,9 +396,10 @@ netstat -ano | findstr :5432
   최소한의 표시는 가능하니, 화면에 배지로 노출하는 것을 고려할 것.
 - "여성용" 필터링이 검색 키워드/카테고리 코드에만 의존한다. 남성 라인 상품이 섞여
   들어오면 제목 기반 후처리 필터 추가를 고려할 것.
-- `category`가 아직 상수다. DB 기본값(`bag`)으로만 채워지고 크롤러는 이 컬럼을 모른다.
-  두 번째 품목(시계 등)을 열 때 `CrawledItem`에 필드를 추가하고
-  `_dedupe_by_url` → `_UPDATABLE_COLUMNS` 경로로 흘려야 한다.
+- `category`는 더 이상 상수가 아니다. 가방·시계·주얼리·의류·신발 5종을 제목에서
+  판정해 채운다(`app/domain/product_type.py`). 남은 한계는 판정 근거가 **제목 문자열
+  뿐**이라는 것이다 — 사이트의 카테고리 코드를 같이 읽으면 정확도가 오르지만, 세
+  수집처의 코드 체계가 서로 달라 대응표가 필요하다.
 - `CrawledItem`/`items` 테이블에 중고나라의 "무료배송" 여부에 대응하는 필드가 아직 없음
 - 브랜드 4개 x 수집처 3개 = 검색 12회를 현재는 의도적으로 순차 실행한다. 외부 사이트에
   불필요한 동시 요청을 보내지 않는 쪽을 우선한 선택이다. 대상이 늘어 한 라운드 시간이

@@ -545,7 +545,7 @@ async function refreshLive(query) {
   try {
     const result = await fetchLive(query);
 
-    // 저장된 것이 있을 때만 다시 그린다. skipped/ignored/failed면 목록이 그대로다.
+    // 저장된 것이 있을 때만 다시 그린다. cooldown/ignored/failed면 목록이 그대로다.
     if (result.status === 'saved' && result.saved > 0) {
       await loadList();
     }

@@ -57,6 +57,7 @@ S3 설정이 **틀린** 경우(역할 누락·버킷 이름 오타·리전 불�
 | `WRITE_TIMEOUT_SECONDS` | `15` | 업로드·메모 저장의 DB 커밋 제한시간 |
 | `MAX_UPLOAD_BYTES` | `5242880` (5MB) | 이미지 업로드 상한 |
 | `READ_FALLBACK_COOLDOWN_SECONDS` | `30` | 복제본 장애 시 주 DB로 보내는 시간 |
+| `LIVE_SEARCH_COOLDOWN_SECONDS` | `120` | 같은 검색어로 번개장터를 다시 칠 수 있기까지의 간격(초). **운영에서 `0`으로 두지 않는다** — 끄면 사용자의 엔터 연타가 그대로 외부 사이트로 나가고, 동시 요청을 막는 장치도 함께 사라진다 |
 | `ADMIN_USERNAME` / `CLIENT_USERNAME` | `admin` / `client` | 계정 아이디를 바꾸고 싶을 때만 |
 | `FORWARDED_ALLOW_IPS` | `*` | ALB 뒤에서는 VPC 대역(예: `10.0.0.0/16`)으로 좁힌다 — X-Forwarded-For 위조 방지. nginx 제거로 체인이 클라이언트→ALB→uvicorn 한 단계다 |
 | `CLIENT_SELLER_ID` | `0` (연결 안 함) | client 계정이 올린 매물을 연결할 판매자 id. 시연에서만 의미 있는 임시 다리 — 지정한 판매자가 없으면 경고만 남기고 업로드는 성공한다 |

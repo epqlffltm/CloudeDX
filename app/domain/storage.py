@@ -38,6 +38,7 @@ A 컨테이너에 올린 사진을 B 컨테이너가 서빙할 수 없고, 컨�
       되고, 503 + Retry-After 로 "지금은 안 되니 잠시 후"를 정직하게 돌려줄 수 있다.
 """
 
+import asyncio
 import logging
 import os
 import secrets
@@ -126,6 +127,12 @@ _probe_ok = False
 _probe_error: str | None = None
 _probe_at = 0.0
 
+# 프로브가 지금 돌고 있는지. 이벤트 루프는 await 지점에서만 다른 코루틴에게 넘어가므로,
+# to_thread 로 넘기기 **직전에** 이 값을 세우면 락 없이도 동시 프로브가 하나로 좁혀진다.
+# (asyncio.Lock 을 모듈 전역에 두면 처음 쓴 이벤트 루프에 묶여서, 테스트처럼 루프를
+#  갈아끼우는 환경에서 터진다. 여기서는 그 위험을 살 이유가 없다.)
+_probe_running = False
+
 # 확장자 → Content-Type. 이걸 안 넣으면 S3가 binary/octet-stream으로 응답해서
 # 브라우저가 이미지를 그리는 대신 내려받으려 든다.
 _CONTENT_TYPES = {
@@ -153,6 +160,7 @@ def _get_s3():
     if _s3 is None:
         try:
             import boto3
+            from botocore.config import Config
         except ImportError as exc:
             raise RuntimeError(
                 "S3_BUCKET이 설정됐지만 boto3가 없습니다. 'uv add boto3'로 설치하세요."
@@ -161,7 +169,23 @@ def _get_s3():
         # 리전을 명시한다. boto3 는 AWS_DEFAULT_REGION 만 읽고 AWS_REGION 은 버전에
         # 따라 무시해서, 리전이 비면 글로벌 엔드포인트(s3.amazonaws.com)로 가 리다이렉트를
         # 탄다. 우리가 읽은 값을 그대로 넘기면 어느 쪽 변수를 줬든 같은 리전으로 간다.
-        _s3 = boto3.client("s3", region_name=AWS_REGION or None)
+        #
+        # 타임아웃을 짧게 못 박는다. botocore 기본값은 연결·읽기 각 60초에 재시도까지
+        # 붙어서, 네트워크가 애매하게 죽으면(보안 그룹 누락, VPC 엔드포인트 오설정)
+        # 요청 하나가 분 단위로 매달린다. S3 는 같은 리전 안이라 정상이면 수십 ms 이고,
+        # 못 붙으면 빨리 실패해서 503 으로 알려주는 편이 낫다.
+        #
+        # total_max_attempts 는 **초기 요청을 포함한** 총 시도 수다(max_attempts 는
+        # 모드에 따라 "추가 재시도 횟수"로 읽혀 헷갈린다). 2 = 처음 한 번 + 재시도 한 번.
+        _s3 = boto3.client(
+            "s3",
+            region_name=AWS_REGION or None,
+            config=Config(
+                connect_timeout=2,
+                read_timeout=3,
+                retries={"mode": "standard", "total_max_attempts": 2},
+            ),
+        )
 
     return _s3
 
@@ -261,7 +285,7 @@ def _probe_s3() -> str | None:
     return None
 
 
-def check_storage() -> str | None:
+async def check_storage() -> str | None:
     """
     저장소에 실제로 쓸 수 있는지 확인한다. 문제면 예외 타입 이름, 정상이면 None.
 
@@ -277,8 +301,13 @@ def check_storage() -> str | None:
 
     실패는 _PROBE_RETRY_SECONDS 뒤에 다시 시도한다. 인프라가 역할을 고쳐 붙이면
     파드를 재시작하지 않아도 Ready 로 돌아온다.
+
+    **S3 프로브는 스레드로 넘긴다.** boto3 는 동기 라이브러리라 이 코루틴에서 직접
+    부르면 그동안 이벤트 루프가 멈춘다 — 위 타임아웃을 걸어도 실패 한 번에 최악 10초
+    이고, 실패는 60초마다 반복되므로 S3 가 안 붙는 내내 다른 요청까지 주기적으로
+    얼어붙는다. readiness 하나 때문에 조회가 멈추면 앞뒤가 바뀐다.
     """
-    global _probe_ok, _probe_error, _probe_at
+    global _probe_ok, _probe_error, _probe_at, _probe_running
 
     if S3_BUCKET:
         if _probe_ok:
@@ -288,8 +317,19 @@ def check_storage() -> str | None:
         if _probe_error is not None and now - _probe_at < _PROBE_RETRY_SECONDS:
             return _probe_error
 
-        _probe_error = _probe_s3()
-        _probe_at = now
+        if _probe_running:
+            # 다른 /ready 요청이 이미 프로브 중이다. 기다리지 않고 마지막으로 아는
+            # 상태를 돌려준다 — readiness 는 빨리 답하는 편이 낫고, 아직 한 번도
+            # 확인하지 못했다면 "아직 준비되지 않았다"가 정직한 답이다.
+            return _probe_error or "ProbeInProgress"
+
+        _probe_running = True
+        try:
+            _probe_error = await asyncio.to_thread(_probe_s3)
+        finally:
+            _probe_running = False
+
+        _probe_at = time.monotonic()
         _probe_ok = _probe_error is None
 
         if _probe_ok:

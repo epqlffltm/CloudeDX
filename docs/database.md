@@ -281,6 +281,49 @@ git 히스토리에 있다 (`git log --oneline -- app/db/repository.py`에서 �
 `app/db/clicks.py`가 이 둘을 다룬다(`record_click`, `list_popular`). repository.py에
 섞지 않은 이유는 그쪽이 매물 목록·upsert의 자리라서다.
 
+### live_search_runs — 실시간 검색 쿨다운
+
+검색어의 **정규형**(`LiveQuery.search_key`)마다 한 행이고, 담는 것은 마지막으로
+**시도한** 시각 하나다. `/api/live/search`가 이 표를 보고 조회 여부를 정한다.
+
+판정과 기록이 문장 하나로 끝난다.
+
+```sql
+INSERT INTO live_search_runs (search_key, last_keyword, last_attempt_at)
+VALUES (:search_key, :keyword, clock_timestamp())
+ON CONFLICT (search_key) DO UPDATE
+   SET last_keyword = EXCLUDED.last_keyword,
+       last_attempt_at = clock_timestamp()
+ WHERE live_search_runs.last_attempt_at
+       < clock_timestamp() - :cooldown * INTERVAL '1 second'
+RETURNING last_attempt_at;
+```
+
+행이 돌아오면 갱신에 성공했다는 뜻이고, 그 요청만 외부 조회로 넘어간다. 같은 키로
+동시에 들어온 요청은 행 잠금에서 기다렸다가 갱신된 시각으로 조건을 다시 평가해
+0행을 받는다 — **"확인하고 나서 기록한다" 사이의 틈이 없다.** 그래서 이 표 하나가
+순차 연타·동시 요청·파드 여러 대를 한꺼번에 처리한다.
+
+`now()`가 아니라 `clock_timestamp()`인 이유: `now()`는 트랜잭션 시작 시각으로 고정된
+값이라, 충돌로 대기했다가 조건을 다시 보는 이 구조에서 기다린 쪽의 기준 시각이 앞
+요청이 기록한 시각보다 이를 수 있다.
+
+선점 직후 곧바로 커밋한다. 두 가지를 위해서다 — 조회가 터져 라우터 트랜잭션이
+되돌아가도 **실패한 시도가 기록에 남아야** 하고(실패를 안 세면 막힌 검색어를 가장
+자주 두드리게 된다), 행 잠금이 8초짜리 크롤링 내내 걸려 있으면 안 된다.
+
+> 이 자리에는 원래 Postgres 어드바이저리 락(`pg_try_advisory_lock`)이 있었다. 두 가지
+> 때문에 걷어냈다. 첫째, 락은 **동시** 호출만 막아서 엔터 연타처럼 순차로 들어오는
+> 요청을 그대로 통과시켰다. 둘째, 세션 레벨 락은 물리 커넥션에 붙는데 SQLAlchemy 의
+> `AsyncSession.commit()` 은 커넥션을 풀에 반납한다 — 락 블록 안에서 `upsert_items` 가
+> 커밋하는 순간, 뒤이은 `pg_advisory_unlock` 이 락을 잡지 않은 다른 커넥션에서
+> 실행될 수 있었다. unlock 은 예외 없이 false 를 돌려주므로 앱은 성공했다고 믿고,
+> 원래 커넥션은 락을 든 채 풀로 돌아간다. 쿨다운은 이 문제를 고치는 것이 아니라
+> 성립하지 않게 만든다.
+
+행은 검색어 종류만큼만 늘고 지우지 않는다. 오래된 행은 다음 요청이 그 자리에서
+갱신한다.
+
 ### crawl_runs — 수집 상태
 
 수집 라운드마다 한 행을 남긴다. `status`(running/success/failed), `started_at`,

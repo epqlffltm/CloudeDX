@@ -125,7 +125,7 @@ async def ready(
     # S3 모드는 처음 성공할 때까지만 프로브한다. 한 번 통과한 뒤 S3 가 흔들리는 것은
     # 설정 오류가 아니라 장애이고, 그때는 업로드만 503 으로 실패하고 조회는 계속된다.
     # (자세한 규칙은 app/domain/storage.check_storage 참고)
-    storage_error = check_storage()
+    storage_error = await check_storage()
     storage_ok = storage_error is None
 
     # 마이그레이션 검사도 읽기 경로로 한다. 주 DB가 죽어 있어도 스키마 버전은
