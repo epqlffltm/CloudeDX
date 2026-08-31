@@ -36,7 +36,13 @@ from app.domain.csv_import import REQUIRED_COLUMNS, parse_csv
 from app.domain.image_security import MAX_UPLOAD_BYTES as MAX_IMAGE_BYTES
 from app.domain.image_security import ImageRejected, sanitize_image
 from app.domain.sources import UPLOAD
-from app.domain.storage import delete_image, object_name_from_url, public_url, save_image
+from app.domain.storage import (
+    StorageUnavailable,
+    delete_image,
+    object_name_from_url,
+    public_url,
+    save_image,
+)
 from app.schemas.auth import UploadResponse
 from app.schemas.uploads import ImageUploadResponse
 
@@ -244,7 +250,7 @@ async def upload_csv(
         403: {"description": "기업고객이 등록한 매물만 수정할 수 있습니다."},
         404: {"description": "해당 매물을 찾을 수 없습니다."},
         413: {"description": "파일이 너무 큽니다."},
-        503: {"description": "DB에 쓸 수 없는 상태입니다. 잠시 후 다시 시도하세요."},
+        503: {"description": "DB 또는 저장소에 쓸 수 없는 상태입니다. 잠시 후 다시 시도하세요."},
     },
 )
 async def upload_item_image(
@@ -303,7 +309,19 @@ async def upload_item_image(
 
     previous = item.image_url
 
-    object_name = save_image(safe.data, safe.extension)
+    # 저장소 실패도 DB 실패와 같은 계약이다 — 500 이 아니라 503 + Retry-After.
+    # S3 권한 누락·네트워크·로컬 디스크 권한이 여기로 온다. 앱 버그가 아니라
+    # 환경 문제이므로 "잠시 후 다시"가 맞고, 지표에서도 5xx 가 섞이면 안 된다.
+    try:
+        object_name = save_image(safe.data, safe.extension)
+    except StorageUnavailable as exc:
+        logger.warning("매물 %s 사진 저장소 실패: %s", item_id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="지금은 사진을 저장할 수 없습니다. 잠시 후 다시 시도해 주세요.",
+            headers={"Retry-After": "30"},
+        ) from exc
+
     item.image_url = public_url(object_name)
 
     try:

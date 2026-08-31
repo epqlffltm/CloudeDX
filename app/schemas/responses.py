@@ -225,9 +225,9 @@ class StorageCheck(BaseModel):
     mode: str = Field(description='저장 모드. "local"(디스크) 또는 "s3"')
     ok: bool = Field(
         description=(
-            "저장소에 쓸 수 있는지. local 모드는 실제로 파일을 써보고 판단하고, "
-            "s3 모드는 검사하지 않아 항상 true다(권한은 IAM 역할의 문제라 프로브 "
-            "비용 대비 얻는 것이 없다)"
+            "저장소에 쓸 수 있는지. local 모드는 매번 파일을 써보고 판단하고, "
+            "s3 모드는 처음 성공할 때까지 프로브 객체를 put/delete 해 본다 — "
+            "IAM 역할·버킷·리전 오류가 기동 직후 드러난다"
         )
     )
     error: str | None = Field(
@@ -255,8 +255,9 @@ class ReadyResponse(BaseModel):
     )
     storage: StorageCheck = Field(
         description=(
-            "저장소 쓰기 확인 결과. local 모드에서는 ready 판정에 들어간다 — "
-            "디스크는 이 컨테이너 자신의 일부라, 못 쓰면 배포 설정 오류다"
+            "저장소 쓰기 확인 결과. ready 판정에 들어간다 — 못 쓰는 것은 대개 "
+            "배포 설정 오류다(local: 볼륨 권한, s3: IAM 역할·버킷·리전). "
+            "s3 모드는 첫 성공 뒤로는 다시 검사하지 않는다"
         )
     )
     migration: MigrationCheck

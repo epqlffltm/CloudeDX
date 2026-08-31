@@ -241,16 +241,22 @@ uv run pytest
 `.github/workflows/ci.yml`. 푸시와 PR마다 돈다.
 
 ```
-lint  ─┐
-       ├─> build (backend, crawler 병렬) ─> ECR 푸시 (main 에서만)
-test  ─┘
+lint      ─┐
+test      ─┼─> build (backend, crawler 병렬) ─> ECR 푸시 (main 에서만)
+web-test  ─┘
 ```
 
 | 잡 | 하는 일 |
 |---|---|
 | `lint` | `ruff check .` (크롤러 코드까지 검사하므로 `--extra crawler`로 설치) |
 | `test` | Postgres 서비스 컨테이너 → `alembic upgrade head` → `alembic check` → `pytest` |
+| `web-test` | Node 22 → `npm ci` → `npm run test:web` (web/test/smoke_home.mjs, jsdom) |
 | `build` | 이미지 두 개 빌드(백엔드·크롤러) · 백엔드는 실행해 임포트 확인 |
+
+`web-test`는 pytest가 보지 않는 `web/`을 지킨다. jsdom 위에서 home.js를 실제로
+실행해 드로어·인기 탭·클릭 전송·판매자 시트가 API 응답으로 그려지는지 보고,
+하나라도 FAIL이면 종료 코드 1로 잡이 빨간불이 된다. 로컬에서는 `npm i` 한 번 뒤
+`npm run test:web`.
 
 ### ECR 푸시
 

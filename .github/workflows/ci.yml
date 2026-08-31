@@ -97,6 +97,26 @@ jobs:
       - name: 테스트
         run: uv run pytest
 
+      # -------------------------------------------------------------------
+      # 프론트 스모크 테스트 (web/test/smoke_home.mjs, jsdom).
+      #
+      # 백엔드 테스트 뒤에 두는 이유는 순서가 아니라 자리다 — 이 잡은 "코드가
+      # 깨졌나"를 묻는 곳이고, 화면도 코드다. 별도 잡으로 빼면 러너 하나를 더
+      # 쓰면서 얻는 것이 없다(jsdom 하나라 몇 초면 끝난다).
+      #
+      # 서버를 띄우지 않는다. 스모크 테스트가 fetch 를 가짜로 바꿔 API 응답을
+      # 흉내 내므로 DB 도 필요 없다 — 위 postgres 서비스는 pytest 용이다.
+      # -------------------------------------------------------------------
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 프론트 스모크 테스트
+        run: |
+          npm ci
+          npm run test:web
+
   build:
     runs-on: ubuntu-latest
     needs: [lint, test]

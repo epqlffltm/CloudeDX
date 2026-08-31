@@ -129,22 +129,98 @@ async def test_ready_fails_when_upload_dir_is_not_writable(client, monkeypatch, 
     assert body["database"]["connected"] is True
 
 
-async def test_ready_skips_storage_probe_in_s3_mode(client, monkeypatch, tmp_path):
-    """
-    S3 모드에서는 저장소 프로브를 돌리지 않는다 — 항상 통과.
+class _FakeS3:
+    """put/delete 호출을 세고, 지정한 예외를 던지는 가짜 boto3 클라이언트."""
 
-    프로브마다 실제 put/delete가 나가면 비용·로그 소음이 생기고, put 권한은
-    IAM 역할의 문제라 기동 후 바뀌는 일도 드물다. 로컬 디스크가 못 쓰는 상태여도
-    S3 모드에서는 그 디스크를 안 쓰므로 ready여야 한다.
-    """
+    def __init__(self, fail_with: Exception | None = None):
+        self.fail_with = fail_with
+        self.attempts = 0
+        self.puts = 0
+        self.deletes = 0
+
+    def put_object(self, **kwargs):
+        self.attempts += 1
+        if self.fail_with is not None:
+            raise self.fail_with
+        self.puts += 1
+
+    def delete_object(self, **kwargs):
+        self.deletes += 1
+
+
+def _use_s3(monkeypatch, tmp_path, fake):
+    """S3 모드로 전환하고 프로브 캐시를 비운다. 로컬 디스크는 일부러 못 쓰게 둔다."""
     blocker = tmp_path / "not-a-directory"
     blocker.write_bytes(b"")
     monkeypatch.setattr(storage, "UPLOAD_DIR", blocker)
     monkeypatch.setattr(storage, "S3_BUCKET", "demo-bucket")
+    monkeypatch.setattr(storage, "_s3", fake)
+    monkeypatch.setattr(storage, "_probe_ok", False)
+    monkeypatch.setattr(storage, "_probe_error", None)
+    monkeypatch.setattr(storage, "_probe_at", 0.0)
+
+
+async def test_ready_probes_s3_once_in_s3_mode(client, monkeypatch, tmp_path):
+    """
+    S3 모드는 프로브 객체를 put→delete 해 보고, 성공하면 다시 묻지 않는다.
+
+    로컬 디스크가 못 쓰는 상태여도 S3 모드에서는 그 디스크를 안 쓰므로 ready 여야 한다.
+    두 번째 /ready 에서 put 횟수가 늘지 않는 것이 "한 번 성공하면 끝"의 증거다.
+    """
+    fake = _FakeS3()
+    _use_s3(monkeypatch, tmp_path, fake)
+
+    first = await client.get("/ready")
+    second = await client.get("/ready")
+
+    assert first.status_code == 200
+    assert first.json()["storage"] == {"mode": "s3", "ok": True, "error": None}
+    assert second.status_code == 200
+    assert (fake.puts, fake.deletes) == (1, 1)
+
+
+async def test_ready_fails_when_s3_is_misconfigured(client, monkeypatch, tmp_path):
+    """
+    IAM 역할이 빠졌거나 버킷 이름이 틀리면 첫 업로드가 아니라 /ready 에서 드러난다.
+
+    실패는 곧바로 재시도하지 않는다(_PROBE_RETRY_SECONDS) — 연속 /ready 가 S3 를
+    두드리지 않게. 여기서는 put 이 1회만 나갔는지로 확인한다.
+    """
+
+    class AccessDenied(Exception):
+        pass
+
+    fake = _FakeS3(fail_with=AccessDenied("403"))
+    _use_s3(monkeypatch, tmp_path, fake)
+
+    first = await client.get("/ready")
+    second = await client.get("/ready")
+
+    assert first.status_code == 503
+    assert first.json()["ready"] is False
+    assert first.json()["storage"] == {"mode": "s3", "ok": False, "error": "AccessDenied"}
+    assert second.status_code == 503
+
+    # 실패가 캐시됐다 — 두 번째 호출은 S3 를 다시 두드리지 않았다.
+    assert fake.attempts == 1
+    assert fake.deletes == 0
+
+
+async def test_ready_recovers_after_s3_is_fixed(client, monkeypatch, tmp_path):
+    """
+    인프라가 역할을 고쳐 붙이면 파드를 재시작하지 않아도 Ready 로 돌아온다.
+    재시도 간격이 지난 것으로 시계를 돌리고, 클라이언트를 성공하는 것으로 바꾼다.
+    """
+    broken = _FakeS3(fail_with=RuntimeError("NoCredentials"))
+    _use_s3(monkeypatch, tmp_path, broken)
+
+    assert (await client.get("/ready")).status_code == 503
+
+    # 재시도 시각을 과거로 밀고, 이제는 되는 클라이언트로 교체
+    monkeypatch.setattr(storage, "_probe_at", storage._probe_at - storage._PROBE_RETRY_SECONDS)
+    monkeypatch.setattr(storage, "_s3", _FakeS3())
 
     response = await client.get("/ready")
-    body = response.json()
 
     assert response.status_code == 200
-    assert body["ready"] is True
-    assert body["storage"] == {"mode": "s3", "ok": True, "error": None}
+    assert response.json()["storage"]["ok"] is True

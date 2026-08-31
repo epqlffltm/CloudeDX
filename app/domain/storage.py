@@ -25,28 +25,106 @@ A 컨테이너에 올린 사진을 B 컨테이너가 서빙할 수 없고, 컨�
 ("../../etc/passwd")과 확장자 위조("사진.jpg.php"). 이름을 새로 만들면 둘 다
 성립하지 않는다. 원본 이름이 필요하면 DB 컬럼에 따로 담을 일이지 파일명으로 쓸
 값이 아니다.
+
+**설정 오류는 배포 시점에 드러나야 한다.** 이 모듈이 지키는 세 가지:
+    - 운영(APP_ENV=production)인데 S3_BUCKET 이 비어 있으면 기동을 거부한다.
+      조용히 로컬 디스크로 떨어지면 파드 3대에서 사진이 깨지는데, 에러가 없어서
+      한참 뒤에야 안다. 단일 호스트 시연처럼 일부러 로컬 모드를 쓰려면
+      ALLOW_LOCAL_STORAGE=true 로 명시한다.
+    - S3 모드는 첫 /ready 에서 프로브 객체를 put→delete 해 본다(check_storage).
+      IAM 권한·리전·버킷 이름 오타가 첫 업로드가 아니라 기동 직후에 잡힌다.
+      한 번 성공하면 다시 묻지 않는다 — 운영 중 S3 장애로 파드를 빼는 일은 없다.
+    - 저장 실패는 StorageUnavailable 하나로 닫는다. 라우터는 botocore 예외를 몰라도
+      되고, 503 + Retry-After 로 "지금은 안 되니 잠시 후"를 정직하게 돌려줄 수 있다.
 """
 
 import logging
 import os
 import secrets
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from app.config import UPLOAD_DIR
+from app.config import IS_PRODUCTION, UPLOAD_DIR
 
 logger = logging.getLogger(__name__)
 
 # S3 버킷 이름. 비어 있으면 로컬 파일 모드다.
 S3_BUCKET = os.getenv("S3_BUCKET", "").strip()
 
+# 리전. IRSA 웹훅과 태스크 데피니션이 AWS_REGION 을 넣어 주지만, 없을 수도 있어
+# AWS_DEFAULT_REGION 까지 본다. 공개 주소를 만들 때만 쓴다(boto3 는 자기가 읽는다).
+AWS_REGION = os.getenv("AWS_REGION", "").strip() or os.getenv("AWS_DEFAULT_REGION", "").strip()
+
+# 로컬 디스크 모드를 운영에서 허용하는 명시적 스위치. 단일 호스트 시연용.
+ALLOW_LOCAL_STORAGE = os.getenv("ALLOW_LOCAL_STORAGE", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
+
+
+def _default_public_base(bucket: str, region: str) -> str:
+    """
+    버킷의 기본 공개 주소를 만든다. 리전을 알면 리전 포함 주소로.
+
+    리전 없는 https://버킷.s3.amazonaws.com 은 us-east-1 밖의 버킷에서 307
+    리다이렉트를 탄다. 브라우저가 <img> 에서 그 리다이렉트를 따라가긴 하지만,
+    버킷을 만든 직후에는 DNS 전파 전이라 실패하기도 한다. 리전을 알 수 있는데
+    굳이 리다이렉트를 탈 이유가 없다.
+    """
+    if not bucket:
+        return ""
+
+    if region:
+        return f"https://{bucket}.s3.{region}.amazonaws.com"
+
+    return f"https://{bucket}.s3.amazonaws.com"
+
+
 # 화면이 참조할 공개 주소의 앞부분. CloudFront를 붙이면 그 도메인을 준다.
-# 비워두면 버킷 기본 주소로 만든다 — 동작은 하지만 리전 리다이렉트를 탈 수 있어
-# 운영에서는 명시하는 것을 권장한다.
-S3_PUBLIC_BASE = (
-    os.getenv("S3_PUBLIC_BASE", "").strip().rstrip("/")
-    or (f"https://{S3_BUCKET}.s3.amazonaws.com" if S3_BUCKET else "")
+# 비워두면 버킷 주소로 만든다 — AWS_REGION 이 있으면 리전 포함 주소다.
+S3_PUBLIC_BASE = os.getenv("S3_PUBLIC_BASE", "").strip().rstrip("/") or _default_public_base(
+    S3_BUCKET, AWS_REGION
 )
+
+
+def _guard_production_storage(*, production: bool, bucket: str, allow_local: bool) -> None:
+    """
+    운영에서 S3 설정 누락을 기동 거부로 바꾼다. config._secret_env 와 같은 판단이다.
+
+    RuntimeError 를 임포트 단계에서 올리면 파드가 CrashLoopBackOff 가 되고 로그
+    첫 줄에 이유가 남는다. 사진이 파드마다 다르게 보이는 상태로 트래픽을 받는
+    것보다 낫다.
+    """
+    if production and not bucket and not allow_local:
+        raise RuntimeError(
+            "APP_ENV=production 인데 S3_BUCKET 이 비어 있습니다. 컨테이너 여러 대에서 "
+            "로컬 디스크 저장은 성립하지 않습니다(파드마다 사진이 다르고 교체 시 사라짐). "
+            "S3_BUCKET 을 설정하거나, 단일 호스트 시연이면 ALLOW_LOCAL_STORAGE=true 로 "
+            "명시하세요."
+        )
+
+
+_guard_production_storage(
+    production=IS_PRODUCTION, bucket=S3_BUCKET, allow_local=ALLOW_LOCAL_STORAGE
+)
+
+
+class StorageUnavailable(Exception):
+    """
+    저장소에 쓸 수 없다 — S3 거부/연결 실패, 로컬 디스크 권한·용량.
+
+    라우터는 이 예외 하나만 잡아 503 으로 바꾼다. botocore 의 예외 계층을 라우터가
+    알 필요가 없고, 로컬/S3 모드가 같은 계약을 갖게 된다.
+    """
+
+
+# S3 프로브 결과 캐시. 성공하면 다시 묻지 않고, 실패는 잠시 뒤 다시 시도한다.
+_PROBE_RETRY_SECONDS = 60
+_probe_ok = False
+_probe_error: str | None = None
+_probe_at = 0.0
 
 # 확장자 → Content-Type. 이걸 안 넣으면 S3가 binary/octet-stream으로 응답해서
 # 브라우저가 이미지를 그리는 대신 내려받으려 든다.
@@ -80,7 +158,10 @@ def _get_s3():
                 "S3_BUCKET이 설정됐지만 boto3가 없습니다. 'uv add boto3'로 설치하세요."
             ) from exc
 
-        _s3 = boto3.client("s3")
+        # 리전을 명시한다. boto3 는 AWS_DEFAULT_REGION 만 읽고 AWS_REGION 은 버전에
+        # 따라 무시해서, 리전이 비면 글로벌 엔드포인트(s3.amazonaws.com)로 가 리다이렉트를
+        # 탄다. 우리가 읽은 값을 그대로 넘기면 어느 쪽 변수를 줬든 같은 리전으로 간다.
+        _s3 = boto3.client("s3", region_name=AWS_REGION or None)
 
     return _s3
 
@@ -129,19 +210,29 @@ def save_image(data: bytes, extension: str) -> str:
     object_name = build_object_name(extension)
 
     if S3_BUCKET:
-        _get_s3().put_object(
-            Bucket=S3_BUCKET,
-            Key=object_name,
-            Body=data,
-            ContentType=_CONTENT_TYPES.get(extension, "application/octet-stream"),
-            # 이름이 난수라 내용이 바뀔 일이 없다 — 브라우저·CDN이 마음껏 캐시해도 된다.
-            CacheControl="public, max-age=31536000, immutable",
-        )
+        try:
+            _get_s3().put_object(
+                Bucket=S3_BUCKET,
+                Key=object_name,
+                Body=data,
+                ContentType=_CONTENT_TYPES.get(extension, "application/octet-stream"),
+                # 이름이 난수라 내용이 바뀔 일이 없다 — 브라우저·CDN이 마음껏 캐시해도 된다.
+                CacheControl="public, max-age=31536000, immutable",
+            )
+        except Exception as exc:  # noqa: BLE001 — botocore 예외 계층 전체를 한 종류로 닫는다
+            # 예외 문자열에는 버킷·키·요청 ID 가 섞인다. 타입 이름만 남기고 원인은 체인으로.
+            logger.warning("S3 업로드 실패: %s (%s)", object_name, type(exc).__name__)
+            raise StorageUnavailable(f"S3 업로드 실패: {type(exc).__name__}") from exc
+
         logger.info("S3 업로드: s3://%s/%s (%d바이트)", S3_BUCKET, object_name, len(data))
     else:
-        path = resolve_upload_path(object_name)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
+        try:
+            path = resolve_upload_path(object_name)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+        except OSError as exc:
+            logger.warning("로컬 저장 실패: %s (%s)", object_name, type(exc).__name__)
+            raise StorageUnavailable(f"로컬 저장 실패: {type(exc).__name__}") from exc
 
     return object_name
 
@@ -151,21 +242,68 @@ def storage_mode() -> str:
     return "s3" if S3_BUCKET else "local"
 
 
+def _probe_s3() -> str | None:
+    """
+    S3 에 프로브 객체를 하나 넣었다 지운다. 문제면 예외 타입 이름, 정상이면 None.
+
+    put 과 delete 를 둘 다 해 보는 이유: 앱이 쓰는 권한이 정확히 그 둘이다.
+    head_bucket 은 ListBucket 권한을 요구해 다른 것을 검사하게 된다.
+    """
+    key = f".readycheck/{secrets.token_hex(8)}"
+
+    try:
+        client = _get_s3()
+        client.put_object(Bucket=S3_BUCKET, Key=key, Body=b"ok")
+        client.delete_object(Bucket=S3_BUCKET, Key=key)
+    except Exception as exc:  # noqa: BLE001 — 어떤 실패든 "못 쓴다" 하나로 보고한다
+        return type(exc).__name__
+
+    return None
+
+
 def check_storage() -> str | None:
     """
     저장소에 실제로 쓸 수 있는지 확인한다. 문제면 예외 타입 이름, 정상이면 None.
 
-    로컬 모드만 검사한다. 이 버그의 실제 사례가 이유다: 컨테이너의 업로드 볼륨이
-    root 소유로 만들어져 앱 계정이 못 쓰는데, 코드 테스트로는 잡을 수 없고(테스트는
-    개발자 PC 권한으로 돈다) 사진 업로드를 눌러보고서야 500으로 드러났다. 디스크
-    권한은 환경의 속성이라, 떠 있는 컨테이너에서 직접 써봐야만 안다.
+    **로컬 모드**는 매번 파일을 써 본다. 실제 사례가 이유다: 컨테이너의 업로드
+    볼륨이 root 소유로 만들어져 앱 계정이 못 쓰는데, 코드 테스트로는 잡을 수 없고
+    (테스트는 개발자 PC 권한으로 돈다) 사진 업로드를 눌러보고서야 500으로 드러났다.
 
-    S3 모드는 검사하지 않는다 — 프로브마다 실제 put/delete 요청이 나가면 비용과
-    로그 소음이 생기고, put 권한은 IAM 역할의 문제라 기동 후 바뀌는 일도 드물다.
-    첫 업로드 실패가 지표(5xx)로 바로 드러나는 것으로 충분하다.
+    **S3 모드**는 "처음 성공할 때까지만" 프로브한다. IAM 역할 누락·버킷 이름 오타·
+    리전 불일치는 전부 배포 설정 오류라 기동 직후에 드러나야 하고, 그 확인은
+    put/delete 한 쌍이면 된다(비용·로그는 파드당 몇 번). 한 번 성공한 뒤에는 다시
+    묻지 않는다 — 운영 중 S3 장애는 업로드 요청이 503 으로 정직하게 실패하는 것으로
+    충분하고, 그것 때문에 조회까지 멈추는(파드를 빼는) 것은 사용자에게 더 나쁘다.
+
+    실패는 _PROBE_RETRY_SECONDS 뒤에 다시 시도한다. 인프라가 역할을 고쳐 붙이면
+    파드를 재시작하지 않아도 Ready 로 돌아온다.
     """
+    global _probe_ok, _probe_error, _probe_at
+
     if S3_BUCKET:
-        return None
+        if _probe_ok:
+            return None
+
+        now = time.monotonic()
+        if _probe_error is not None and now - _probe_at < _PROBE_RETRY_SECONDS:
+            return _probe_error
+
+        _probe_error = _probe_s3()
+        _probe_at = now
+        _probe_ok = _probe_error is None
+
+        if _probe_ok:
+            logger.info("S3 저장소 확인: s3://%s 에 쓰기·삭제 가능", S3_BUCKET)
+        else:
+            logger.error(
+                "S3 저장소 확인 실패: s3://%s (%s) — IAM 역할(PutObject/DeleteObject), "
+                "버킷 이름, 리전을 확인하세요. %d초 뒤 다시 시도합니다.",
+                S3_BUCKET,
+                _probe_error,
+                _PROBE_RETRY_SECONDS,
+            )
+
+        return _probe_error
 
     try:
         UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
