@@ -36,6 +36,8 @@
     <g id="i-user" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 5-6 8-6s6.5 2 8 6"/></g>
     <g id="i-seal" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8 12.5 2.5 2.5L16 9"/></g>
     <g id="i-arrow-r" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></g>
+    <g id="i-menu" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 7h18M3 12h18M3 17h18"/></g>
+    <g id="i-close" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M5 5l14 14M19 5 5 19"/></g>
   </defs>
 </svg>
 
@@ -43,8 +45,16 @@
      "100% Verified" 같은 문구는 쓰지 않는다. -->
 <div class="announce">Curated Pre-loved Luxury &middot; 당근마켓 · 중고나라 · 번개장터 통합검색</div>
 
+<!-- 헤더. 카테고리 링크는 헤더 줄에 두지 않고 왼쪽 드로어(아래 aside)에 둔다 —
+     대문은 브랜드 사이트처럼 조용하게, 카테고리는 검색 결과 화면의 필터 칩으로
+     바로 고를 수 있으므로 헤더에 상시 노출할 이유가 없다. -->
 <header class="site">
   <div class="wrap header-row">
+    <button class="menu-btn" type="button" id="menuBtn" data-drawer-open
+            aria-label="메뉴 열기" aria-controls="drawer" aria-expanded="false">
+      <svg viewBox="0 0 24 24"><use href="#i-menu"/></svg>
+    </button>
+
     <form class="search-pill" id="searchForm" role="search">
       <button type="submit" aria-label="검색"><svg viewBox="0 0 24 24"><use href="#i-search"/></svg></button>
       <label class="visually-hidden" for="searchInput">브랜드, 모델명 검색</label>
@@ -56,12 +66,23 @@
 
     <a class="login-btn" href="login.html" aria-label="기업고객 로그인" id="loginBtn">Login</a>
   </div>
-
-  <div class="wrap">
-    <!-- 카테고리 링크는 /api/meta 응답으로 채운다. -->
-    <nav class="main-nav" id="mainNav" aria-label="카테고리"></nav>
-  </div>
 </header>
+
+<!-- 사이드 드로어. 햄버거 버튼으로 열고, 배경·닫기·Esc·카테고리 선택으로 닫힌다.
+     카테고리 목록(#mainNav)은 /api/meta 응답으로 채운다 — home.js renderNav().
+     기업고객 링크는 두지 않는다 — 헤더 Login과 대문 For Business 블록으로 충분하다. -->
+<div class="drawer-backdrop" id="drawerBackdrop" hidden></div>
+<aside class="drawer" id="drawer" aria-label="메뉴" aria-hidden="true">
+  <div class="drawer-head">
+    <span class="drawer-logo">Reverdi</span>
+    <button class="drawer-close" type="button" data-drawer-close aria-label="메뉴 닫기">
+      <svg viewBox="0 0 24 24"><use href="#i-close"/></svg>
+    </button>
+  </div>
+  <p class="drawer-label">Categories</p>
+  <nav class="main-nav" id="mainNav" aria-label="카테고리"></nav>
+  <p class="drawer-foot">당근마켓 · 중고나라 · 번개장터</p>
+</aside>
 
 <main>
 
@@ -91,7 +112,14 @@
   <section class="section section--flush">
     <div class="wrap">
       <h2 class="home-h">Maisons</h2>
-      <div class="brand-scroll" id="brandScroll"></div>
+      <!-- 브랜드 마퀴. #brandScroll이 원본 한 벌이고, 그 뒤 복제본은 home.js가
+           화면 너비에 맞춰 붙인다(aria-hidden). 트랙 전체가 천천히 왼쪽으로
+           흐르고, 마우스를 올리면 멈춘다. -->
+      <div class="brand-marquee" id="brandMarquee">
+        <div class="brand-marquee-inner" id="brandMarqueeInner">
+          <div class="brand-scroll" id="brandScroll"></div>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -118,6 +146,8 @@
       <div class="tab-row" role="tablist" aria-label="정렬">
         <button class="tab-btn" type="button" role="tab" data-rail="latest" aria-selected="true">신규 물품</button>
         <button class="tab-btn" type="button" role="tab" data-rail="authenticated" aria-selected="false">인증 물품</button>
+        <!-- 인기: 카드 클릭 수 순, 직접등록 매물이 앞 (/api/products/popular). -->
+        <button class="tab-btn" type="button" role="tab" data-rail="popular" aria-selected="false">인기 물품</button>
       </div>
       <div class="rail" id="railGrid"></div>
     </div>
@@ -151,6 +181,7 @@
     </div>
 
     <div class="filter-bar">
+      <div class="filter-group" id="categoryChips" role="group" aria-label="카테고리"></div>
       <div class="filter-group" id="sourceChips" role="group" aria-label="수집처"></div>
       <div class="filter-group" id="brandChips" role="group" aria-label="브랜드"></div>
       <div class="filter-spacer"></div>

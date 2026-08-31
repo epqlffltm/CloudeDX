@@ -90,10 +90,20 @@ header.site {
   border-bottom: 1px solid var(--line);
 }
 
+/* 4열: 햄버거 · 검색 · 로고 · 로그인. 바깥 두 열이 1fr로 같아서 로고가 정중앙에 온다. */
 .header-row {
-  display: grid; grid-template-columns: 1fr auto 1fr;
-  align-items: center; height: 76px; gap: 24px;
+  display: grid; grid-template-columns: auto 1fr auto 1fr;
+  align-items: center; height: 76px; gap: 18px;
 }
+
+.menu-btn {
+  grid-column: 1; justify-self: start;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; margin-left: -8px;
+  color: var(--ink); transition: background .2s;
+}
+.menu-btn svg { width: 20px; height: 20px; }
+.menu-btn:hover { background: var(--bg-alt); }
 
 .logo {
   font-family: var(--font-display); font-weight: 500;
@@ -107,7 +117,7 @@ header.site {
 
 /* 검색: 필 대신 언더라인 미니멀 */
 .search-pill {
-  grid-column: 1; justify-self: start;
+  grid-column: 2; justify-self: start;
   display: flex; align-items: center; gap: 9px;
   border-bottom: 1px solid var(--line);
   padding: 8px 2px; width: 230px;
@@ -122,11 +132,11 @@ header.site {
 .search-pill svg { flex-shrink: 0; width: 15px; height: 15px; color: var(--ink-soft); }
 .search-pill button { display: flex; padding: 0; }
 
-.logo { grid-column: 2; }
+.logo { grid-column: 3; }
 
 .login-btn,
 .icon-btn { /* icon-btn: 예전 마크업 호환 */
-  grid-column: 3; justify-self: end;
+  grid-column: 4; justify-self: end;
   display: inline-flex; align-items: center; justify-content: center;
   border: 1px solid var(--ink); padding: 8px 20px;
   font-size: 11px; font-weight: 700;
@@ -136,33 +146,86 @@ header.site {
 .login-btn:hover, .icon-btn:hover { background: var(--ink); color: #fff; }
 .icon-btn svg { width: 15px; height: 15px; }
 
-nav.main-nav {
-  display: flex; align-items: center; justify-content: center; gap: 34px;
-  padding: 13px 0; border-top: 1px solid var(--line-soft);
-  overflow-x: auto; scrollbar-width: none;
-}
-nav.main-nav::-webkit-scrollbar { display: none; }
-nav.main-nav button {
-  flex: 0 0 auto; padding: 0 0 2px;
-  font-size: 12.5px; font-weight: 500; color: var(--ink-soft);
-  letter-spacing: .08em;
-  border-bottom: 1px solid transparent;
-}
-nav.main-nav button:hover { color: var(--ink); }
-nav.main-nav button[aria-current="true"] {
-  color: var(--ink); font-weight: 700;
-  border-bottom-color: var(--ink);
-}
-
 @media (max-width: 860px) {
   .header-row {
-    grid-template-columns: 1fr auto; grid-auto-rows: auto;
+    grid-template-columns: auto 1fr auto; grid-auto-rows: auto;
     height: auto; padding: 14px 0; row-gap: 12px;
   }
-  .logo { grid-column: 1; grid-row: 1; justify-self: start; font-size: 19px; }
-  .login-btn, .icon-btn { grid-column: 2; grid-row: 1; }
+  .menu-btn { grid-column: 1; grid-row: 1; }
+  .logo { grid-column: 2; grid-row: 1; justify-self: start; font-size: 19px; }
+  .login-btn, .icon-btn { grid-column: 3; grid-row: 1; }
   .search-pill { grid-column: 1 / -1; grid-row: 2; width: 100%; }
-  nav.main-nav { justify-content: flex-start; gap: 24px; }
+}
+
+/* ── 사이드 드로어 ──────────────────────────────────────────────────
+ * 카테고리만 들어간다 — 기업고객 진입은 헤더의 Login 버튼과 대문의 For Business
+ * 블록이 이미 맡고 있다. 헤더보다 위(z-index)에 있고, 열리면
+ * 왼쪽에서 밀려 들어온다. 배경은 판매자 시트와 같은 잉크색 반투명. */
+
+.drawer-backdrop {
+  position: fixed; inset: 0; z-index: 90;
+  background: rgba(26, 26, 26, .45);
+}
+.drawer-backdrop[hidden] { display: none; }
+
+.drawer {
+  position: fixed; top: 0; bottom: 0; left: 0; z-index: 95;
+  width: min(320px, 86vw);
+  background: var(--bg); border-right: 1px solid var(--line);
+  padding: 0 32px 32px; overflow-y: auto;
+  transform: translateX(-100%);
+  transition: transform .32s cubic-bezier(.2, .7, .2, 1);
+  display: flex; flex-direction: column;
+}
+.drawer.is-open { transform: none; }
+body.drawer-open { overflow: hidden; }
+
+.drawer-head {
+  display: flex; align-items: center; justify-content: space-between;
+  height: 76px; margin-bottom: 24px; border-bottom: 1px solid var(--line);
+}
+.drawer-logo {
+  font-family: var(--font-display); font-weight: 500;
+  font-size: 18px; letter-spacing: .34em; text-transform: uppercase;
+}
+.drawer-close {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; margin-right: -8px; color: var(--ink-soft);
+}
+.drawer-close:hover { background: var(--bg-alt); color: var(--ink); }
+.drawer-close svg { width: 18px; height: 18px; }
+
+.drawer-label {
+  margin: 22px 0 10px; font-size: 10.5px; font-weight: 700;
+  letter-spacing: var(--track-wide); text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.drawer-label:first-of-type { margin-top: 0; }
+
+nav.main-nav { display: flex; flex-direction: column; align-items: stretch; }
+nav.main-nav button {
+  display: flex; align-items: center; gap: 12px;
+  padding: 11px 0; text-align: left;
+  font-size: 15px; font-weight: 500; color: var(--ink-soft);
+  letter-spacing: .02em; border-bottom: 1px solid var(--line-soft);
+  transition: color .15s;
+}
+nav.main-nav button::before {
+  content: ''; width: 0; height: 1px; background: var(--ink);
+  transition: width .2s;
+}
+nav.main-nav button:hover { color: var(--ink); }
+nav.main-nav button[aria-current="true"] { color: var(--ink); font-weight: 700; }
+nav.main-nav button[aria-current="true"]::before,
+nav.main-nav button:hover::before { width: 14px; }
+
+.drawer-foot {
+  margin: auto 0 0; padding-top: 28px;
+  font-size: 11px; letter-spacing: .06em; color: var(--ink-faint);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drawer { transition: none; }
 }
 
 /* ── hero ──────────────────────────────────────────────────────────── */
@@ -258,13 +321,38 @@ nav.main-nav button[aria-current="true"] {
   .cat-item:hover .cat-circle { transform: none; }
 }
 
-/* 브랜드 셔틀 */
-.brand-scroll {
-  display: flex; gap: 26px; overflow-x: auto;
-  padding: 6px 0 4px; scrollbar-width: none;
-  justify-content: safe center;
+/* 브랜드 마퀴.
+ * home.js가 #brandScroll 뒤에 복제본을 붙이고 --marquee-shift(한 벌 폭)와
+ * --marquee-duration을 넣어 준다. 0에서 한 벌 폭만큼 왼쪽으로 밀면 트랙이
+ * 왼쪽으로 흐르고, 한 벌이 지나간 자리는 다음 복제본이 정확히 메운다
+ * (오른쪽으로 흘리려면 from/to를 바꾼다).
+ * 복제본이 없을 때(.is-animated 없음)는 예전처럼 가로 스크롤 줄이다. */
+.brand-marquee {
+  overflow-x: auto; scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent);
+          mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent);
 }
-.brand-scroll::-webkit-scrollbar { display: none; }
+.brand-marquee::-webkit-scrollbar { display: none; }
+.brand-marquee-inner { display: flex; width: max-content; }
+.brand-marquee.is-animated { overflow: hidden; }
+.brand-marquee.is-animated .brand-marquee-inner {
+  animation: brand-marquee var(--marquee-duration, 40s) linear infinite;
+}
+.brand-marquee.is-animated:hover .brand-marquee-inner,
+.brand-marquee.is-animated:focus-within .brand-marquee-inner { animation-play-state: paused; }
+@keyframes brand-marquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(calc(-1 * var(--marquee-shift, 0px))); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .brand-marquee.is-animated { overflow-x: auto; }
+  .brand-marquee.is-animated .brand-marquee-inner { animation: none; }
+}
+
+.brand-scroll {
+  display: flex; gap: 26px; flex: 0 0 auto;
+  padding: 6px 13px 4px; /* 좌우 13px씩 = 벌 사이 간격 26px */
+}
 .brand-item {
   flex: 0 0 auto; display: flex; flex-direction: column;
   align-items: center; gap: 10px; padding: 0;
@@ -506,6 +594,8 @@ nav.main-nav button[aria-current="true"] {
 
 @media (min-width: 861px) {
   .filter-bar { justify-content: flex-start; }
+  /* 카테고리·수집처는 한 줄씩. 브랜드 줄 끝에 정렬 select가 붙는다. */
+  #categoryChips, #sourceChips { flex-basis: 100%; }
   .filter-group { justify-content: flex-start; }
   .filter-spacer { display: block; flex: 1 1 auto; }
   .results-head { text-align: left; }
