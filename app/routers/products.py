@@ -21,7 +21,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import repository
+from app.db import clicks, repository
 from app.db.engine import get_read_session
 from app.db.models import ItemRecord
 from app.schemas.products import ListingListResponse, ListingOut
@@ -74,6 +74,38 @@ async def list_listings(
         limit=filters.limit,
         offset=filters.offset,
         has_next=filters.offset + len(rows) < total,
+        items=[_to_listing(row) for row in rows],
+    )
+
+
+# /{item_id}보다 **먼저** 등록해야 한다. 뒤에 두면 "popular"가 item_id 자리로
+# 매칭돼 정수 변환 실패(422)가 난다. FastAPI는 등록 순서대로 경로를 본다.
+@router.get(
+    "/popular",
+    response_model=ListingListResponse,
+    status_code=status.HTTP_200_OK,
+    operation_id="listPopularListings",
+    summary="인기 매물 (대문 레일용)",
+)
+async def list_popular_listings(
+    session: Annotated[AsyncSession, Depends(get_read_session)],
+    limit: Annotated[int, Query(ge=1, le=50)] = 12,
+):
+    """
+    클릭이 많은 순. 직접등록 매물이 앞이고, 모자라면 크롤링 매물이 채운다
+    (app/db/clicks.list_popular). 응답 모양은 목록과 같다 — 화면이 카드를 그리는
+    코드를 공유하기 위해서다. 페이지네이션은 없으므로 offset=0, has_next=false 고정.
+
+    클릭 수 자체는 내려주지 않는다. 정렬 결과만 계약이다.
+    """
+    rows = await clicks.list_popular(session, limit)
+
+    return ListingListResponse(
+        total=len(rows),
+        count=len(rows),
+        limit=limit,
+        offset=0,
+        has_next=False,
         items=[_to_listing(row) for row in rows],
     )
 

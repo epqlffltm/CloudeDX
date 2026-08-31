@@ -15,7 +15,9 @@
 | GET | `/api/crawled-items/{item_id}` | 매물 단건 JSON |
 | GET | `/api/meta` | 필터 선택지(브랜드/수집처)와 수집 현황 |
 | GET | `/api/products` | 프론트엔드용 매물 목록 (ListingOut) |
+| GET | `/api/products/popular` | 인기 매물 — 클릭 많은 순, 직접등록이 앞 (대문 레일) |
 | GET | `/api/products/{item_id}` | 매물 단건 |
+| POST | `/api/events/click` | 매물 카드 클릭 기록. 202 Accepted |
 
 `/api/meta`의 `crawler` 항목은 백그라운드 수집기의 상태다. 서버가 크롤링을 기다리지
 않고 바로 열리기 때문에, 방금 뜬 서버는 목록이 비어 있다. 그게 "매물이 없다"인지
@@ -62,6 +64,26 @@
 복사되는 걸 막기 위해서다 — 나중에 커서 기반으로 바꿔도 클라이언트는 그대로 둘 수 있다.
 
 `items` 원소의 전체 필드와 주의할 점은 [웹 화면](frontend.md)의 "프론트엔드 연결" 절 응답 예시를 참고.
+
+### 클릭 집계 — 인기 매물
+
+화면이 매물 카드를 누를 때 `POST /api/events/click` `{"item_id": 60}`을 보내고
+(web/js/api.js `sendClick`, sendBeacon), 서버는 202에 `{"status": "counted"}` 또는
+`"duplicate"`를 돌려준다. 세션은 서버가 굽는 익명 쿠키 `reverdi_cid`(httpOnly, 1년)로
+식별하고, DB에는 그 값의 HMAC만 남는다. **한 세션·한 매물·30분 버킷에 한 번**만 센다 —
+연타·새로고침은 `duplicate`다. 판정은 `item_click_events`의 유니크 제약이 한다
+([DB](database.md) 참고). 없는 매물은 404, DB 오류는 503이고, 화면은 어느 쪽이든
+조용히 넘어간다.
+
+`GET /api/products/popular?limit=12`(1~50)는 그 집계로 정렬한 목록이다. 응답 모양은
+`/api/products`와 같고(ListingOut, offset=0·has_next=false 고정), 순서는
+**직접등록 매물 먼저 → 클릭 많은 순 → 최신순**이다. 직접등록이 limit보다 적으면
+크롤링 매물이 나머지를 채운다. 클릭 수 자체는 내려주지 않는다 — 카드에 찍히면
+"조회수"처럼 읽히는데, 그건 사이트가 주지 않아 계약에서 뺀 값이다. 정렬만 계약이다.
+
+202로 둔 이유: 지금은 요청 안에서 저장까지 끝나지만, 나중에 앞단에 SQS를 붙여
+"받았다"와 "집계했다"를 나눠도 화면 계약이 바뀌지 않게 하려는 것이다. 그때 저장
+규칙(`app/db/clicks.record_click`)은 큐 소비자가 그대로 쓴다.
 
 ### 매물 API — 도메인과 프론트 계약의 경계
 

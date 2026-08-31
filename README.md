@@ -62,10 +62,10 @@ docker compose up -d --build
 | 문서 | 내용 |
 |---|---|
 | [docs/architecture.md](docs/architecture.md) | 수집처별 역할 분담, 계층 분리, 프로세스 구성, 패키지 경계 |
-| [docs/frontend.md](docs/frontend.md) | 웹 화면 4종, 판매자 시트(매장 사진·약도), 관리자 메모, 프론트-API 연결 |
+| [docs/frontend.md](docs/frontend.md) | 웹 화면 4종, 헤더 드로어·마퀴·인기 탭, 판매자 시트(매장 사진·약도), 관리자 메모, 프론트-API 연결 |
 | [docs/crawler.md](docs/crawler.md) | 등록 시각 환산, 수집 동작, 수집 예절·robots.txt, 브랜드 목록 |
-| [docs/database.md](docs/database.md) | 마이그레이션, 매물 생명주기, 가격 이력을 제거한 경위, crawl_runs |
-| [docs/api.md](docs/api.md) | API 계약, 매물 API와 도메인의 경계, /health·/ready, 로깅 |
+| [docs/database.md](docs/database.md) | 마이그레이션, 매물 생명주기, 가격 이력을 제거한 경위, 클릭 집계, crawl_runs |
+| [docs/api.md](docs/api.md) | API 계약, 클릭 집계·인기 매물, 매물 API와 도메인의 경계, /health·/ready, 로깅 |
 | [docs/dev.md](docs/dev.md) | 로컬 실행, 환경 변수, 테스트, CI, 트러블슈팅, 알려진 이슈/TODO |
 | [docs/deploy.md](docs/deploy.md) | 이미지 빌드, compose 구성, nginx를 제거한 경위, 인프라 인계 |
 | [docs/deploy-env.md](docs/deploy-env.md) | **운영 환경변수 계약** — 태스크 데피니션 작성용 정본 |

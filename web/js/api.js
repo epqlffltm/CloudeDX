@@ -91,3 +91,41 @@ export async function fetchReco(limit = 50) {
 
   return data.items;
 }
+
+/**
+ * 인기 매물. 클릭 많은 순, 직접등록이 앞 (app/db/clicks.list_popular).
+ * 응답 모양은 목록과 같아서 카드 렌더 코드를 그대로 쓴다.
+ */
+export async function fetchPopular(limit = 12) {
+  const data = await getJSON(`${API_BASE}/api/products/popular?limit=${limit}`);
+
+  return data.items;
+}
+
+/**
+ * 카드 클릭을 서버에 알린다. 응답을 기다리지 않는다.
+ *
+ * 크롤링 매물 카드는 누르는 순간 원문 사이트로 나가므로(새 탭이지만 현재 탭도
+ * 언로드될 수 있다) 보통의 fetch는 취소될 수 있다. sendBeacon은 페이지가
+ * 떠나도 브라우저가 전송을 끝내 주는 API라 그걸 먼저 쓰고, 없는 환경(jsdom 등)
+ * 에서는 keepalive fetch로 대신한다.
+ *
+ * 실패는 무시한다. 집계가 안 됐다고 사용자가 할 일은 없고, 카드 클릭의 본래
+ * 동작(원문 이동·판매자 시트)을 막아서도 안 된다.
+ */
+export function sendClick(itemId) {
+  const url = `${API_BASE}/api/events/click`;
+  const body = JSON.stringify({ item_id: Number(itemId) });
+
+  if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
+    if (navigator.sendBeacon(url, new Blob([body], { type: 'application/json' }))) return;
+  }
+
+  fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body,
+    keepalive: true,
+    credentials: 'same-origin',
+  }).catch(() => {});
+}

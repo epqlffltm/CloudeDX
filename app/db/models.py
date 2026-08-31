@@ -27,6 +27,7 @@ from sqlalchemy import (
     MetaData,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -167,6 +168,60 @@ class ItemRecord(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    # ---- 인기 ------------------------------------------------------------
+    #
+    # 카드 클릭 누적 수. 대문 "인기 물품" 레일의 정렬 키다.
+    #
+    # 원천 기록은 item_click_events(한 세션이 한 매물을 30분에 한 번)이고, 이
+    # 컬럼은 그 건수의 캐시다. 매 조회마다 이벤트 테이블을 COUNT하면 대문이
+    # 열릴 때마다 집계가 돌기 때문에, 이벤트를 넣을 때 여기를 +1 해 둔다.
+    # 두 값이 어긋나면 이벤트 테이블이 진실이다 — 이 컬럼은 다시 셀 수 있다.
+    #
+    # 화면 계약(ListingOut)에는 싣지 않는다. 클릭 수를 카드에 찍으면 "조회수"
+    # 처럼 읽히는데, 그건 사이트가 주지 않아 계약에서 뺀 값이다. 정렬에만 쓴다.
+    click_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0", index=True
+    )
+
+
+class ItemClickEvent(Base):
+    """
+    매물 카드 클릭 한 건. 인기 집계의 원천이다.
+
+    **한 세션이 한 매물을 30분 버킷에 한 번만** 남긴다 — (item_id, session_hash,
+    bucket_start) 유니크가 그 규칙이다. 같은 카드를 연타하거나 새로고침해도 한
+    번으로 센다. 큐·캐시 없이 DB 제약 하나로 중복을 거르는 것이 이 설계의
+    전부라서, 나중에 앞단에 SQS·Redis SETNX를 붙여도 이 제약은 그대로 남아
+    최종 방어선이 된다.
+
+    session_hash는 익명 쿠키 값의 HMAC이다. 원값을 저장하지 않으므로 이 테이블만
+    으로는 누가 눌렀는지 알 수 없다 — 인기 집계에 필요한 것은 "같은 사람인가"
+    뿐이다.
+
+    items가 지워지면 같이 지운다(CASCADE). 매물 없는 클릭 기록은 쓸 데가 없다.
+    """
+
+    __tablename__ = "item_click_events"
+    __table_args__ = (
+        UniqueConstraint("item_id", "session_hash", "bucket_start"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+
+    item_id: Mapped[int] = mapped_column(
+        ForeignKey("items.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    # sha256 hex = 64자.
+    session_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    # 클릭 시각을 30분 단위로 내림한 값 (app/domain/clicks.py bucket_start).
+    bucket_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 

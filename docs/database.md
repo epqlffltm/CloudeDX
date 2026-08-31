@@ -264,6 +264,23 @@ uv run python -m app.crawler.daangn.debug_cards --query "샤넬 가방"
 git 히스토리에 있다 (`git log --oneline -- app/db/repository.py`에서 계약 평탄화
 커밋 직전).
 
+### item_click_events · items.click_count — 인기 집계
+
+`item_click_events`는 카드 클릭 한 건이다. `(item_id, session_hash, bucket_start)`
+유니크가 "한 세션이 한 매물을 30분에 한 번"을 강제한다 — 중복 제거는 큐도 캐시도
+아닌 이 제약 하나가 맡고, 나중에 앞단에 Redis SETNX·SQS를 붙여도 이 제약은 최종
+방어선으로 남는다. `session_hash`는 익명 쿠키의 HMAC이라 이 테이블만으로 누가
+눌렀는지는 알 수 없다. items가 지워지면 같이 지운다(CASCADE).
+
+`items.click_count`는 위 테이블 건수의 캐시다. 이벤트가 실제로 들어갔을 때만
++1 한다(`INSERT ... ON CONFLICT DO NOTHING ... RETURNING`으로 들어갔는지 본다).
+대문이 열릴 때마다 COUNT를 돌리지 않으려는 것이고, 두 값이 어긋나면 이벤트
+테이블이 진실이다 — 컬럼은 다시 셀 수 있다. 기존 행은 0에서 시작한다. 과거
+클릭은 기록이 없으니 지어내지 않는다.
+
+`app/db/clicks.py`가 이 둘을 다룬다(`record_click`, `list_popular`). repository.py에
+섞지 않은 이유는 그쪽이 매물 목록·upsert의 자리라서다.
+
 ### crawl_runs — 수집 상태
 
 수집 라운드마다 한 행을 남긴다. `status`(running/success/failed), `started_at`,

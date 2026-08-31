@@ -70,6 +70,7 @@ from app.logging_config import setup_logging
 from app.routers.admin import router as admin_router
 from app.routers.auth import router as auth_router
 from app.routers.crawled import router as crawled_router
+from app.routers.events import router as events_router
 from app.routers.health import router as health_router
 from app.routers.live import router as live_router
 from app.routers.memo import router as memo_router
@@ -258,6 +259,7 @@ app.include_router(admin_router, prefix=API_PREFIX)
 app.include_router(memo_router, prefix=API_PREFIX)
 app.include_router(uploads_router, prefix=API_PREFIX)
 app.include_router(live_router, prefix=API_PREFIX)
+app.include_router(events_router, prefix=API_PREFIX)
 app.include_router(sellers_router, prefix=API_PREFIX)
 
 # ---------------------------------------------------------------------------

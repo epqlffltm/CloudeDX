@@ -10,7 +10,7 @@
 // 뒤 이 화면에 자동으로 칸이 늘어난다. 프론트에 목록을 박아두면 백엔드를 고칠 때마다
 // 양쪽을 같이 고쳐야 하고, 실제로는 한쪽만 고쳐서 어긋난다.
 
-import { fetchListings, fetchLive, fetchMeta, fetchSeller } from './api.js';
+import { fetchListings, fetchLive, fetchMeta, fetchPopular, fetchSeller, sendClick } from './api.js';
 import { PAGE_SIZE, PRICE_UNLIMITED, toDisplayBrand } from './state.js';
 
 // ── 표시용 사전 ─────────────────────────────────────────────────────
@@ -80,7 +80,8 @@ const state = {
   // 실시간 조회 상태. idle | running | done
   // 화면에 "최신 매물을 확인하는 중" 배지를 띄우는 용도다.
   live: 'idle',
-  // 대문 레일 탭. 'latest'는 최신순 전체, 'authenticated'는 인증 매물만.
+  // 대문 레일 탭. 'latest'는 최신순 전체, 'authenticated'는 인증 매물만,
+  // 'popular'는 클릭 많은 순(/api/products/popular).
   railTab: 'latest',
 };
 
@@ -146,8 +147,9 @@ function cardHtml(item) {
     ? `type="button" data-seller="${item.seller_id}"`
     : `href="${esc(item.item_url)}" target="_blank" rel="noopener noreferrer"`;
 
+  // data-item은 클릭 집계용이다. 이벤트 위임이 이 값을 읽어 서버에 보낸다.
   return `
-    <${tag} class="p-card" ${attrs}>
+    <${tag} class="p-card" ${attrs} data-item="${item.id}">
       <div class="p-img${item.image_url ? '' : ' p-img--empty'}">
         ${image}
         <span class="p-badge">${esc(item.source)}</span>
@@ -223,9 +225,94 @@ function renderBrands() {
         <span class="brand-name">${esc(display)}</span>
       </button>`;
   }).join('');
+
+  layoutBrandMarquee();
+}
+
+// ── 브랜드 마퀴 ─────────────────────────────────────────────────────
+//
+// #brandScroll(원본 한 벌) 뒤에 복제본을 붙여 화면 너비 + 한 벌 폭을 채우고,
+// 트랙 전체를 한 벌 폭만큼 왼쪽으로 흘려보낸다. 한 벌 폭만큼 이동하면 처음
+// 모양과 같아지므로 끊김 없이 돈다. 이동 거리·시간은 CSS 변수로 넘긴다.
+//
+// 폭을 잴 수 없으면(대문이 숨겨진 검색 모드, jsdom) 복제본 없이 원본만 두고
+// 애니메이션도 걸지 않는다 — 나중에 goHome()에서 다시 잰다.
+
+function layoutBrandMarquee() {
+  const marquee = $('brandMarquee');
+  const inner = $('brandMarqueeInner');
+  const original = $('brandScroll');
+  if (!marquee || !inner || !original) return;
+
+  inner.querySelectorAll('[data-brand-clone]').forEach((el) => el.remove());
+  inner.style.removeProperty('--marquee-shift');
+  inner.style.removeProperty('--marquee-duration');
+  marquee.classList.remove('is-animated');
+
+  const listWidth = original.getBoundingClientRect().width;
+  const viewWidth = marquee.getBoundingClientRect().width;
+  if (listWidth <= 0 || viewWidth <= 0 || original.children.length === 0) return;
+
+  // 보이는 폭을 덮고도 한 벌이 더 있어야 왼쪽으로 빠져나간 자리를 채울 여유가 생긴다.
+  const copies = Math.ceil(viewWidth / listWidth) + 1;
+  for (let i = 0; i < copies; i += 1) {
+    const clone = original.cloneNode(true);
+    clone.removeAttribute('id');
+    clone.setAttribute('data-brand-clone', '');
+    clone.setAttribute('aria-hidden', 'true');
+    clone.querySelectorAll('button').forEach((b) => { b.tabIndex = -1; });
+    inner.appendChild(clone);
+  }
+
+  // 초당 약 22px — 읽히는 속도. 빠르면 싸 보인다.
+  inner.style.setProperty('--marquee-shift', `${listWidth}px`);
+  inner.style.setProperty('--marquee-duration', `${Math.max(20, listWidth / 22)}s`);
+  marquee.classList.add('is-animated');
+}
+
+let marqueeResizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(marqueeResizeTimer);
+  marqueeResizeTimer = setTimeout(layoutBrandMarquee, 200);
+});
+
+// ── 사이드 드로어 ───────────────────────────────────────────────────
+
+function openDrawer() {
+  const drawer = $('drawer');
+  if (!drawer || drawer.classList.contains('is-open')) return;
+
+  drawer.classList.add('is-open');
+  drawer.setAttribute('aria-hidden', 'false');
+  $('drawerBackdrop').hidden = false;
+  $('menuBtn')?.setAttribute('aria-expanded', 'true');
+  document.body.classList.add('drawer-open');
+  drawer.querySelector('[data-drawer-close]')?.focus();
+}
+
+function closeDrawer() {
+  const drawer = $('drawer');
+  if (!drawer || !drawer.classList.contains('is-open')) return;
+
+  drawer.classList.remove('is-open');
+  drawer.setAttribute('aria-hidden', 'true');
+  $('drawerBackdrop').hidden = true;
+  $('menuBtn')?.setAttribute('aria-expanded', 'false');
+  document.body.classList.remove('drawer-open');
+  $('menuBtn')?.focus();
 }
 
 function renderFilterChips() {
+  // 카테고리 칩. 헤더에서 카테고리 줄을 뺐으므로 검색 결과에서는 여기서 고른다.
+  const cats = Object.keys(state.meta?.categories ?? {});
+
+  $('categoryChips').innerHTML = [
+    '<span class="filter-label">카테고리</span>',
+    ...[['all', ALL], ...cats.map((id) => [id, categoryLabel(id)])].map(([id, label]) => `
+      <button class="chip" type="button" data-category="${esc(id)}"
+        aria-pressed="${state.filters.category === id}">${esc(label)}</button>`),
+  ].join('');
+
   const sources = [ALL, ...(state.meta?.sources ?? [])];
 
   $('sourceChips').innerHTML = [
@@ -314,10 +401,14 @@ function renderList() {
     <button type="button" data-page="next"${state.hasNext ? '' : ' disabled'}>다음</button>`;
 }
 
+const RAIL_EMPTY = {
+  latest: { title: '표시할 매물이 없습니다', body: '수집이 끝나면 이곳에 나타납니다.' },
+  popular: { title: '아직 인기 매물이 없습니다', body: '매물 카드가 눌리기 시작하면 많이 본 순서로 여기에 모입니다.' },
+  authenticated: { title: '인증 매물이 아직 없습니다', body: '기업고객이 증표를 확인해 등록한 매물이 여기에 모입니다.' },
+};
+
 function renderRail(items) {
-  const empty = state.railTab === 'authenticated'
-    ? { title: '인증 매물이 아직 없습니다', body: '기업고객이 증표를 확인해 등록한 매물이 여기에 모입니다.' }
-    : { title: '표시할 매물이 없습니다', body: '수집이 끝나면 이곳에 나타납니다.' };
+  const empty = RAIL_EMPTY[state.railTab] ?? RAIL_EMPTY.latest;
 
   $('railGrid').innerHTML = items.length === 0
     ? stateHtml(empty)
@@ -415,17 +506,21 @@ async function loadList() {
 
 async function loadRail() {
   try {
-    const data = await fetchListings(
-      {
-        ...state.filters,
-        category: 'all', brand: ALL, source: ALL, q: '', sort: 'latest',
-        authenticatedOnly: state.railTab === 'authenticated',
-      },
-      0, 12,
-    );
+    // 인기 탭은 정렬 기준이 달라 별도 엔드포인트다. 나머지 두 탭은 목록 API를
+    // 최신순으로 부르고, 인증 탭만 authenticated_only를 얹는다.
+    const items = state.railTab === 'popular'
+      ? await fetchPopular(12)
+      : (await fetchListings(
+        {
+          ...state.filters,
+          category: 'all', brand: ALL, source: ALL, q: '', sort: 'latest',
+          authenticatedOnly: state.railTab === 'authenticated',
+        },
+        0, 12,
+      )).items;
 
-    renderRail(data.items);
-    renderHero(data.items);
+    renderRail(items);
+    renderHero(items);
   } catch {
     // 대문 레일은 부가 정보다. 실패해도 화면 전체를 막지 않는다.
     renderRail([]);
@@ -769,6 +864,9 @@ function goHome() {
   writeURL();
   renderNav();
   window.scrollTo({ top: 0, behavior: 'smooth' });
+
+  // 검색 모드에서는 대문이 display:none이라 폭이 0이었다. 다시 보이는 지금 잰다.
+  requestAnimationFrame(layoutBrandMarquee);
 }
 
 // ── 이벤트 ──────────────────────────────────────────────────────────
@@ -780,6 +878,18 @@ function goHome() {
 document.addEventListener('click', (e) => {
   const hit = (sel) => e.target.closest(sel);
 
+  // 매물 카드면 먼저 집계를 보내고, 카드의 본래 동작(원문 링크·판매자 시트)은
+  // 그대로 이어간다 — return하지 않는다. 보조 버튼(휠·우클릭)은 여기 안 온다.
+  const card = hit('.p-card[data-item]');
+  if (card) sendClick(card.dataset.item);
+
+  if (hit('[data-drawer-open]')) { openDrawer(); return; }
+
+  if (hit('[data-drawer-close]') || e.target.id === 'drawerBackdrop') {
+    closeDrawer();
+    return;
+  }
+
   if (hit('[data-home]')) { goHome(); return; }
 
   if (hit('[data-browse]')) {
@@ -789,7 +899,11 @@ document.addEventListener('click', (e) => {
   }
 
   const cat = hit('[data-category]');
-  if (cat) { apply({ category: cat.dataset.category, brand: ALL }); return; }
+  if (cat) {
+    closeDrawer(); // 드로어에서 골랐으면 닫고 결과로 간다. 열려 있지 않으면 아무 일도 없다.
+    apply({ category: cat.dataset.category, brand: ALL });
+    return;
+  }
 
   const brand = hit('[data-brand]');
   if (brand) { apply({ brand: brand.dataset.brand }); return; }
@@ -833,7 +947,9 @@ document.addEventListener('click', (e) => {
 });
 
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !$('sellerPanel').hidden) closeSellerPanel();
+  if (e.key !== 'Escape') return;
+  if (!$('sellerPanel').hidden) { closeSellerPanel(); return; }
+  closeDrawer();
 });
 
 $('searchForm').addEventListener('submit', (e) => {
