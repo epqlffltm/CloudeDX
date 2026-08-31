@@ -15,6 +15,7 @@ import asyncio
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 
 from app.db import live_runs
 from app.domain.collection import Collection
@@ -179,6 +180,49 @@ async def test_concurrent_claims_let_exactly_one_through(session):
     results = await asyncio.gather(claim(), claim())
 
     assert sorted(results) == [False, True], f"동시 선점 결과가 {results} 였다"
+
+
+async def test_claim_failure_does_not_leak_500(client, monkeypatch):
+    """
+    선점이 DB 장애로 터져도 200 failed 다.
+
+    선점은 주 DB(writer)를 쓰는데 RDS 페일오버는 60~120초가 걸린다. 그동안 조회는
+    읽기 복제본으로 멀쩡히 돌아가므로, 부가 기능 하나 때문에 500을 내보낼 이유가
+    없다 — 이 엔드포인트의 계약은 "실패해도 200"이다.
+    """
+    calls = install_fake_crawler(monkeypatch)
+
+    async def boom(*args, **kwargs):
+        raise OperationalError("SELECT 1", {}, Exception("writer failover"))
+
+    monkeypatch.setattr(live_runs, "claim_live_search", boom)
+
+    response = await client.get("/api/live/search", params={"q": "샤넬 클래식"})
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "failed"
+    assert calls == [], "쿨다운을 확인하지 못했는데 외부 조회가 나갔다"
+
+
+async def test_claim_timeout_does_not_leak_500(client, monkeypatch):
+    """
+    선점이 제한시간을 넘겨도 매달리지 않고 200 failed 로 끝난다.
+
+    asyncio.timeout 은 TimeoutError 를 올린다. 라우터가 SQLAlchemyError 만 잡고
+    있으면 이 경로가 그대로 500이 된다.
+    """
+    calls = install_fake_crawler(monkeypatch)
+
+    async def slow(*args, **kwargs):
+        raise TimeoutError
+
+    monkeypatch.setattr(live_runs, "claim_live_search", slow)
+
+    response = await client.get("/api/live/search", params={"q": "샤넬 클래식"})
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "failed"
+    assert calls == []
 
 
 @pytest.mark.parametrize("cooldown", [0, -1])

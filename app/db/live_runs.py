@@ -35,12 +35,23 @@ INSERT ... ON CONFLICT DO UPDATE 에 WHERE 를 달아 **갱신에 성공한 요�
 미묘함에 맡기지 않으려는 것이고, 켜지 않은 기능 때문에 DB 를 왕복할 이유도 없다.
 """
 
+import asyncio
 import logging
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
+
+# 선점 한 문장에 거는 제한시간(초).
+#
+# 단일 행 upsert 라 정상이면 밀리초 단위다. 이 시간을 넘긴다는 것은 주 DB 가
+# 페일오버 중이거나(RDS Multi-AZ 는 60~120초) 커넥션 풀이 말랐다는 뜻인데, 그때
+# 기다려 봐야 얻을 것이 없다 — 화면은 이미 읽기 복제본에서 온 목록을 보여주고
+# 있고, 실시간 조회는 부가 기능이다. 빨리 포기하고 status="failed" 로 넘긴다.
+#
+# 설정으로 빼지 않은 이유: 튜닝할 값이 아니라 "정상이면 절대 안 걸리는" 상한이다.
+CLAIM_TIMEOUT_SECONDS = 2
 
 # 시도 시각을 선점하는 한 문장.
 #
@@ -79,25 +90,32 @@ async def claim_live_search(
 
     호출자는 이 함수가 커밋한다는 것을 알고 있어야 한다. 지금 호출자(live 라우터)는
     이 시점에 커밋할 것이 따로 없어서 문제가 되지 않는다.
+
+    **DB 장애는 여기서 삼키지 않는다.** 주 DB 페일오버 중이면 예외가 그대로 올라가고,
+    라우터가 그것을 status="failed" 로 바꾼다. 여기서 True 를 돌려주면 "쿨다운을
+    확인하지 못한 채 외부 조회를 하는" 상태가 되는데, DB 가 흔들리는 동안이야말로
+    남의 사이트에 요청을 쏟으면 안 되는 때다. 다만 CLAIM_TIMEOUT_SECONDS 를 넘겨
+    매달리지는 않는다.
     """
     if cooldown_seconds <= 0:
         # 쿨다운을 끈 구성. 이 경우 같은 검색어의 동시 호출을 막는 장치가 없다.
         return True
 
-    row = (
-        await session.execute(
-            _CLAIM,
-            {
-                "search_key": search_key,
-                "keyword": keyword,
-                "cooldown": float(cooldown_seconds),
-            },
-        )
-    ).first()
+    async with asyncio.timeout(CLAIM_TIMEOUT_SECONDS):
+        row = (
+            await session.execute(
+                _CLAIM,
+                {
+                    "search_key": search_key,
+                    "keyword": keyword,
+                    "cooldown": float(cooldown_seconds),
+                },
+            )
+        ).first()
 
-    # 통과했든 걸렸든 커밋한다. 걸린 쪽도 행 잠금을 잡았다 놓는 참여자라, 트랜잭션을
-    # 열어둔 채 크롤링·응답으로 넘어가면 그 시간만큼 잠금이 남는다.
-    await session.commit()
+        # 통과했든 걸렸든 커밋한다. 걸린 쪽도 행 잠금을 잡았다 놓는 참여자라,
+        # 트랜잭션을 열어둔 채 크롤링·응답으로 넘어가면 그 시간만큼 잠금이 남는다.
+        await session.commit()
 
     if row is None:
         logger.debug("실시간 조회 쿨다운: %s (%d초)", search_key, cooldown_seconds)

@@ -33,6 +33,7 @@ import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import (
@@ -78,12 +79,29 @@ async def live_search(
     # 이 검색어를 지금 쳐도 되는지 DB에 물어보고, 된다면 그 자리를 선점한다.
     # 성공·실패와 무관하게 시도 시각이 즉시 커밋되므로, 아래에서 무엇이 터지든
     # 같은 검색어가 곧바로 다시 나가지 않는다.
-    claimed = await live_runs.claim_live_search(
-        session,
-        search_key=live.search_key,
-        keyword=live.keyword,
-        cooldown_seconds=LIVE_SEARCH_COOLDOWN_SECONDS,
-    )
+    #
+    # **이 호출도 실패할 수 있다.** 선점은 주 DB(writer)를 쓰는데, RDS 페일오버는
+    # 60~120초가 걸린다. 그동안 조회는 읽기 복제본으로 멀쩡히 돌아가므로 화면에는
+    # 목록이 떠 있는데, 여기서 예외를 그대로 올리면 부가 기능 하나 때문에 500이
+    # 나간다. 이 엔드포인트의 계약은 "실패해도 200"이므로 여기서 닫는다.
+    try:
+        claimed = await live_runs.claim_live_search(
+            session,
+            search_key=live.search_key,
+            keyword=live.keyword,
+            cooldown_seconds=LIVE_SEARCH_COOLDOWN_SECONDS,
+        )
+    except (SQLAlchemyError, OSError, TimeoutError) as exc:
+        # 쿨다운을 확인하지 못했으면 조회하지 않는다. 확인 없이 나가면 DB가 흔들리는
+        # 동안 같은 검색어가 제한 없이 상대 사이트로 나갈 수 있다.
+        logger.warning(
+            "실시간 조회 선점 실패 ('%s'): %s: %s",
+            live.keyword,
+            type(exc).__name__,
+            exc,
+        )
+
+        return LiveSearchResponse(status="failed", keyword=live.keyword)
 
     if not claimed:
         # 기다리지 않고 즉시 돌아간다 — 화면은 이미 DB 결과를 보여주고 있으므로
