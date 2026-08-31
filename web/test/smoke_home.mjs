@@ -177,7 +177,7 @@ check("패널 열림", !panel.hidden);
 check("판매자 이름", panel.textContent.includes("해운대 빈티지"));
 check("사업자번호 노출", panel.textContent.includes("345-67-89012"));
 check("매물 건수", panel.textContent.includes("8건"));
-check("지도 렌더", !!panel.querySelector(".seller-map img"));
+check("약도 렌더 (SVG 생성 그림)", !!panel.querySelector(".seller-map svg"));
 check("검증 범위 고지", panel.textContent.includes("국세청 진위확인을 거치지 않았"));
 
 panel.querySelector("[data-seller-close]")?.dispatchEvent(new window.Event("click", { bubbles: true }));
