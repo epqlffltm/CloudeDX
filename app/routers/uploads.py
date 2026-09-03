@@ -28,13 +28,14 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import User, require_role
-from app.config import CLIENT_SELLER_ID, MAX_UPLOAD_BYTES, WRITE_TIMEOUT_SECONDS
+from app.config import MAX_UPLOAD_BYTES, WRITE_TIMEOUT_SECONDS
 from app.db import repository
 from app.db.engine import get_session
 from app.db.models import ItemRecord, Seller
 from app.domain.csv_import import REQUIRED_COLUMNS, parse_csv
 from app.domain.image_security import MAX_UPLOAD_BYTES as MAX_IMAGE_BYTES
 from app.domain.image_security import ImageRejected, sanitize_image
+from app.domain.ownership import owns_item
 from app.domain.sources import UPLOAD
 from app.domain.storage import (
     StorageUnavailable,
@@ -91,6 +92,54 @@ async def _read_body_capped(request: Request, limit: int) -> bytes:
     return b"".join(chunks)
 
 
+async def _reject_foreign_urls(report, session: AsyncSession, user: User) -> None:
+    """
+    report.items 중 **남의 매물 URL** 을 골라내 오류로 돌리고 목록에서 뺀다.
+
+    upsert 는 URL 이 같으면 덮어쓴다 — 그것이 크롤링 재발견을 처리하는 방식이라
+    바꿀 수 없다. 대신 그 앞에서, 이미 있는 URL 이 이 계정의 것인지 확인한다.
+    크롤링 매물 URL 을 CSV 에 적으면 여기서 걸린다. 없는 URL 은 새 매물이라 통과.
+
+    SELECT 와 upsert 사이에 크롤러가 같은 URL 을 넣는 틈은 있다. 시연 규모에서는
+    감수하고, 닫으려면 upsert 의 ON CONFLICT 에 WHERE 절을 붙이면 된다.
+    """
+    if not report.items:
+        return
+
+    urls = [item.url for item in report.items]
+    rows = (
+        await session.execute(
+            select(ItemRecord.url, ItemRecord.source, ItemRecord.seller_id).where(
+                ItemRecord.url.in_(urls)
+            )
+        )
+    ).all()
+
+    mine = user.seller_id
+    foreign = {
+        url
+        for url, source, seller_id in rows
+        if not owns_item(account_seller_id=mine, item_source=source, item_seller_id=seller_id)
+    }
+
+    if not foreign:
+        return
+
+    kept = []
+    for item in report.items:
+        if item.url in foreign:
+            # 행 번호는 여기까지 오지 않는다. 링크로 식별할 수 있으니 그것으로 알린다.
+            # add_error 는 "N행:" 접두어를 붙이므로 쓰지 않는다.
+            report.skipped += 1
+            report.accepted -= 1
+            if len(report.errors) < 50:
+                report.errors.append(f"다른 출처의 매물이라 수정할 수 없습니다: {item.url}")
+        else:
+            kept.append(item)
+
+    report.items = kept
+
+
 @router.post(
     "/csv",
     response_model=UploadResponse,
@@ -130,6 +179,19 @@ async def upload_csv(
 
     report = parse_csv(raw)
 
+    # 남의 매물 URL 은 저장 전에 걸러낸다. 이 조회는 읽기뿐이라 아래 쓰기
+    # 타임아웃 블록 밖에 둬도 되지만, DB 장애면 같은 503 이어야 하므로 같이 잡는다.
+    try:
+        async with asyncio.timeout(WRITE_TIMEOUT_SECONDS):
+            await _reject_foreign_urls(report, session, user)
+    except (TimeoutError, SQLAlchemyError, OSError) as exc:
+        logger.warning("CSV 업로드 실패 (소유 확인): %s", type(exc).__name__)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="지금은 저장할 수 없습니다. 잠시 후 다시 시도해 주세요.",
+            headers={"Retry-After": "30"},
+        ) from exc
+
     # 유효한 행이 하나도 없으면 400이다. 200에 accepted=0을 담아 주면 화면이
     # 성공으로 그리고, 사용자는 아무 일도 안 일어난 이유를 모른다.
     if report.accepted == 0:
@@ -158,19 +220,20 @@ async def upload_csv(
             # connect timeout 을 두 배로 기다린다(app/db/repository.py 설명 참고).
             saved = await repository.upsert_items(report.items, session=session)
 
-            # 이 배포의 client 계정이 특정 판매자로 선언돼 있으면(CLIENT_SELLER_ID),
-            # 방금 저장한 매물을 그 판매자와 연결한다. 이 연결이 있어야 화면에서
-            # 매물을 눌렀을 때 판매자 시트(연락처·약도)가 열린다.
+            # 이 계정이 판매자로 선언돼 있으면(User.seller_id), 방금 저장한 매물을
+            # 그 판매자와 연결한다. 이 연결이 있어야 화면에서 매물을 눌렀을 때
+            # 판매자 시트(연락처·약도)가 열리고, **이 계정이 나중에 이 매물을 고칠
+            # 수 있다** — 소유 검사가 seller_id 일치로만 판단하기 때문이다.
             #
             # upsert 계약(CrawledItem)에 seller_id를 넣지 않는 이유: 그 계약은
             # 크롤러와 공유하는 것이고, 판매자 연결은 업로드 경로만의 사실이다.
             # 저장 뒤 한 번의 UPDATE가 계약 확장보다 싸다.
-            if CLIENT_SELLER_ID:
-                if await session.get(Seller, CLIENT_SELLER_ID) is not None:
+            if user.seller_id:
+                if await session.get(Seller, user.seller_id) is not None:
                     await session.execute(
                         update(ItemRecord)
                         .where(ItemRecord.url.in_(urls), ItemRecord.source == UPLOAD)
-                        .values(seller_id=CLIENT_SELLER_ID)
+                        .values(seller_id=user.seller_id)
                     )
                     # upsert_items가 자체 커밋한 뒤라 이 UPDATE는 별도 트랜잭션이다.
                     # 여기서 커밋하지 않으면 세션이 닫히며 조용히 롤백된다.
@@ -179,7 +242,7 @@ async def upload_csv(
                     logger.warning(
                         "CLIENT_SELLER_ID=%d 판매자가 없어 연결을 건너뜁니다. "
                         "seed(--sellers-only)를 먼저 돌렸는지 확인하세요.",
-                        CLIENT_SELLER_ID,
+                        user.seller_id,
                     )
 
             hidden = (
@@ -283,20 +346,18 @@ async def upload_item_image(
             detail="해당 매물을 찾을 수 없습니다.",
         )
 
-    # 크롤링 매물은 건드리지 못한다.
-    #
-    # 원문 사이트의 매물이라 우리가 사진을 바꿀 권한이 없고, 바꾸면 그 사이트에
-    # 실제로 걸린 사진과 우리 화면이 달라진다. 사용자가 링크를 눌러 갔을 때
-    # 다른 물건처럼 보인다.
-    #
-    # 여기까지가 지금 계정 체계로 강제할 수 있는 전부다. 계정이 설정 기반이라
-    # (app/auth.py) client 계정과 sellers 행을 잇는 연결이 없어서, "내가 등록한
-    # 매물인가"까지는 확인하지 못한다. client 계정이 하나뿐인 지금은 차이가
-    # 없지만, 판매자별 계정을 만드는 순간 여기에 소유자 검사가 필요해진다.
-    if item.source != UPLOAD:
+    # 주인만 고친다(app/domain/ownership.py). 크롤링 매물은 원문 사이트의 것이라
+    # 누구의 것도 아니고, 업로드 매물은 같은 판매자로 선언된 계정만 고친다.
+    # 판매자 미지정 계정은 어느 매물의 주인도 아니다 — 판매자별 계정이 생겨도
+    # 이 줄은 그대로다.
+    if not owns_item(
+        account_seller_id=user.seller_id,
+        item_source=item.source,
+        item_seller_id=item.seller_id,
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="기업고객이 등록한 매물만 수정할 수 있습니다.",
+            detail="이 계정이 등록한 매물만 수정할 수 있습니다.",
         )
 
     # 검증과 재인코딩. 원본 바이트는 여기서 버려지고 픽셀만 새 파일로 옮겨진다.

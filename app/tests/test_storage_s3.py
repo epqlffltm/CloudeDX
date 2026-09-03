@@ -19,6 +19,7 @@ import pytest
 from PIL import Image
 
 from app.domain import storage
+from app.tests.sellers import declare_client_seller
 
 
 class _FakeS3:
@@ -187,7 +188,9 @@ def _png_bytes() -> bytes:
 
 
 @pytest.fixture
-async def client_session(client):
+async def client_session(client, session, monkeypatch):
+    # 사진은 주인만 붙일 수 있다. client 계정을 판매자 하나로 선언해 두고 로그인한다.
+    await declare_client_seller(session, monkeypatch)
     response = await client.post(
         "/api/auth/login",
         json={"username": "client", "password": "client1234"},

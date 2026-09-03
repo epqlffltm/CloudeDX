@@ -33,6 +33,7 @@ from app.config import (
     ADMIN_PASSWORD,
     ADMIN_USERNAME,
     CLIENT_PASSWORD,
+    CLIENT_SELLER_ID,
     CLIENT_USERNAME,
     COOKIE_SECURE,
     SESSION_MAX_AGE_SECONDS,
@@ -52,10 +53,18 @@ _PBKDF2_ROUNDS = 200_000
 
 @dataclass(frozen=True)
 class User:
-    """로그인한 사용자. 라우터는 이 모양만 알면 된다."""
+    """
+    로그인한 사용자. 라우터는 이 모양만 알면 된다.
+
+    seller_id 는 "이 계정은 어느 판매자인가". 매물을 고쳐도 되는지는 이 값으로만
+    판단한다(app/domain/ownership.py). 지금은 설정(CLIENT_SELLER_ID)에서 오지만,
+    users 테이블이 생기면 그 행의 컬럼에서 온다 — 라우터는 어느 쪽이든 모른다.
+    admin 과 판매자 미지정 client 는 None 이고, None 은 어떤 매물의 주인도 아니다.
+    """
 
     username: str
     role: Role
+    seller_id: int | None = None
 
     @property
     def display_role(self) -> str:
@@ -103,7 +112,24 @@ def authenticate(username: str, password: str) -> User | None:
     if not account.verify(password):
         return None
 
-    return User(username=account.username, role=account.role)
+    return _build_user(account.username, account.role)
+
+
+def _seller_for(role: Role) -> int | None:
+    """
+    역할 → 판매자 id. users 테이블이 생기면 여기가 조회로 바뀐다.
+
+    모듈 전역 CLIENT_SELLER_ID 를 호출 시점에 읽는다 — 테스트가 monkeypatch 로
+    바꿔 끼울 수 있어야 해서다. 계정 목록(_ACCOUNTS)처럼 임포트 시점에 굳히면 안 된다.
+    """
+    if role != "client":
+        return None
+
+    return CLIENT_SELLER_ID or None
+
+
+def _build_user(username: str, role: Role) -> User:
+    return User(username=username, role=role, seller_id=_seller_for(role))
 
 
 # --------------------------------------------------------------------------
@@ -183,7 +209,9 @@ def _parse_session(raw: str | None) -> User | None:
     if role not in ("admin", "client"):
         return None
 
-    return User(username=username, role=role)  # type: ignore[arg-type]
+    # 판매자 id 는 쿠키에 싣지 않는다. 쿠키에 넣으면 CLIENT_SELLER_ID 를 바꿔도
+    # 기존 세션이 옛 판매자로 남는다. 매 요청 설정(나중엔 DB)에서 다시 본다.
+    return _build_user(username, role)  # type: ignore[arg-type]
 
 
 # --------------------------------------------------------------------------
