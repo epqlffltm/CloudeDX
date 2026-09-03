@@ -32,13 +32,15 @@ import asyncio
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import (
     LIVE_SEARCH_COOLDOWN_SECONDS,
     LIVE_SEARCH_MAX_PAGES,
+    LIVE_SEARCH_RATE_LIMIT,
+    LIVE_SEARCH_RATE_WINDOW_SECONDS,
     LIVE_SEARCH_TIMEOUT_SECONDS,
 )
 from app.crawler.bunjang.config import BunjangCrawlerConfig
@@ -46,11 +48,16 @@ from app.crawler.bunjang.crawler import BunjangCrawler
 from app.db import live_runs, repository
 from app.db.engine import get_session
 from app.domain.live_search import build_live_query
+from app.ratelimit import SlidingWindowLimiter, client_ip
 from app.schemas.live import LiveSearchResponse
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/live", tags=["live"])
+
+# IP 마다 창 안의 호출 횟수. 쿨다운(검색어 기준)과 짝이다 — 쿨다운은 같은 검색어의
+# 연타를, 이것은 검색어를 바꿔가며 부르는 것을 막는다.
+search_calls = SlidingWindowLimiter(LIVE_SEARCH_RATE_LIMIT, LIVE_SEARCH_RATE_WINDOW_SECONDS)
 
 
 @router.get(
@@ -61,6 +68,7 @@ router = APIRouter(prefix="/live", tags=["live"])
     summary="검색어로 번개장터를 즉시 조회해 저장",
 )
 async def live_search(
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
     q: Annotated[str, Query(description="검색어. 화면 검색창에 입력한 값 그대로")],
 ):
@@ -75,6 +83,14 @@ async def live_search(
 
     if live is None:
         return LiveSearchResponse(status="ignored")
+
+    # IP 기준 상한. DB 를 보기 **전에** 건다 — 막을 요청 때문에 커넥션을 쓸 이유가 없다.
+    # 429 가 아니라 200 + status="limited" 인 이유는 이 엔드포인트의 계약이
+    # "실패해도 200" 이라서다(위 docstring). 화면은 saved 외에는 조용히 넘어간다.
+    ip = client_ip(request)
+    if search_calls.hit(ip) is not None:
+        logger.info("실시간 조회 제한 (%s): '%s'", ip, live.keyword)
+        return LiveSearchResponse(status="limited", keyword=live.keyword)
 
     # 이 검색어를 지금 쳐도 되는지 DB에 물어보고, 된다면 그 자리를 선점한다.
     # 성공·실패와 무관하게 시도 시각이 즉시 커밋되므로, 아래에서 무엇이 터지든

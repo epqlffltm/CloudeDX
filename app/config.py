@@ -298,6 +298,27 @@ SESSION_MAX_AGE_SECONDS = _int_env("SESSION_MAX_AGE_SECONDS", 12 * 60 * 60, mini
 # 틀린 값이 된다. 쿠키 보안 속성을 그런 값에 걸어두고 싶지 않다.
 COOKIE_SECURE = _bool_env("COOKIE_SECURE", IS_PRODUCTION)
 
+# ---------------------------------------------------------------------------
+# 호출 횟수 제한 (app/ratelimit.py)
+# ---------------------------------------------------------------------------
+#
+# 전부 프로세스 안 메모리로 센다. 파드가 늘면 그만큼 느슨해지지만 "무제한"은 아니다.
+# 파드를 가로지르는 제한은 WAF rate-based rule 이 맡는다. 값이 0 이면 그 제한은 꺼진다.
+
+# X-Forwarded-For 를 믿을지. ALB 뒤에서는 request.client 가 전부 ALB IP 라 이게
+# 없으면 사용자 전원이 한 명으로 묶인다. 로컬에서 켜면 헤더 한 줄로 제한을 피한다.
+TRUST_PROXY_HEADERS = _bool_env("TRUST_PROXY_HEADERS", IS_PRODUCTION)
+
+# 같은 IP 가 로그인에 몇 번 실패하면 잠글지, 그리고 몇 초 동안 잠글지.
+# 5회/5분이면 사람이 오타를 내는 수준은 걸리지 않고, 기계가 대입하는 속도는 막힌다.
+LOGIN_MAX_FAILURES = _int_env("LOGIN_MAX_FAILURES", 5, minimum=0)
+LOGIN_LOCKOUT_SECONDS = _int_env("LOGIN_LOCKOUT_SECONDS", 300, minimum=1)
+
+# 같은 IP 가 실시간 조회를 창(초) 안에 몇 번까지 부를 수 있는지.
+# 검색어별 쿨다운은 "같은 검색어"만 막는다. 검색어를 바꿔가며 부르는 것은 여기서 막는다.
+LIVE_SEARCH_RATE_LIMIT = _int_env("LIVE_SEARCH_RATE_LIMIT", 10, minimum=0)
+LIVE_SEARCH_RATE_WINDOW_SECONDS = _int_env("LIVE_SEARCH_RATE_WINDOW_SECONDS", 60, minimum=1)
+
 # CSV 업로드 한 번에 받을 최대 바이트. 기본 5MB.
 # 본문을 읽는 도중에 이 선을 넘으면 그 자리에서 끊는다 — 다 읽은 뒤에 재고 거절하면
 # 막으려던 파일이 이미 메모리에 올라와 있다(app/routers/uploads.py 참고).

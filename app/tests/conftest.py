@@ -42,6 +42,11 @@ TEST_DATABASE_URL = os.getenv(
 # DATABASE_URL을 읽고, app.db.engine이 그 값으로 엔진을 만들기 때문이다.
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 os.environ["ENABLE_CRAWLER"] = "false"
+# IP 기준 호출 제한은 끈다. 테스트는 전부 같은 클라이언트 주소라, 켜 두면 파일을
+# 넘나들며 합산돼 뒤쪽 테스트가 이유 없이 막힌다. 제한 자체는 test_ratelimit.py 가
+# 리미터를 직접 주입해서 검증한다.
+os.environ["LIVE_SEARCH_RATE_LIMIT"] = "0"
+os.environ["LOGIN_MAX_FAILURES"] = "0"
 
 
 @pytest.fixture(scope="session")

@@ -12,7 +12,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-LiveStatus = Literal["saved", "cooldown", "ignored", "failed"]
+LiveStatus = Literal["saved", "cooldown", "limited", "ignored", "failed"]
 
 
 class LiveSearchResponse(BaseModel):
@@ -28,6 +28,7 @@ class LiveSearchResponse(BaseModel):
         description=(
             "saved: 조회해서 저장했다 / "
             "cooldown: 같은 검색어를 최근에 이미 조회했다 (동시 요청도 여기로 온다) / "
+            "limited: 이 IP 가 창 안에 너무 많이 불렀다 / "
             "ignored: 실시간 조회를 걸 검색어가 아니다 (너무 짧거나 너무 김) / "
             "failed: 번개장터 조회에 실패했다"
         )

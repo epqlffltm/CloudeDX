@@ -235,3 +235,21 @@ async def test_claim_skips_database_when_disabled(session, cooldown):
     rows = (await session.execute(text("SELECT count(*) FROM live_search_runs"))).scalar()
 
     assert rows == 0
+
+
+async def test_ip_rate_limit_blocks_different_keywords(client, monkeypatch):
+    """검색어를 바꿔가며 불러도 IP 기준 상한에 걸린다. 쿨다운은 이걸 못 막는다."""
+    from app.ratelimit import SlidingWindowLimiter
+
+    calls = install_fake_crawler(monkeypatch)
+    monkeypatch.setattr(live_router, "search_calls", SlidingWindowLimiter(2, 60))
+
+    a = await client.get("/api/live/search", params={"q": "샤넬 클래식"})
+    b = await client.get("/api/live/search", params={"q": "루이비통 네버풀"})
+    c = await client.get("/api/live/search", params={"q": "구찌 마몬트"})
+
+    assert a.json()["status"] == "saved"
+    assert b.json()["status"] == "saved"
+    assert c.json()["status"] == "limited"
+    # 막힌 요청은 외부 사이트로 나가지 않는다.
+    assert len(calls) == 2
