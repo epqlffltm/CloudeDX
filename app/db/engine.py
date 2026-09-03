@@ -18,6 +18,7 @@ create_all()로 테이블을 만들었는데, create_all은 없는 테이블만 
 import asyncio
 import logging
 import re
+import ssl
 import time
 from collections.abc import AsyncGenerator
 
@@ -33,7 +34,14 @@ from sqlalchemy.ext.asyncio import (
 
 # app.config가 load_dotenv()를 호출하므로, 이 모듈을 임포트하는 것만으로 .env가 반영된다.
 # 예전에는 호출부가 임포트 순서를 지켜야 했다.
-from app.config import DATABASE_RO_URL, DATABASE_URL, READ_FALLBACK_COOLDOWN_SECONDS
+from app.config import (
+    DATABASE_RO_URL,
+    DATABASE_SSL_MODE,
+    DATABASE_SSL_ROOT_CERT,
+    DATABASE_URL,
+    IS_PRODUCTION,
+    READ_FALLBACK_COOLDOWN_SECONDS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +78,48 @@ def mask_url(url: str) -> str:
     return _PASSWORD_PATTERN.sub(r"\1***\2", url)
 
 
+def build_connect_args(
+    *,
+    ssl_mode: str = DATABASE_SSL_MODE,
+    root_cert: str = DATABASE_SSL_ROOT_CERT,
+    timeout: int = 10,
+) -> dict:
+    """
+    asyncpg.connect 에 넘길 인자. 쓰기·읽기 엔진이 같은 것을 쓴다.
+
+    timeout: DB가 죽어있을 때 OS 기본 타임아웃까지 매달려 있지 않도록 짧게 끊는다.
+
+    ssl: 루트 CA 파일이 없으면 sslmode 문자열을 그대로 넘긴다 — asyncpg 가
+         'require' 이상이면 TLS 를 강제하고 'verify-full' 이면 시스템 CA 로
+         인증서와 호스트명을 본다.
+         루트 CA 파일이 있으면 SSLContext 를 직접 만든다. asyncpg 의 connect() 는
+         sslrootcert 를 인자로 받지 않고(DSN 쿼리나 PGSSLROOTCERT 로만), SQLAlchemy
+         는 URL 을 분해해서 넘기므로 그 경로가 막혀 있다. 컨텍스트로 주면
+         'verify-full' 과 같은 검증이고, 'verify-ca' 면 호스트명 검사만 끈다.
+    """
+    args: dict = {"timeout": timeout}
+
+    if root_cert and ssl_mode.startswith("verify"):
+        context = ssl.create_default_context(cafile=root_cert)
+        context.check_hostname = ssl_mode == "verify-full"
+        args["ssl"] = context
+    else:
+        args["ssl"] = ssl_mode
+
+    return args
+
+
+_CONNECT_ARGS = build_connect_args()
+
+# TLS 를 강제하지 않은 채 운영으로 떴다는 것을 로그 첫 줄에 남긴다. 기동은 막지
+# 않는다(EC2 자체 postgres 경로가 있다). RDS 라면 DATABASE_SSL_MODE=require 를 준다.
+if IS_PRODUCTION and DATABASE_SSL_MODE in ("disable", "allow", "prefer"):
+    logger.warning(
+        "DATABASE_SSL_MODE=%s 로 운영 기동 — DB 연결이 평문일 수 있습니다. "
+        "RDS 라면 require 이상으로 올리세요.",
+        DATABASE_SSL_MODE,
+    )
+
 engine = create_async_engine(
     DATABASE_URL,
     echo=False,
@@ -78,8 +128,7 @@ engine = create_async_engine(
     # 30분 넘은 커넥션은 폐기해서 새로 맺는다.
     pool_pre_ping=True,
     pool_recycle=1800,
-    # DB가 죽어있을 때 OS 기본 타임아웃까지 매달려 있지 않도록 짧게 끊는다.
-    connect_args={"timeout": 10},
+    connect_args=_CONNECT_ARGS,
 )
 async_session = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -99,7 +148,7 @@ else:
         echo=False,
         pool_pre_ping=True,
         pool_recycle=1800,
-        connect_args={"timeout": 10},
+        connect_args=_CONNECT_ARGS,
     )
     read_session = async_sessionmaker(read_engine, expire_on_commit=False)
     logger.info("읽기 복제본 사용: %s", mask_url(DATABASE_RO_URL))

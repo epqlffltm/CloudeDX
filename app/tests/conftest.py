@@ -47,6 +47,8 @@ os.environ["ENABLE_CRAWLER"] = "false"
 # 리미터를 직접 주입해서 검증한다.
 os.environ["LIVE_SEARCH_RATE_LIMIT"] = "0"
 os.environ["LOGIN_MAX_FAILURES"] = "0"
+os.environ["CLICK_RATE_LIMIT"] = "0"
+os.environ["CLICK_NEW_SESSION_LIMIT"] = "0"
 
 
 @pytest.fixture(scope="session")

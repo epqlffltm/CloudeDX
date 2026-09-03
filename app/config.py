@@ -84,31 +84,60 @@ APP_ENV = os.getenv("APP_ENV", "local").strip().lower() or "local"
 IS_PRODUCTION = APP_ENV == "production"
 
 
+# 기본값으로 떨어진 비밀값의 이름. require_secrets() 가 본다.
+_DEFAULTED_SECRETS: dict[str, str] = {}
+
+
 def _secret_env(name: str, local_default: str, *, hint: str = "") -> str:
     """
-    비밀값을 읽는다. 운영에서 비어 있으면 기동을 거부한다.
+    비밀값을 읽는다. 비어 있으면 기본값을 쓰되, **그 사실을 기록한다.**
 
-    로컬/CI에서는 기본값으로 조용히 진행한다. 운영에서 같은 관용을 베풀면 안 되는
-    이유는 증상이 늦게 나타나기 때문이다 — SESSION_SECRET 이 파드마다 다르면
-    "로그인이 됐다 안 됐다 하는" 버그로 보이고, 파드 3개에 흩어져 있으면 재현조차
-    어렵다. 기본 비밀번호로 뜬 서비스는 아예 아무 증상도 없다.
+    여기서 바로 기동을 거부하지 않는 이유: 이 모듈은 웹·크롤러·집계·백업이 전부
+    임포트한다. 그런데 ADMIN_PASSWORD 와 SESSION_SECRET 은 웹만 쓴다. 여기서
+    거부하면 크롤러 파드에도 관리자 비밀번호를 넣어 줘야 뜬다 — 크롤러 하나가
+    뚫리면 관리자 비밀번호까지 같이 넘어가는 구조가 그래서 생겼다.
 
-    RuntimeError 를 여기서 올리면 프로세스가 임포트 단계에서 죽는다. 쿠버네티스는
-    CrashLoopBackOff 로 보여주고 로그에 이유가 남는다 — 잘못된 설정으로 트래픽을
-    받는 것보다 낫다.
+    거부는 그 값을 **실제로 쓰는 모듈**이 임포트될 때 한다(require_secrets).
+    app/auth.py 가 그 자리다. 웹 파드는 여전히 CrashLoopBackOff 로 죽고,
+    크롤러 파드는 DATABASE_URL 만으로 뜬다.
     """
     raw = os.getenv(name, "").strip()
 
     if raw:
         return raw
 
-    if IS_PRODUCTION:
-        raise RuntimeError(
-            f"APP_ENV=production 인데 {name} 이 비어 있습니다. "
-            f"기동을 중단합니다.{' ' + hint if hint else ''}"
-        )
-
+    _DEFAULTED_SECRETS[name] = hint
     return local_default
+
+
+def require_secrets(*names: str) -> None:
+    """
+    운영에서 이 비밀값들이 기본값이면 기동을 거부한다.
+
+    값을 실제로 쓰는 모듈의 임포트 시점에 부른다. RuntimeError 를 임포트 단계에서
+    올리면 프로세스가 죽고, 쿠버네티스는 CrashLoopBackOff 로 보여주고 로그 첫 줄에
+    이유가 남는다 — 기본 비밀번호로 트래픽을 받는 것보다 낫다. 그 서비스는 아무
+    증상도 없기 때문이다.
+
+    로컬/CI 에서는 기본값으로 조용히 진행한다.
+    """
+    if not IS_PRODUCTION:
+        return
+
+    missing = [name for name in names if name in _DEFAULTED_SECRETS]
+    if not missing:
+        return
+
+    lines = []
+    for name in missing:
+        hint = _DEFAULTED_SECRETS[name]
+        lines.append(f"{name}{' (' + hint + ')' if hint else ''}")
+
+    raise RuntimeError(
+        "APP_ENV=production 인데 다음 비밀값이 비어 있습니다: "
+        + ", ".join(lines)
+        + ". 기동을 중단합니다."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -130,6 +159,30 @@ DATABASE_URL = os.getenv(
 # 않고 쓰기 엔진을 그대로 재사용한다(app/db/engine.py). 커넥션 풀이 두 벌 생기는
 # 것을 막기 위해서다.
 DATABASE_RO_URL = os.getenv("DATABASE_RO_URL", "").strip() or DATABASE_URL
+
+# DB 연결 암호화. asyncpg 의 sslmode 문자열을 그대로 쓴다.
+#
+#   disable      평문. 쓸 일 없다.
+#   prefer       서버가 되면 TLS, 안 되면 평문. **기본값.** 로컬 도커 postgres 와
+#                EC2 에 직접 올린 postgres 는 TLS 를 안 켜 둔 경우가 많아, 이게
+#                아니면 기동 자체가 안 된다. "제대로 도는 것"이 먼저다.
+#   require      TLS 아니면 거부. 상대가 누군지는 안 본다. RDS 는 항상 TLS 를
+#                받아 주므로 RDS 배포(gitops ConfigMap)에서는 이걸 명시한다 —
+#                이걸로 "봉투 없이 오가는" 상태는 끝난다.
+#   verify-full  TLS + 서버 인증서가 신뢰하는 CA 것이고 호스트명이 일치해야 한다.
+#                RDS 루트 CA 번들을 파드에 마운트하고 DATABASE_SSL_ROOT_CERT 에
+#                경로를 줘야 한다. 없으면 시스템 CA 로 검증해서 RDS 는 실패한다.
+#
+# 운영(APP_ENV=production)에서 prefer 로 뜨면 기동 로그에 경고를 남긴다. 기동을
+# 막지 않는 이유는 위 EC2 경로 때문이고, 경고를 남기는 이유는 RDS 로 옮기고 나서
+# 이 값을 올리는 것을 잊지 않게 하기 위해서다(app/db/engine.py).
+#
+# 잘못된 값이면 asyncpg 가 연결 시 ValueError 로 알려준다. 여기서 검사하지 않는
+# 이유는 목록을 두 벌 관리하고 싶지 않아서다.
+DATABASE_SSL_MODE = os.getenv("DATABASE_SSL_MODE", "").strip().lower() or "prefer"
+
+# verify-ca / verify-full 에서 쓸 루트 CA 파일. 비우면 시스템 CA.
+DATABASE_SSL_ROOT_CERT = os.getenv("DATABASE_SSL_ROOT_CERT", "").strip()
 
 # 읽기 복제본 접속에 실패했을 때, 다시 시도하기까지 쓰기 엔진으로 보낼 시간(초).
 #
@@ -318,6 +371,17 @@ LOGIN_LOCKOUT_SECONDS = _int_env("LOGIN_LOCKOUT_SECONDS", 300, minimum=1)
 # 검색어별 쿨다운은 "같은 검색어"만 막는다. 검색어를 바꿔가며 부르는 것은 여기서 막는다.
 LIVE_SEARCH_RATE_LIMIT = _int_env("LIVE_SEARCH_RATE_LIMIT", 10, minimum=0)
 LIVE_SEARCH_RATE_WINDOW_SECONDS = _int_env("LIVE_SEARCH_RATE_WINDOW_SECONDS", 60, minimum=1)
+
+# 클릭 이벤트. 같은 세션·매물·30분 버킷은 DB 유니크가 이미 한 번만 세지만,
+# 쿠키를 안 보내는 봇은 매 요청 새 세션이라 그 검사를 지나간다. 그래서
+#   (a) IP 당 분당 클릭 수 상한 — 사람은 초당 한 번도 못 누른다
+#   (b) IP 당 시간당 **새 세션 쿠키 발급** 상한 — 정상 방문자는 평생 하나 받는다
+# (b) 가 핵심이다. 쿠키를 버리는 봇은 여기서 끊기고, 부풀리기보다 더 아픈
+# "행이 무한히 쌓이는" 문제도 같이 막힌다.
+CLICK_RATE_LIMIT = _int_env("CLICK_RATE_LIMIT", 60, minimum=0)
+CLICK_RATE_WINDOW_SECONDS = _int_env("CLICK_RATE_WINDOW_SECONDS", 60, minimum=1)
+CLICK_NEW_SESSION_LIMIT = _int_env("CLICK_NEW_SESSION_LIMIT", 30, minimum=0)
+CLICK_NEW_SESSION_WINDOW_SECONDS = _int_env("CLICK_NEW_SESSION_WINDOW_SECONDS", 3600, minimum=1)
 
 # CSV 업로드 한 번에 받을 최대 바이트. 기본 5MB.
 # 본문을 읽는 도중에 이 선을 넘으면 그 자리에서 끊는다 — 다 읽은 뒤에 재고 거절하면

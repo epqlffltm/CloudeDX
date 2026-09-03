@@ -61,6 +61,13 @@ S3 설정이 **틀린** 경우(역할 누락·버킷 이름 오타·리전 불�
 | `ADMIN_USERNAME` / `CLIENT_USERNAME` | `admin` / `client` | 계정 아이디를 바꾸고 싶을 때만 |
 | `FORWARDED_ALLOW_IPS` | `*` | ALB 뒤에서는 VPC 대역(예: `10.0.0.0/16`)으로 좁힌다 — X-Forwarded-For 위조 방지. nginx 제거로 체인이 클라이언트→ALB→uvicorn 한 단계다 |
 | `CLIENT_SELLER_ID` | `0` (연결 안 함) | client 계정이 올린 매물을 연결할 판매자 id. 시연에서만 의미 있는 임시 다리 — 지정한 판매자가 없으면 경고만 남기고 업로드는 성공한다 |
+| `DATABASE_SSL_MODE` | `prefer` | DB 연결 암호화. `require`(TLS 강제) / `verify-full`(CA·호스트명 검증). **RDS 는 `require` 이상** — 운영에서 `prefer` 로 뜨면 기동 로그에 경고 |
+| `DATABASE_SSL_ROOT_CERT` | 비움 | `verify-*` 에서 쓸 루트 CA 파일 경로 (RDS 번들). 비우면 시스템 CA |
+| `TRUST_PROXY_HEADERS` | `APP_ENV` 따름 | ALB 뒤에서 X-Forwarded-For 로 사용자 IP 를 구분. 호출 제한(로그인·실시간 검색)이 이 값을 쓴다 |
+| `LOGIN_MAX_FAILURES` / `LOGIN_LOCKOUT_SECONDS` | `5` / `300` | 같은 IP 로그인 실패 잠금. `0` 이면 끔 |
+| `LIVE_SEARCH_RATE_LIMIT` / `LIVE_SEARCH_RATE_WINDOW_SECONDS` | `10` / `60` | 같은 IP 실시간 검색 호출 상한. `0` 이면 끔 |
+| `CLICK_RATE_LIMIT` / `CLICK_RATE_WINDOW_SECONDS` | `60` / `60` | 같은 IP 클릭 이벤트 상한. `0` 이면 끔 |
+| `CLICK_NEW_SESSION_LIMIT` / `CLICK_NEW_SESSION_WINDOW_SECONDS` | `30` / `3600` | 같은 IP 에 새 클릭 세션 쿠키를 발급하는 상한. 쿠키를 버리는 봇이 세션 중복제거를 우회하는 길을 막는다. `0` 이면 끔 |
 
 지정하지 않는 변수: `UPLOAD_DIR` — S3 모드에서는 안 쓴다. `ADMIN_MEMO_PATH` —
 **폐기됨** (메모가 DB 테이블 `admin_memo`로 옮겨져서 변수 자체가 사라졌다).

@@ -184,7 +184,9 @@ async def test_popular_puts_direct_first_then_fills_with_crawled(client, session
     titles = [it["title"] for it in body["items"]]
 
     assert titles == [
-        "샤넬 클래식 플랩 직접1", "샤넬 클래식 플랩 크롤2", "샤넬 클래식 플랩 크롤1",
+        "샤넬 클래식 플랩 직접1",
+        "샤넬 클래식 플랩 크롤2",
+        "샤넬 클래식 플랩 크롤1",
     ]
     assert body["count"] == 3
     assert body["has_next"] is False
@@ -208,8 +210,16 @@ async def test_popular_keeps_listing_contract(client, session):
     listing = (await client.get("/api/products/popular")).json()["items"][0]
     assert "click_count" not in listing
     assert set(listing) == {
-        "id", "source", "title", "brand", "category", "price",
-        "image_url", "item_url", "seller_id", "is_authenticated",
+        "id",
+        "source",
+        "title",
+        "brand",
+        "category",
+        "price",
+        "image_url",
+        "item_url",
+        "seller_id",
+        "is_authenticated",
     }
 
 
@@ -219,3 +229,60 @@ async def test_popular_path_does_not_shadow_item_detail(client, session):
 
     assert (await client.get("/api/products/1")).status_code == 200
     assert (await client.get("/api/products/popular")).status_code == 200
+
+
+async def test_click_without_cookie_is_limited_after_new_session_quota(client, monkeypatch):
+    """쿠키를 버리고 오는 봇 — 세션 발급 상한 뒤로는 세지도 굽지도 않는다."""
+    from app.ratelimit import SlidingWindowLimiter
+    from app.routers import events as events_router
+
+    monkeypatch.setattr(events_router, "new_sessions", SlidingWindowLimiter(2, 3600))
+    await repository.upsert_items([make_item("https://ex.com/1")])
+
+    statuses = []
+    for _ in range(3):
+        client.cookies.clear()
+        res = await client.post("/api/events/click", json={"item_id": 1})
+        assert res.status_code == 202
+        statuses.append((res.json()["status"], "set-cookie" in res.headers))
+
+    assert statuses[0] == ("counted", True)
+    assert statuses[1] == ("counted", True)
+    assert statuses[2] == ("limited", False)
+
+
+async def test_click_with_cookie_is_not_charged_to_new_session_quota(client, monkeypatch):
+    """쿠키를 갖고 오는 정상 방문자는 세션 발급 상한과 무관하다."""
+    from app.ratelimit import SlidingWindowLimiter
+    from app.routers import events as events_router
+
+    monkeypatch.setattr(events_router, "new_sessions", SlidingWindowLimiter(1, 3600))
+    await repository.upsert_items([make_item("https://ex.com/1"), make_item("https://ex.com/2")])
+
+    first = await client.post("/api/events/click", json={"item_id": 1})
+    assert first.json()["status"] == "counted"
+
+    # 쿠키를 들고 다시 — 발급 한도(1)를 이미 썼지만 발급이 아니므로 통과한다.
+    second = await client.post("/api/events/click", json={"item_id": 2})
+    assert second.json()["status"] == "counted"
+
+
+async def test_click_rate_limit_per_ip(client, monkeypatch):
+    from app.ratelimit import SlidingWindowLimiter
+    from app.routers import events as events_router
+
+    monkeypatch.setattr(events_router, "click_calls", SlidingWindowLimiter(2, 60))
+    await repository.upsert_items(
+        [
+            make_item("https://ex.com/1"),
+            make_item("https://ex.com/2"),
+            make_item("https://ex.com/3"),
+        ]
+    )
+
+    a = await client.post("/api/events/click", json={"item_id": 1})
+    b = await client.post("/api/events/click", json={"item_id": 2})
+    c = await client.post("/api/events/click", json={"item_id": 3})
+    assert a.json()["status"] == "counted"
+    assert b.json()["status"] == "counted"
+    assert c.json()["status"] == "limited"

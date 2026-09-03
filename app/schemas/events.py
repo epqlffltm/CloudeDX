@@ -23,6 +23,7 @@ class ClickEventAccepted(BaseModel):
     """
     counted   새로 센 클릭
     duplicate 같은 세션이 같은 매물을 30분 안에 다시 누름 — 세지 않았다
+    limited   이 IP 가 너무 자주 눌렀거나 새 세션을 너무 많이 만들었다 — 세지 않았다
     """
 
-    status: Literal["counted", "duplicate"]
+    status: Literal["counted", "duplicate", "limited"]

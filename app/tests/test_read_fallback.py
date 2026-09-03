@@ -61,9 +61,22 @@ class TestSecretEnv:
     """
     운영에서 비밀값이 비어 있으면 기동을 거부한다.
 
+    두 단계다. _secret_env 는 값을 읽고 기본값으로 떨어졌다는 사실만 기록하며,
+    require_secrets 가 그 기록을 보고 운영이면 거부한다. 거부를 config 임포트가
+    아니라 값을 쓰는 모듈(app/auth.py)이 하게 만든 이유는, 크롤러가 관리자
+    비밀번호 없이도 떠야 하기 때문이다(test_secret_scope.py).
+
     app.config 는 임포트 시점에 값을 확정하므로, 모듈을 다시 임포트하는 대신
     헬퍼 함수를 직접 부른다. 검증 대상은 분기 규칙이지 임포트 부작용이 아니다.
     """
+
+    @pytest.fixture(autouse=True)
+    def _clean_record(self):
+        from app import config
+
+        config._DEFAULTED_SECRETS.pop("TEST_SECRET", None)
+        yield
+        config._DEFAULTED_SECRETS.pop("TEST_SECRET", None)
 
     def test_로컬에서는_기본값으로_진행한다(self, monkeypatch):
         from app import config
@@ -72,6 +85,7 @@ class TestSecretEnv:
         monkeypatch.setattr(config, "IS_PRODUCTION", False)
 
         assert config._secret_env("TEST_SECRET", "local-default") == "local-default"
+        config.require_secrets("TEST_SECRET")  # 로컬은 조용히 지나간다
 
     def test_운영에서_비어있으면_기동을_거부한다(self, monkeypatch):
         from app import config
@@ -79,8 +93,12 @@ class TestSecretEnv:
         monkeypatch.delenv("TEST_SECRET", raising=False)
         monkeypatch.setattr(config, "IS_PRODUCTION", True)
 
+        # 읽는 것만으로는 죽지 않는다 — 크롤러가 이 경로다.
+        assert config._secret_env("TEST_SECRET", "local-default") == "local-default"
+
+        # 요구하는 순간 죽는다 — 웹이 이 경로다.
         with pytest.raises(RuntimeError, match="TEST_SECRET"):
-            config._secret_env("TEST_SECRET", "local-default")
+            config.require_secrets("TEST_SECRET")
 
     def test_운영에서도_값이_있으면_통과한다(self, monkeypatch):
         from app import config
@@ -89,6 +107,7 @@ class TestSecretEnv:
         monkeypatch.setattr(config, "IS_PRODUCTION", True)
 
         assert config._secret_env("TEST_SECRET", "local-default") == "from-secrets-manager"
+        config.require_secrets("TEST_SECRET")
 
     def test_공백만_있는_값은_비어있는_것으로_본다(self, monkeypatch):
         """쿠버네티스 Secret 이 빈 문자열로 주입되는 사고를 잡는다."""
@@ -97,8 +116,19 @@ class TestSecretEnv:
         monkeypatch.setenv("TEST_SECRET", "   ")
         monkeypatch.setattr(config, "IS_PRODUCTION", True)
 
-        with pytest.raises(RuntimeError):
-            config._secret_env("TEST_SECRET", "local-default")
+        config._secret_env("TEST_SECRET", "local-default")
+        with pytest.raises(RuntimeError, match="TEST_SECRET"):
+            config.require_secrets("TEST_SECRET")
+
+    def test_요구하지_않은_이름은_상관없다(self, monkeypatch):
+        """크롤러가 ADMIN_PASSWORD 없이 뜨는 근거 — 다른 이름의 기록은 보지 않는다."""
+        from app import config
+
+        monkeypatch.delenv("TEST_SECRET", raising=False)
+        monkeypatch.setattr(config, "IS_PRODUCTION", True)
+
+        config._secret_env("TEST_SECRET", "local-default")
+        config.require_secrets("SOMETHING_ELSE_THE_CRAWLER_NEEDS")
 
 
 class TestReadSessionWiring:

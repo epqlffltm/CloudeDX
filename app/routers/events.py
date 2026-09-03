@@ -29,14 +29,23 @@ import secrets
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import COOKIE_SECURE, SESSION_SECRET, WRITE_TIMEOUT_SECONDS
+from app.config import (
+    CLICK_NEW_SESSION_LIMIT,
+    CLICK_NEW_SESSION_WINDOW_SECONDS,
+    CLICK_RATE_LIMIT,
+    CLICK_RATE_WINDOW_SECONDS,
+    COOKIE_SECURE,
+    SESSION_SECRET,
+    WRITE_TIMEOUT_SECONDS,
+)
 from app.db.clicks import record_click
 from app.db.engine import get_session
 from app.domain.clicks import bucket_start, session_hash
+from app.ratelimit import SlidingWindowLimiter, client_ip
 from app.schemas.events import ClickEventAccepted, ClickEventIn
 
 logger = logging.getLogger(__name__)
@@ -46,15 +55,22 @@ router = APIRouter(prefix="/events", tags=["events"])
 CLIENT_ID_COOKIE = "reverdi_cid"
 CLIENT_ID_MAX_AGE = 365 * 24 * 60 * 60
 
+# IP 당 클릭 수, 그리고 IP 당 새 세션 쿠키 발급 수 (app/config.py 의 설명 참고).
+click_calls = SlidingWindowLimiter(CLICK_RATE_LIMIT, CLICK_RATE_WINDOW_SECONDS)
+new_sessions = SlidingWindowLimiter(CLICK_NEW_SESSION_LIMIT, CLICK_NEW_SESSION_WINDOW_SECONDS)
 
-def _ensure_client_id(response: Response, current: str | None) -> str:
+
+def _valid_client_id(current: str | None) -> bool:
     """
-    익명 클라이언트 id를 돌려준다. 쿠키가 없거나 모양이 이상하면 새로 굽는다.
-
     32자 hex(16바이트)만 받는다. 쿠키는 클라이언트가 임의로 바꿀 수 있는 값이라,
     길이·문자 집합을 고정해 두면 해시 입력이 통제된다.
     """
-    if current and len(current) == 32 and all(c in "0123456789abcdef" for c in current):
+    return bool(current) and len(current) == 32 and all(c in "0123456789abcdef" for c in current)
+
+
+def _ensure_client_id(response: Response, current: str | None) -> str:
+    """익명 클라이언트 id를 돌려준다. 쿠키가 없거나 모양이 이상하면 새로 굽는다."""
+    if current is not None and _valid_client_id(current):
         return current
 
     fresh = secrets.token_hex(16)
@@ -84,6 +100,7 @@ def _ensure_client_id(response: Response, current: str | None) -> str:
 )
 async def record_click_event(
     body: ClickEventIn,
+    request: Request,
     response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
     client_id: Annotated[str | None, Cookie(alias=CLIENT_ID_COOKIE)] = None,
@@ -94,6 +111,21 @@ async def record_click_event(
     본문은 매물 id 하나. 세션은 쿠키에서, 시각은 서버에서 정한다 — 둘 다 클라이언트가
     고를 수 없는 값이어야 집계를 부풀릴 수 없다.
     """
+    ip = client_ip(request)
+
+    # (a) 클릭 자체가 너무 잦으면 세지 않는다. 202 인 이유는 이 엔드포인트의
+    # 계약이 "화면은 결과와 무관하게 조용히 넘어간다" 라서다 — 429 를 줘도 화면이
+    # 할 일은 없고, sendBeacon 은 응답을 읽지도 않는다.
+    if click_calls.hit(ip) is not None:
+        return ClickEventAccepted(status="limited")
+
+    # (b) 쿠키가 없어 새로 구워야 하는데, 이 IP 가 이미 너무 많이 받아 갔으면
+    # 굽지도 세지도 않는다. 쿠키를 버리고 오는 봇이 세션 유니크를 우회하는 길이
+    # 이것 하나뿐이라, 여기만 막으면 부풀리기와 행 폭증이 같이 막힌다.
+    if not _valid_client_id(client_id) and new_sessions.hit(ip) is not None:
+        logger.info("클릭 세션 발급 제한 (%s)", ip)
+        return ClickEventAccepted(status="limited")
+
     cid = _ensure_client_id(response, client_id)
     hashed = session_hash(cid, SESSION_SECRET)
     bucket = bucket_start(datetime.now(UTC))

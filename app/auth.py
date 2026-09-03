@@ -38,9 +38,14 @@ from app.config import (
     COOKIE_SECURE,
     SESSION_MAX_AGE_SECONDS,
     SESSION_SECRET,
+    require_secrets,
 )
 
 logger = logging.getLogger(__name__)
+
+# 이 모듈이 그 값들을 쓰는 유일한 자리다. 웹 프로세스만 여기를 임포트하므로,
+# 크롤러·집계·백업은 관리자 비밀번호 없이 뜨고 웹은 없으면 여기서 죽는다.
+require_secrets("ADMIN_PASSWORD", "CLIENT_PASSWORD", "SESSION_SECRET")
 
 Role = Literal["admin", "client"]
 
