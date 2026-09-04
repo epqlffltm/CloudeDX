@@ -295,6 +295,12 @@ CI 가 ECR 로 올리려면 이것들이 있어야 한다.
 
 ### 서버에서 할 일
 
+> `.env.web` 에는 `DATABASE_URL`·`SESSION_SECRET` 외에 **`APP_ENV=production`, `ADMIN_PASSWORD`,
+> `CLIENT_PASSWORD`, `CLIENT_SELLER_ID=1`, `DATABASE_SSL_MODE`, `S3_BUCKET`** 이 있어야 한다.
+> compose 의 `--env-file` 은 치환용이라 `docker-compose.web.yml` 의 `environment:` 에 적힌
+> 것만 컨테이너에 들어간다 — 전체 목록은 [deploy-env.md](deploy-env.md), 배경은
+> [security.md](security.md) 7번. 기동 뒤 `admin1234` 로 로그인이 **안 되면** 제대로 들어간 것이다.
+
 **웹서버 3대 (각각 동일)**
 
 ```bash

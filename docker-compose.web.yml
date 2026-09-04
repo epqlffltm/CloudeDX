@@ -78,6 +78,52 @@ services:
       MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-5242880}
 
       # -----------------------------------------------------------------
+      # 실행 환경과 계정.
+      #
+      # --env-file 은 이 파일의 ${...} 치환에만 쓰이고 컨테이너 안으로는 들어가지
+      # 않는다. 그래서 여기 적지 않은 변수는 .env.web 에 있어도 앱이 못 본다 —
+      # APP_ENV 가 빠져 있던 동안 운영 컨테이너가 local 로 떠서 기본 비밀번호
+      # (admin1234) 로 로그인이 됐다. 앱이 읽는 값은 전부 여기 명시한다.
+      #
+      # :? 는 비어 있으면 compose 단계에서 멈춘다. 앱의 require_secrets 가 한 번
+      # 더 막지만, 컨테이너가 CrashLoop 도는 것보다 up 이 안 되는 쪽이 빨리 보인다.
+      # -----------------------------------------------------------------
+      APP_ENV: ${APP_ENV:-production}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD 를 .env.web 에 설정하세요}
+      CLIENT_USERNAME: ${CLIENT_USERNAME:-client}
+      CLIENT_PASSWORD: ${CLIENT_PASSWORD:?CLIENT_PASSWORD 를 .env.web 에 설정하세요}
+      # client 계정이 올린 매물을 연결할 판매자. 0 이면 client 는 업로드만 되고
+      # 어떤 매물도 수정(사진 등)하지 못한다 — 소유 검사가 판매자 일치로 판단한다.
+      CLIENT_SELLER_ID: ${CLIENT_SELLER_ID:-1}
+
+      # -----------------------------------------------------------------
+      # DB 부가 설정.
+      # -----------------------------------------------------------------
+      # 읽기 복제본. 비우면 DATABASE_URL 로 떨어진다.
+      DATABASE_RO_URL: ${DATABASE_RO_URL:-}
+      # DB 연결 암호화. RDS 면 require. EC2 자체 postgres 가 TLS 를 안 켰으면
+      # prefer 로 둬야 붙는다 (운영에서 prefer 면 기동 로그에 경고가 남는다).
+      DATABASE_SSL_MODE: ${DATABASE_SSL_MODE:-prefer}
+
+      # -----------------------------------------------------------------
+      # 이미지 저장소. S3_BUCKET 이 있으면 S3, 없으면 로컬 디스크.
+      # 운영에서 둘 다 비어 있으면 앱이 기동을 거부한다 — 3대가 각자 디스크에
+      # 쓰면 사진이 서버마다 다르게 보이기 때문이다. 단일 호스트 시연에서만
+      # ALLOW_LOCAL_STORAGE=true 로 눌러 쓴다.
+      # -----------------------------------------------------------------
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_PUBLIC_BASE: ${S3_PUBLIC_BASE:-}
+      AWS_REGION: ${AWS_REGION:-ap-northeast-2}
+      ALLOW_LOCAL_STORAGE: ${ALLOW_LOCAL_STORAGE:-false}
+
+      # 호출 제한 (0 이면 끔). ALB 뒤라 TRUST_PROXY_HEADERS 는 APP_ENV 를 따라 켜진다.
+      LOGIN_MAX_FAILURES: ${LOGIN_MAX_FAILURES:-5}
+      LIVE_SEARCH_RATE_LIMIT: ${LIVE_SEARCH_RATE_LIMIT:-10}
+      CLICK_RATE_LIMIT: ${CLICK_RATE_LIMIT:-60}
+      CLICK_NEW_SESSION_LIMIT: ${CLICK_NEW_SESSION_LIMIT:-30}
+
+      # -----------------------------------------------------------------
       # X-Forwarded-For 를 믿어줄 대역.
       #
       # 체인이 한 단계다:  클라이언트 → ALB → uvicorn

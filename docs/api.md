@@ -78,11 +78,15 @@
 |---|---|
 | `saved` | 조회해서 저장했다. `saved`에 upsert 건수 |
 | `cooldown` | 같은 검색어를 최근에 이미 조회했다. 동시 요청도 여기로 온다 |
+| `limited` | 이 IP 가 창 안에 너무 많이 불렀다 (`LIVE_SEARCH_RATE_LIMIT`, 기본 10회/분). DB 를 보기 전에 돌려보낸다 |
 | `ignored` | 실시간 조회를 걸 값이 아니다 (2자 미만, 60자 초과, 기호만) |
 | `failed` | 번개장터 조회에 실패했다. **쿨다운 기록용 주 DB에 붙지 못한 경우도 여기다** |
 
-`cooldown`이 이 엔드포인트의 유일한 보호 장치다. 사용자의 입력이 그대로 남의 서버로
-나가는 자리라, 같은 검색어를 자주 치지 않는 것이 중요하다.
+보호 장치는 둘이다. `cooldown`은 **같은 검색어**의 연타를, `limited`는 **검색어를
+바꿔가며** 부르는 것을 막는다. 사용자의 입력이 그대로 남의 서버로 나가는 자리라 둘 다
+필요하다 — 쿨다운만 있으면 검색어를 바꾸는 순간 무제한이다. `limited`는 파드 안 메모리로
+IP 를 세므로 파드가 여럿이면 그만큼 느슨해진다; 파드를 가로지르는 상한은 WAF 몫이다
+([보안](security.md)).
 
 - 기준은 사용자 원문이 아니라 **정규형**이다. "루이뷔통 가방"과 "루이비통 가방"은 같은
   키로 접혀 쿨다운을 공유한다.
@@ -110,12 +114,17 @@
 ### 클릭 집계 — 인기 매물
 
 화면이 매물 카드를 누를 때 `POST /api/events/click` `{"item_id": 60}`을 보내고
-(web/js/api.js `sendClick`, sendBeacon), 서버는 202에 `{"status": "counted"}` 또는
-`"duplicate"`를 돌려준다. 세션은 서버가 굽는 익명 쿠키 `reverdi_cid`(httpOnly, 1년)로
+(web/js/api.js `sendClick`, sendBeacon), 서버는 202에 `{"status": "counted"}`,
+`"duplicate"`, `"limited"` 중 하나를 돌려준다. 세션은 서버가 굽는 익명 쿠키 `reverdi_cid`(httpOnly, 1년)로
 식별하고, DB에는 그 값의 HMAC만 남는다. **한 세션·한 매물·30분 버킷에 한 번**만 센다 —
 연타·새로고침은 `duplicate`다. 판정은 `item_click_events`의 유니크 제약이 한다
 ([DB](database.md) 참고). 없는 매물은 404, DB 오류는 503이고, 화면은 어느 쪽이든
 조용히 넘어간다.
+
+`limited`는 부풀리기 방어다. 세션 유니크는 **쿠키를 안 보내면** 매 요청 새 세션이 돼
+지나가므로, IP 당 분당 클릭 수(`CLICK_RATE_LIMIT`)와 **IP 당 시간당 새 쿠키 발급 수**
+(`CLICK_NEW_SESSION_LIMIT`)를 센다. 후자가 핵심이다 — 정상 방문자는 쿠키를 한 번 받고
+평생 쓰니 닿을 일이 없고, 쿠키를 버리고 오는 봇만 걸린다. 걸리면 쿠키도 굽지 않는다.
 
 `GET /api/products/popular?limit=12`(1~50)는 그 집계로 정렬한 목록이다. 응답 모양은
 `/api/products`와 같고(ListingOut, offset=0·has_next=false 고정), 순서는

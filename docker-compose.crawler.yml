@@ -36,6 +36,10 @@ services:
       # 웹 계층과 같은 DB 를 본다. 여기도 Route 53 이름을 쓰므로 주 DB 전환 시
       # 이 설정을 건드릴 필요가 없다.
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL 을 .env.crawler 에 설정하세요}
+      # 크롤러는 관리자 비밀번호·세션 키를 받지 않는다. 그 값들은 웹만 요구한다
+      # (app/auth.py 의 require_secrets). 여기엔 DB 접속만 있으면 된다.
+      APP_ENV: ${APP_ENV:-production}
+      DATABASE_SSL_MODE: ${DATABASE_SSL_MODE:-prefer}
 
       CRAWL_INTERVAL_MINUTES: ${CRAWL_INTERVAL_MINUTES:-30}
       CRAWL_RETRY_MINUTES: ${CRAWL_RETRY_MINUTES:-5}

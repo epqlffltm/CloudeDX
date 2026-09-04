@@ -42,7 +42,8 @@
 | 스키마 | Alembic 마이그레이션 (판매자 · 매장 사진 · 관리자 메모 포함) |
 | 화면 | 메인 · 로그인 · 관리자 콘솔 · 기업고객 포털 + 판매자 시트 (에디토리얼 리디자인) |
 | 이미지 저장 | S3 이중 모드 — `S3_BUCKET` 설정 시 S3, 비우면 로컬 디스크 |
-| 테스트 | 실제 Postgres 위에서 실행 (`uv run pytest`, 345건) + 프론트 스모크(`npm run test:web`) |
+| 테스트 | 실제 Postgres 위에서 실행 (`uv run pytest`, 376건) + 프론트 스모크(`npm run test:web`) |
+| 보안 | 로그인 잠금 · 호출 제한(검색·클릭) · 매물 소유 검사 · 비밀값 웹 전용 · DB TLS 모드 — [docs/security.md](docs/security.md) |
 | CI | GitHub Actions — lint · test(파이썬 + 프론트 스모크) · 이미지 빌드 (AWS Secret 등록 시 ECR 푸시) |
 
 ## 빠른 시작
@@ -69,6 +70,7 @@ docker compose up -d --build
 | [docs/dev.md](docs/dev.md) | 로컬 실행, 환경 변수, 테스트, CI, 트러블슈팅, 알려진 이슈/TODO |
 | [docs/deploy.md](docs/deploy.md) | 이미지 빌드, compose 구성, nginx를 제거한 경위, 인프라 인계 |
 | [docs/deploy-env.md](docs/deploy-env.md) | **운영 환경변수 계약** — 태스크 데피니션 작성용 정본 |
+| [docs/security.md](docs/security.md) | 보안 점검 결과 — 이미 돼 있던 것, 고친 것, 남긴 것, 인프라 인계 |
 | [docs/demo.md](docs/demo.md) | 시연 철학·순서, CSV 규칙, down -v 후 복구 |
 
 ## 스택

@@ -98,13 +98,18 @@ uv run python -m app.crawler.daangn.debug_cards --query "냉장고"
 | `POSTGRES_USER` | `cloudedx` | compose 가 db 초기화와 접속 문자열 조립에 함께 쓴다 |
 | `POSTGRES_PASSWORD` | `cloudedx` | 위와 같음. 배포에서는 필수 |
 | `POSTGRES_DB` | `cloudedx` | 위와 같음 |
-| `SESSION_SECRET` | (프로세스마다 랜덤) | 세션 쿠키 서명 키. `APP_ENV=production` 이면 미설정 시 기동 거부 |
+| `SESSION_SECRET` | (프로세스마다 랜덤) | 세션 쿠키 서명 키. `APP_ENV=production` 이면 **웹만** 미설정 시 기동 거부 (`app/auth.py`). 크롤러는 요구하지 않는다 |
 | `SESSION_MAX_AGE_SECONDS` | `43200` | 로그인 유지 시간(초). 기본 12시간 |
 | `MAX_UPLOAD_BYTES` | `5242880` | CSV 업로드 최대 바이트 (ALB 는 본문 크기를 제한하지 않으므로 이 값이 유일한 상한이다) |
 | `FORWARDED_ALLOW_IPS` | `*` (배포 `172.28.0.0/16`) | `X-Forwarded-For` 를 믿어줄 프록시 대역 |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | `admin` / `admin1234` | 시연용 고정 계정 |
 | `CLIENT_USERNAME` / `CLIENT_PASSWORD` | `client` / `client1234` | 시연용 고정 계정 |
-| `CLIENT_SELLER_ID` | `0` (연결 안 함) | client 계정이 올린 매물을 연결할 판매자 id. 시연은 `1`(청담 명품관) — [웹 화면](frontend.md)의 판매자 시트 절 참고 |
+| `CLIENT_SELLER_ID` | `0` (연결 안 함) | client 계정이 올린 매물을 연결할 판매자 id. 시연은 `1`(청담 명품관). **`0` 이면 client 는 업로드만 되고 어떤 매물도 수정(사진 등)하지 못한다** — 소유 검사가 판매자 일치로만 판단한다 ([보안](security.md)) |
+| `LOGIN_MAX_FAILURES` / `LOGIN_LOCKOUT_SECONDS` | `5` / `300` | 같은 IP 로그인 실패 잠금. `0` 이면 끔 |
+| `LIVE_SEARCH_RATE_LIMIT` / `LIVE_SEARCH_RATE_WINDOW_SECONDS` | `10` / `60` | 같은 IP 실시간 검색 호출 상한. 혼자 리허설하다 `limited` 가 뜨면 `0` 으로 |
+| `CLICK_RATE_LIMIT` / `CLICK_NEW_SESSION_LIMIT` | `60` / `30` | 같은 IP 클릭 상한(분) / 새 클릭 세션 쿠키 발급 상한(시간). `0` 이면 끔 |
+| `TRUST_PROXY_HEADERS` | `APP_ENV` 따름 | 호출 제한이 `X-Forwarded-For` 로 사용자 IP 를 구분할지. 로컬은 꺼져 있어야 헤더 위조로 못 피한다 |
+| `DATABASE_SSL_MODE` | `prefer` | DB 연결 암호화. RDS 는 `require`. 로컬 도커 Postgres 는 TLS 가 없어 `prefer` 여야 붙는다 |
 
 `POSTGRES_*` 세 값은 **볼륨이 비어 있을 때(최초 기동)만** 반영된다. 이미 초기화된 뒤에
 바꾸면 앱은 새 비밀번호로 접속하는데 DB 에는 옛 비밀번호가 남아 있어
