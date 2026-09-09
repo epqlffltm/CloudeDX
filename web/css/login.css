@@ -10,12 +10,16 @@
  */
 
 :root {
-  --bg: #F7F6F3;
+  --bg: #F7F3EC;
   --card: #FFFFFF;
   --ink: #1A1A1A;
+  --ink-dark: #3D3226;
+  --primary: #8B6F4E;
+  --primary-dark: #3D3226;
+  --gold-point: #B08D57;
   --ink-soft: #78716C;
   --ink-faint: #A8A29E;
-  --line: #E7E5E4;
+  --line: #E8E2D8;
   --danger: #B4423A;
 
   --font-display: 'Fraunces', Georgia, serif;
@@ -56,6 +60,11 @@ a { color: inherit; text-decoration: none; }
   font-family: var(--font-display); font-weight: 500;
   font-size: 30px; letter-spacing: .3em; text-transform: uppercase;
   padding-left: .3em; /* 자간 보정 */
+}
+.auth-logo em {
+  font-style: italic;
+  text-transform: lowercase;
+  color: var(--gold-point);
 }
 .auth-eyebrow {
   margin: 14px 0 0;
@@ -118,12 +127,12 @@ a { color: inherit; text-decoration: none; }
 /* 제출 버튼 */
 .auth-submit {
   width: 100%; padding: 17px;
-  background: var(--ink); color: #fff;
+  background: var(--primary-dark); color: #fff;
   font-size: 12.5px; font-weight: 700;
   letter-spacing: var(--track-wide); text-transform: uppercase;
-  transition: opacity .2s;
+  transition: background .2s, opacity .2s;
 }
-.auth-submit:hover { opacity: .85; }
+.auth-submit:hover:not(:disabled) { background: var(--primary); }
 .auth-submit:disabled { opacity: .5; cursor: default; }
 
 /* 시연 계정. 시안의 "Request Access" 자리 — 실제로 있는 기능만 그린다. */
@@ -163,4 +172,99 @@ a { color: inherit; text-decoration: none; }
   text-align: center; padding: 26px 16px 34px;
   font-size: 10.5px; letter-spacing: .18em; text-transform: uppercase;
   color: var(--ink-faint);
+}
+
+/* ──────────────────────────────────────────────────────────────────────
+ * [임시 개발용] 관리자 / 기업고객 페이지 강제 이동 하단 바 (삭제 완료)
+ * ────────────────────────────────────────────────────────────────────── */
+#devQuickBar,
+.dev-quick-bar {
+  display: none !important;
+}
+
+.dev-quick-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.dev-quick-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.dev-quick-tag {
+  background: #dc2626;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 7px;
+  border-radius: 4px;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+.dev-quick-desc {
+  color: #d6d3d1;
+  font-size: 12.5px;
+}
+
+.dev-quick-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.dev-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 16px;
+  font-size: 12.5px;
+  font-weight: 600;
+  border-radius: 4px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: opacity 0.15s, transform 0.1s;
+  white-space: nowrap;
+}
+
+.dev-btn:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+.dev-btn--home {
+  background: #44403c;
+  color: #ffffff;
+  border: 1px solid #78716c;
+}
+
+.dev-btn--admin {
+  background: #e11d48;
+  color: #ffffff;
+  border: 1px solid #f43f5e;
+}
+
+.dev-btn--client {
+  background: #2563eb;
+  color: #ffffff;
+  border: 1px solid #3b82f6;
+}
+
+.dev-btn--login {
+  background: #292524;
+  color: #e7e5e4;
+  border: 1px solid #57534e;
+}
+
+body {
+  padding-bottom: 58px;
 }

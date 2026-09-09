@@ -50,21 +50,23 @@
      바로 고를 수 있으므로 헤더에 상시 노출할 이유가 없다. -->
 <header class="site">
   <div class="wrap header-row">
-    <button class="menu-btn" type="button" id="menuBtn" data-drawer-open
-            aria-label="메뉴 열기" aria-controls="drawer" aria-expanded="false">
-      <svg viewBox="0 0 24 24"><use href="#i-menu"/></svg>
-    </button>
+    <div class="header-left">
+      <button class="menu-btn" type="button" id="menuBtn" data-drawer-open
+              aria-label="메뉴 열기" aria-controls="drawer" aria-expanded="false">
+        <svg viewBox="0 0 24 24"><use href="#i-menu"/></svg>
+      </button>
 
-    <form class="search-pill" id="searchForm" role="search">
-      <button type="submit" aria-label="검색"><svg viewBox="0 0 24 24"><use href="#i-search"/></svg></button>
-      <label class="visually-hidden" for="searchInput">브랜드, 모델명 검색</label>
-      <input id="searchInput" type="search" autocomplete="off" enterkeyhint="search"
-             placeholder="브랜드, 모델명 검색" />
-    </form>
+      <form class="header-search-bar" id="headerSearchForm" role="search">
+        <button type="submit" aria-label="검색"><svg viewBox="0 0 24 24"><use href="#i-search"/></svg></button>
+        <label class="visually-hidden" for="headerSearchInput">브랜드, 모델명 검색</label>
+        <input id="headerSearchInput" type="search" autocomplete="off" enterkeyhint="search"
+               placeholder="브랜드, 모델명 검색" />
+      </form>
+    </div>
 
     <button class="logo" type="button" data-home aria-label="Reverdi 홈">Reverdi</button>
 
-    <a class="login-btn" href="login.html" aria-label="기업고객 로그인" id="loginBtn">Login</a>
+    <a class="login-btn" href="login.html" aria-label="로그인 화면으로 이동" id="loginBtn">로그인</a>
   </div>
 </header>
 
@@ -89,16 +91,41 @@
 <!-- ══════════════════════════════════════════ 대문 -->
 <div class="home-view">
 
-  <section class="hero" id="hero">
+  <section class="hero" id="hero" aria-label="셀러 컬렉션 쇼케이스">
     <div class="hero-overlay"></div>
     <div class="hero-copy">
       <p class="hero-eyebrow">Curated Pre-loved Luxury</p>
       <h1 class="hero-title">다시, 봄</h1>
       <p class="hero-sub">당근마켓 · 중고나라 · 번개장터의 매물을 한곳에서</p>
+      <form class="hero-search-pill" id="searchForm" role="search">
+        <button type="submit" aria-label="검색"><svg viewBox="0 0 24 24"><use href="#i-search"/></svg></button>
+        <label class="visually-hidden" for="searchInput">브랜드, 모델명 검색</label>
+        <input id="searchInput" type="search" autocomplete="off" enterkeyhint="search"
+               placeholder="브랜드, 모델명 검색" />
+      </form>
       <button class="btn-primary" type="button" data-browse>
         매물 둘러보기
         <svg viewBox="0 0 24 24"><use href="#i-arrow-r"/></svg>
       </button>
+    </div>
+
+    <!-- 셀러 갤러리 배경 슬라이더 (img/sellers 폴더 내 사진들, 오른쪽으로 순환) -->
+    <div class="hero-slider" id="heroSlider" aria-hidden="true">
+      <div class="hero-slide active" data-index="0" data-label="청담 부티크">
+        <img src="/img/sellers/chungdam.jpg" alt="청담 부티크" loading="eager" />
+      </div>
+      <div class="hero-slide" data-index="1" data-label="대구 쇼룸">
+        <img src="/img/sellers/daegu.jpg" alt="대구 쇼룸" loading="lazy" />
+      </div>
+      <div class="hero-slide" data-index="2" data-label="해운대 빈티지">
+        <img src="/img/sellers/haeundae.jpg" alt="해운대 빈티지" loading="lazy" />
+      </div>
+      <div class="hero-slide" data-index="3" data-label="명동 헤리티지">
+        <img src="/img/sellers/myeongdong.jpg" alt="명동 헤리티지" loading="lazy" />
+      </div>
+      <div class="hero-slide" data-index="4" data-label="판교 아틀리에">
+        <img src="/img/sellers/pangyo.jpg" alt="판교 아틀리에" loading="lazy" />
+      </div>
     </div>
   </section>
 
@@ -231,22 +258,6 @@
 </footer>
 
 <script type="module" src="js/home.js"></script>
-<script type="module">
-  // 로그인 상태면 헤더의 Login 버튼을 자기 콘솔 바로가기로 바꾼다.
-  // 로그인한 사람에게 다시 Login을 보여주는 것은 "이미 됐는데 안 된 것처럼
-  // 보이는" 혼란이라서다. 비로그인·네트워크 실패는 조용히 무시 — 버튼은
-  // 원래의 Login으로 남고, 화면의 다른 기능은 이 스크립트와 무관하게 돈다.
-  import { fetchMe } from './js/auth.js';
 
-  fetchMe().then((me) => {
-    if (!me) return;
-    const btn = document.getElementById('loginBtn');
-    if (!btn) return;
-    const isAdmin = me.role === 'admin';
-    btn.textContent = isAdmin ? 'Console' : 'My Page';
-    btn.href = isAdmin ? 'admin.html' : 'client.html';
-    btn.setAttribute('aria-label', isAdmin ? '관리자 콘솔로 이동' : '내 매물 관리로 이동');
-  }).catch(() => {});
-</script>
 </body>
 </html>

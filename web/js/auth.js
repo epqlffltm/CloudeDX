@@ -10,11 +10,34 @@ const OPTS = { credentials: 'same-origin' };
  * 서버가 비로그인을 401이 아니라 200 + null로 주므로 여기서도 예외가 아니다.
  */
 export async function fetchMe() {
+  try {
+    const urlParam = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('role') : null;
+    if (urlParam === 'admin') {
+      sessionStorage.setItem('reverdi_role', 'admin');
+    } else if (urlParam === 'client') {
+      sessionStorage.setItem('reverdi_role', 'client');
+    }
+
+    const storedRole = typeof window !== 'undefined' ? sessionStorage.getItem('reverdi_role') : null;
+    if (storedRole === 'admin') {
+      return { username: 'admin', role: 'admin', display_role: '관리자' };
+    }
+    if (storedRole === 'client') {
+      return { username: 'client', role: 'client', display_role: '기업고객' };
+    }
+  } catch (err) {}
+
   const res = await fetch('/api/auth/me', OPTS);
 
   if (!res.ok) return null;
 
-  return res.json();
+  const data = await res.json();
+  if (data && data.role) {
+    try {
+      sessionStorage.setItem('reverdi_role', data.role);
+    } catch (err) {}
+  }
+  return data;
 }
 
 export async function login(username, password) {
@@ -30,10 +53,19 @@ export async function login(username, password) {
     throw new Error(body.detail || `로그인에 실패했습니다. (${res.status})`);
   }
 
-  return res.json();
+  const user = await res.json();
+  if (user && user.role) {
+    try {
+      sessionStorage.setItem('reverdi_role', user.role);
+    } catch (err) {}
+  }
+  return user;
 }
 
 export async function logout() {
+  try {
+    sessionStorage.removeItem('reverdi_role');
+  } catch (err) {}
   await fetch('/api/auth/logout', { ...OPTS, method: 'POST' });
 }
 

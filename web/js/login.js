@@ -2,7 +2,7 @@
 //
 // 로그인 화면. 성공하면 역할에 맞는 페이지로 보낸다.
 
-import { fetchMe, login } from './auth.js';
+import { login } from './auth.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -15,13 +15,7 @@ function showError(message) {
 }
 
 async function init() {
-  // 이미 로그인돼 있으면 폼을 보여줄 이유가 없다.
-  const me = await fetchMe();
-
-  if (me) {
-    location.replace(homeFor(me.role));
-    return;
-  }
+  // 로그인 화면에서는 항상 로그인 입력 폼을 표시한다 (자동 리다이렉트 금지)
 
   // 비밀번호 표시 토글. input의 type을 password <-> text로 바꾸는 것이 전부다.
   // aria-pressed는 CSS가 눈/빗금눈 아이콘을 고르는 기준이자, 스크린리더에

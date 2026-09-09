@@ -410,9 +410,12 @@ const RAIL_EMPTY = {
 function renderRail(items) {
   const empty = RAIL_EMPTY[state.railTab] ?? RAIL_EMPTY.latest;
 
-  $('railGrid').innerHTML = items.length === 0
+  // 5개씩 2줄 (총 10개)
+  const displayItems = items.slice(0, 10);
+
+  $('railGrid').innerHTML = displayItems.length === 0
     ? stateHtml(empty)
-    : items.map(cardHtml).join('');
+    : displayItems.map(cardHtml).join('');
 }
 
 /**
@@ -509,14 +512,14 @@ async function loadRail() {
     // 인기 탭은 정렬 기준이 달라 별도 엔드포인트다. 나머지 두 탭은 목록 API를
     // 최신순으로 부르고, 인증 탭만 authenticated_only를 얹는다.
     const items = state.railTab === 'popular'
-      ? await fetchPopular(12)
+      ? await fetchPopular(10)
       : (await fetchListings(
         {
           ...state.filters,
           category: 'all', brand: ALL, source: ALL, q: '', sort: 'latest',
           authenticatedOnly: state.railTab === 'authenticated',
         },
-        0, 12,
+        0, 10,
       )).items;
 
     renderRail(items);
@@ -848,6 +851,11 @@ function apply(patch, { resetOffset = true } = {}) {
     refreshLive(state.filters.q);
   }
 
+  if (patch.q !== undefined) {
+    if ($('searchInput')) $('searchInput').value = state.filters.q;
+    if ($('headerSearchInput')) $('headerSearchInput').value = state.filters.q;
+  }
+
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -861,6 +869,7 @@ function goHome() {
   state.offset = 0;
 
   $('searchInput').value = '';
+  if ($('headerSearchInput')) $('headerSearchInput').value = '';
   writeURL();
   renderNav();
   window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -957,16 +966,237 @@ $('searchForm').addEventListener('submit', (e) => {
   apply({ q: $('searchInput').value.trim() });
 });
 
+if ($('headerSearchForm')) {
+  $('headerSearchForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const query = $('headerSearchInput') ? $('headerSearchInput').value.trim() : '';
+    apply({ q: query });
+  });
+}
+
 $('sortSelect').addEventListener('change', (e) => {
   apply({ sort: e.target.value });
 });
+
+// ── 셀러 갤러리 히어로 슬라이더 (오른쪽으로 회전) ────────────────────────
+async function discoverSellersImages() {
+  if (typeof window === 'undefined' || typeof window.Image === 'undefined') return [];
+
+  const candidateNames = [
+    'photo1.jpg', 'photo2.jpg', 'photo3.jpg', 'photo4.jpg', 'photo5.jpg',
+    'photo6.jpg', 'photo7.jpg', 'photo8.jpg', 'photo9.jpg', 'photo10.jpg',
+    'chungdam.jpg', 'daegu.jpg', 'haeundae.jpg', 'myeongdong.jpg', 'pangyo.jpg',
+    'showroom.jpg', 'image.png', 'image.jpg',
+    '1.jpg', '2.jpg', '3.jpg', '4.jpg', '5.jpg', '6.jpg', '7.jpg', '8.jpg', '9.jpg', '10.jpg',
+    '1.png', '2.png', '3.png', '4.png', '5.png',
+    '1.webp', '2.webp', '3.webp', '4.webp', '5.webp',
+    'bag1.jpg', 'bag2.jpg', 'bag3.jpg',
+    'seller1.jpg', 'seller2.jpg', 'seller3.jpg',
+  ];
+
+  try {
+    const checkImage = (name) =>
+      new Promise((resolve) => {
+        const img = new Image();
+        const timer = setTimeout(() => resolve(null), 1000);
+        img.onload = () => { clearTimeout(timer); resolve(`/img/sellers/${name}`); };
+        img.onerror = () => { clearTimeout(timer); resolve(null); };
+        img.src = `/img/sellers/${name}`;
+      });
+
+    const results = await Promise.all(candidateNames.map(checkImage));
+    return results.filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+async function initHeroSlider() {
+  const slider = $('heroSlider');
+  if (!slider) return;
+
+  // manifest.json 없이 폴더 내 사진 자동 감지
+  try {
+    const discovered = await discoverSellersImages();
+    if (discovered.length > 0) {
+      slider.innerHTML = discovered.map((src, idx) => `
+        <div class="hero-slide ${idx === 0 ? 'active' : ''}" data-index="${idx}">
+          <img src="${src}" alt="셀러 갤러리 사진" loading="${idx === 0 ? 'eager' : 'lazy'}" />
+        </div>
+      `).join('');
+    }
+  } catch {
+    // 감지 실패 시 기존 HTML 정적 슬라이드 유지
+  }
+
+  let slides = slider.querySelectorAll('.hero-slide');
+  const dots = document.querySelectorAll('.hero-dot');
+  const prevBtn = $('heroPrevBtn');
+  const nextBtn = $('heroNextBtn');
+  const hero = $('hero');
+
+  if (slides.length <= 1) return;
+
+  let currentIndex = 0;
+  let timer = null;
+  const INTERVAL = 3800; // 3.8초마다 오른쪽으로 순환
+
+  function goToSlide(newIndex, direction = 'right') {
+    slides = slider.querySelectorAll('.hero-slide');
+    if (newIndex === currentIndex || slides.length === 0) return;
+
+    const currentSlide = slides[currentIndex];
+    const nextSlide = slides[newIndex];
+    if (!currentSlide || !nextSlide) return;
+
+    // 기존 슬라이드 클래스 정리
+    slides.forEach((s) => {
+      s.classList.remove('active', 'exit-right', 'exit-left');
+      s.style.transform = '';
+    });
+
+    if (direction === 'right') {
+      currentSlide.classList.add('exit-right');
+      nextSlide.style.transform = 'translateX(-100%)';
+    } else {
+      currentSlide.classList.add('exit-left');
+      nextSlide.style.transform = 'translateX(100%)';
+    }
+
+    // 브라우저 리플로우 강제 후 active 적용
+    void nextSlide.offsetWidth;
+
+    nextSlide.style.transform = '';
+    nextSlide.classList.add('active');
+
+    dots.forEach((dot, idx) => {
+      const isActive = idx === newIndex;
+      dot.classList.toggle('active', isActive);
+      dot.setAttribute('aria-selected', String(isActive));
+    });
+
+    currentIndex = newIndex;
+  }
+
+  function nextSlide() {
+    slides = slider.querySelectorAll('.hero-slide');
+    if (slides.length <= 1) return;
+    const nextIndex = (currentIndex + 1) % slides.length;
+    goToSlide(nextIndex, 'right');
+  }
+
+  function prevSlide() {
+    slides = slider.querySelectorAll('.hero-slide');
+    if (slides.length <= 1) return;
+    const prevIndex = (currentIndex - 1 + slides.length) % slides.length;
+    goToSlide(prevIndex, 'left');
+  }
+
+  function startAutoplay() {
+    stopAutoplay();
+    timer = setInterval(() => {
+      nextSlide();
+    }, INTERVAL);
+  }
+
+  function stopAutoplay() {
+    if (timer) {
+      clearInterval(timer);
+      timer = null;
+    }
+  }
+
+  if (nextBtn) {
+    nextBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      nextSlide();
+      startAutoplay();
+    });
+  }
+
+  if (prevBtn) {
+    prevBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      prevSlide();
+      startAutoplay();
+    });
+  }
+
+  dots.forEach((dot) => {
+    dot.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const targetIdx = Number(dot.dataset.slide);
+      if (!isNaN(targetIdx)) {
+        goToSlide(targetIdx, targetIdx >= currentIndex ? 'right' : 'left');
+        startAutoplay();
+      }
+    });
+  });
+
+  if (hero) {
+    hero.addEventListener('mouseenter', stopAutoplay);
+    hero.addEventListener('mouseleave', startAutoplay);
+    hero.addEventListener('focusin', stopAutoplay);
+    hero.addEventListener('focusout', startAutoplay);
+
+    // 사용자가 사진 파일을 브라우저 화면으로 직접 끌어다 놓으면(드래그 앤 드롭) 배경에 즉시 추가
+    hero.addEventListener('dragover', (e) => {
+      e.preventDefault();
+    });
+    hero.addEventListener('drop', (e) => {
+      e.preventDefault();
+      const files = Array.from(e.dataTransfer?.files || []).filter((f) => f.type.startsWith('image/'));
+      if (files.length > 0) {
+        files.forEach((file) => {
+          const reader = new FileReader();
+          reader.onload = (ev) => {
+            const dataUrl = ev.target?.result;
+            if (dataUrl) {
+              const newSlide = document.createElement('div');
+              newSlide.className = 'hero-slide';
+              newSlide.innerHTML = `<img src="${dataUrl}" alt="추가된 사진" />`;
+              slider.appendChild(newSlide);
+              slides = slider.querySelectorAll('.hero-slide');
+              goToSlide(slides.length - 1, 'right');
+            }
+          };
+          reader.readAsDataURL(file);
+        });
+      }
+    });
+
+    // 모바일 터치 스와이프
+    let touchStartX = 0;
+    hero.addEventListener('touchstart', (e) => {
+      touchStartX = e.touches[0].clientX;
+      stopAutoplay();
+    }, { passive: true });
+
+    hero.addEventListener('touchend', (e) => {
+      const touchEndX = e.changedTouches[0].clientX;
+      const diffX = touchEndX - touchStartX;
+      if (Math.abs(diffX) > 40) {
+        if (diffX > 0) {
+          nextSlide(); // 오른쪽으로 넘기기
+        } else {
+          prevSlide();
+        }
+      }
+      startAutoplay();
+    }, { passive: true });
+  }
+
+  startAutoplay();
+}
 
 // ── 부팅 ────────────────────────────────────────────────────────────
 
 readURL();
 document.body.className = `mode-${state.mode}`;
 $('searchInput').value = state.filters.q;
+if ($('headerSearchInput')) $('headerSearchInput').value = state.filters.q;
 
+initHeroSlider();
 loadMeta();
 loadRail();
 
