@@ -12,7 +12,6 @@ DB 저장은 여기서 하지 않는다.
 """
 
 import logging
-from urllib.parse import quote
 
 from playwright.async_api import async_playwright
 
@@ -40,12 +39,9 @@ class JoongnaCrawler:
         self.config = config or JoongnaCrawlerConfig()
 
     def _build_url(self, page_num: int) -> str:
-        # keyword가 "구찌 가방"처럼 공백을 포함할 수 있어서 경로 세그먼트로 넣기 전에 인코딩한다.
-        encoded_keyword = quote(self.config.keyword)
-        return (
-            f"https://web.joongna.com/search/{encoded_keyword}"
-            f"?page={page_num}&category={self.config.category}"
-        )
+        # URL 조립은 Playwright와 무관한 config에 둔다. 기본 category를 강제하지 않는
+        # 규칙을 브라우저 없는 단위 테스트에서도 검증할 수 있다.
+        return self.config.build_search_url(page_num)
 
     def _resolve_url(self, href: str) -> str | None:
         return f"https://web.joongna.com{href}" if href.startswith("/") else href

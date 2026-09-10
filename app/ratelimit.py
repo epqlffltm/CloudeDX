@@ -22,8 +22,6 @@ from collections.abc import Callable
 
 from fastapi import Request
 
-from app.config import TRUST_PROXY_HEADERS
-
 # 몇 번 hit 할 때마다 빈 키를 정리할지. 매번 하면 O(키 수)라 부담이고, 안 하면
 # 스캐너가 IP 를 바꿔가며 두드릴 때 dict 가 계속 자란다.
 _SWEEP_EVERY = 256
@@ -122,21 +120,16 @@ class SlidingWindowLimiter:
 
 def client_ip(request: Request) -> str:
     """
-    요청을 보낸 쪽의 IP.
+    호출 제한에 사용할 실제 클라이언트 IP를 반환한다.
 
-    ALB 뒤에서는 request.client.host 가 전부 ALB 의 IP 라, 그것으로 세면 모든
-    사용자가 한 사람으로 묶여 첫 사용자가 상한을 채우면 전원이 막힌다.
-    그래서 운영(TRUST_PROXY_HEADERS)에서는 X-Forwarded-For 의 첫 값을 쓴다.
+    raw X-Forwarded-For를 여기서 다시 파싱하지 않는다. 그 헤더는 클라이언트도 직접
+    보낼 수 있어서, 애플리케이션이 첫 값을 그대로 믿으면 로그인/검색/클릭 제한의 키를
+    위조할 수 있다.
 
-    로컬에서는 이 헤더를 믿으면 안 된다 — 누구나 헤더에 아무 IP 나 적어서 제한을
-    피할 수 있다. 앞에 프록시가 있어서 헤더를 덮어쓰는 것이 보장될 때만 켠다.
+    운영에서는 Uvicorn의 proxy headers 기능과 FORWARDED_ALLOW_IPS로 신뢰할 프록시
+    대역을 제한한다. 신뢰 가능한 프록시에서 온 경우 Uvicorn이 request.client를 실제
+    클라이언트 주소로 정규화하므로, 애플리케이션은 그 검증 결과만 사용한다.
     """
-    if TRUST_PROXY_HEADERS:
-        forwarded = request.headers.get("x-forwarded-for", "")
-        first = forwarded.split(",", 1)[0].strip()
-        if first:
-            return first
-
     if request.client is None:
         return "unknown"
 

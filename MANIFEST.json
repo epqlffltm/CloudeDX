@@ -1,0 +1,15 @@
+{
+  "base_commit": "ea5eb54c4f8041f15bdf984cce8cb78f472621db",
+  "github_modified": false,
+  "purpose": "seller-scoped inventory and photo upload ownership fix",
+  "files": [
+    "app/routers/uploads.py",
+    "app/db/repository.py",
+    "web/js/client_photos.js",
+    "scripts/repair_unowned_uploads.py",
+    "app/tests/test_upload_seller_link.py",
+    "app/tests/test_photo_upload_regressions.py",
+    "PATCH_NOTES.md"
+  ],
+  "notes": "repository.py는 앞선 정적 리뷰의 category upsert/sweep scope 수정도 포함한 누적 수정본이며, 이번 패치에서 commit=False 옵션을 추가했습니다."
+}

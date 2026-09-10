@@ -96,40 +96,36 @@ async def run_crawl_round(jobs: tuple[CrawlJob, ...]) -> int:
     return total
 
 
-async def should_crawl_now() -> bool:
+async def seconds_until_next_crawl() -> float:
     """
-    프로세스가 뜨자마자 수집을 시작해야 하는지 판단한다.
+    프로세스 기동 시 다음 수집까지 실제로 남은 초를 반환한다.
 
-    개발 중에는 서버를 하루에도 몇 번씩 재시작하는데, 그때마다 검색을 새로 도는 건
-    사이트에도 부담이고 봇 감지 위험도 올린다. 마지막 라운드가 주기 안에 있으면
-    건너뛰고 다음 주기를 기다린다. 기록이 없으면(첫 실행) 당연히 바로 시작한다.
+    예전 crawler_loop는 should_crawl_now()가 False이면 남은 시간이 1분이든 29분이든
+    전체 CRAWL_INTERVAL_SECONDS를 다시 잤다. 30분 주기에서 마지막 수집 29분 뒤
+    프로세스를 재시작하면 원래 1분 뒤 돌아야 할 라운드가 30분 뒤로 밀려, 실제 간격이
+    거의 59분이 될 수 있었다.
 
-    items.last_seen_at이 아니라 crawl_runs를 보는 이유는 실패한 라운드도 세기 위해서다.
-    전부 실패한 라운드는 아무것도 저장하지 않으므로 last_seen_at이 갱신되지 않고,
-    그러면 재시작할 때마다 곧바로 다시 긁으러 간다 — 봇 감지로 막힌 상황이라면 그게
-    제일 안 좋은 행동이다.
-
-    다른 프로세스가 수집 중이면 양보한다. 크롤러 컨테이너가 배포 중에 잠깐 두 개가 되는
-    상황에서 같은 매물을 두 번 긁는 걸 줄여준다. 다만 이건 진짜 잠금이 아니다 —
-    두 프로세스가 동시에 확인하면 둘 다 통과할 수 있다. 완전한 상호 배제가 필요해지면
-    Postgres 어드바이저리 락으로 올려야 한다.
+    이 함수는 crawl_runs 기준으로 남은 시간을 그대로 반환해 재시작이 스케줄을
+    뒤로 미루지 않게 한다. 0이면 즉시 실행한다.
     """
     latest = await crawl_runs.get_latest_run()
 
     if latest is None:
         logger.info("수집 기록이 없어 즉시 시작합니다.")
-        return True
+        return 0.0
 
     if latest.status == CrawlRunStatus.RUNNING:
         if not crawl_runs.is_stale(latest, CRAWL_RUN_TIMEOUT_MINUTES):
+            # 다른 프로세스가 언제 끝날지는 알 수 없다. 기존 동작처럼 한 정상 주기
+            # 뒤 다시 확인한다. 중복 수집을 피하는 쪽을 우선한다.
             logger.info("다른 프로세스가 수집 중이라 이번 차례는 건너뜁니다.")
-            return False
+            return float(CRAWL_INTERVAL_SECONDS)
 
         logger.warning(
             "%d분 넘게 running으로 남은 기록이 있습니다. 비정상 종료로 보고 새로 시작합니다.",
             CRAWL_RUN_TIMEOUT_MINUTES,
         )
-        return True
+        return 0.0
 
     reference = latest.finished_at or latest.started_at
 
@@ -140,21 +136,34 @@ async def should_crawl_now() -> bool:
 
     if elapsed >= CRAWL_INTERVAL_SECONDS:
         logger.info("마지막 수집이 %s분 전이라 즉시 시작합니다.", int(elapsed // 60))
-        return True
+        return 0.0
 
-    remaining = int((CRAWL_INTERVAL_SECONDS - elapsed) // 60)
-    logger.info("마지막 수집이 최근이라 건너뜁니다. 약 %s분 뒤 시작합니다.", remaining)
+    remaining = max(0.0, CRAWL_INTERVAL_SECONDS - elapsed)
+    logger.info(
+        "마지막 수집이 최근이라 건너뜁니다. 약 %s분 뒤 시작합니다.",
+        max(1, int((remaining + 59) // 60)),
+    )
 
-    return False
+    return remaining
+
+
+async def should_crawl_now() -> bool:
+    """
+    프로세스가 뜨자마자 수집을 시작해야 하는지 판단한다.
+
+    외부 호출부와 기존 테스트 호환을 위해 bool API는 유지하되, 실제 대기 시간 계산은
+    seconds_until_next_crawl() 한 곳에서 한다.
+    """
+    return await seconds_until_next_crawl() <= 0
 
 
 async def crawler_loop(jobs: tuple[CrawlJob, ...]) -> None:
     """
     주기적으로 수집하는 루프.
 
-    첫 라운드는 should_crawl_now()가 판단해서 즉시 돌거나 다음 주기까지 기다린다.
-    라운드가 실패해도 루프는 유지하고, 정상 주기보다 짧게 기다렸다가 다시 시도한다 —
-    봇 감지 같은 일시적 문제라면 주기 전체를 버릴 이유가 없다.
+    첫 라운드는 crawl_runs 기준으로 실제 남은 시간만 기다린다. 라운드가 실패해도
+    루프는 유지하고, 정상 주기보다 짧게 기다렸다가 다시 시도한다 — 봇 감지 같은
+    일시적 문제라면 주기 전체를 버릴 이유가 없다.
 
     백엔드 프로세스가 이 루프를 create_task로 띄울 때는 서버 시작을 막지 않는다
     (app/main.py 참고). 크롤러를 별도 컨테이너로 띄울 때는 app/crawler/__main__.py가
@@ -162,8 +171,9 @@ async def crawler_loop(jobs: tuple[CrawlJob, ...]) -> None:
     """
     logger.info("백그라운드 수집 시작 (주기 %s분)", CRAWL_INTERVAL_MINUTES)
 
-    if not await should_crawl_now():
-        await asyncio.sleep(CRAWL_INTERVAL_SECONDS)
+    initial_delay = await seconds_until_next_crawl()
+    if initial_delay > 0:
+        await asyncio.sleep(initial_delay)
 
     while True:
         try:

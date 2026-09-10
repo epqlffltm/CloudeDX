@@ -6,6 +6,7 @@ daangn/config.py와 동일한 방침 — DB나 FastAPI와 독립적인 설정만
 """
 
 from dataclasses import dataclass
+from urllib.parse import quote, urlencode
 
 # 받지 않을 리소스 종류. base.EngineConfig의 기본값과 같은 값을 여기 두는 이유는
 # 이 모듈이 Playwright에 의존하지 않게 하기 위해서다 — base를 임포트하면 순수 설정
@@ -16,8 +17,11 @@ _BLOCKED_RESOURCES: frozenset[str] = frozenset({"image", "media", "font"})
 @dataclass(slots=True)
 class JoongnaCrawlerConfig:
     brand: str = "구찌"
-    keyword_suffix: str = "가방"  # 브랜드명만 검색하면 신발/지갑 등도 섞여서, "가방"을 붙여 좁힌다
-    category: str = "103"  # 원본 스크립트 기준 여성 가방 카테고리로 추정
+    keyword_suffix: str = "가방"  # 브랜드명만 검색하면 다른 품목도 섞여서 서픽스로 좁힌다.
+    # 예전 기본값 "103"은 가방 카테고리로 추정된 값이었고, watch/jewelry/apparel/shoes
+    # SearchJob에도 그대로 적용돼 검색 계획과 충돌했다. 검증된 카테고리 ID를 명시적으로
+    # 아는 호출부만 설정하고, 기본은 키워드 검색 전체 범위로 둔다.
+    category: str | None = None
     max_pages: int = 5
     headless: bool = True
     timeout_ms: int = 60_000
@@ -34,3 +38,21 @@ class JoongnaCrawlerConfig:
     @property
     def keyword(self) -> str:
         return f"{self.brand} {self.keyword_suffix}".strip()
+
+    def build_search_url(self, page_num: int) -> str:
+        """
+        검색 URL을 만든다.
+
+        category가 없으면 category 쿼리 파라미터 자체를 보내지 않는다. 확인되지 않은
+        가방 카테고리 ID를 모든 품목 검색에 강제하는 것보다 검색어 서픽스로 범위를
+        좁히는 편이 안전하다. 추후 실제 중고나라 카테고리 ID를 검증하면 호출부에서
+        category를 명시하면 된다.
+        """
+        params = {"page": str(page_num)}
+        if self.category:
+            params["category"] = self.category
+
+        return (
+            f"https://web.joongna.com/search/{quote(self.keyword)}"
+            f"?{urlencode(params)}"
+        )

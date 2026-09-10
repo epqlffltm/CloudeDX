@@ -1,28 +1,19 @@
 # app/routers/uploads.py
-
 """
-기업고객 전용 CSV 업로드.
+기업고객 전용 CSV/사진 업로드와 '내 매물' 조회.
 
-파일을 multipart가 아니라 요청 본문(text/csv)으로 받는다. multipart를 쓰려면
-python-multipart를 새로 넣어야 하는데, 파일이 하나뿐이고 함께 보낼 필드도 없어서
-의존성과 uv.lock을 건드릴 만한 이유가 못 된다. 화면은 FileReader로 읽어 그대로
-POST한다(web/js/client.js).
-
-매물 사진 등록(PUT /items/{id}/image)도 같은 방식이다. 매물 id는 경로에 있고
-파일은 하나이며 함께 보낼 필드가 없어서, 여기서도 multipart가 주는 이점이 없다.
-
-저장은 repository.upsert_items로 간다 — 크롤러와 같은 문이다. 제목 정제, 브랜드
-판정, 카테고리 분류, url 기준 중복 처리가 업로드분에도 똑같이 걸린다. 별도 경로를
-만들면 "크롤링한 샤넬"과 "올린 샤넬"의 표기가 갈라진다.
-
-main.py에서 prefix="/api"를 붙이므로 실제 경로는 /api/uploads/csv 다.
+핵심 원칙:
+- 직접등록 매물은 반드시 로그인 계정의 seller_id와 연결한다.
+- seller_id가 설정되지 않았거나 실제 sellers 행이 없으면 새 매물을 만들지 않는다.
+- '내 매물'은 source=직접등록 전체가 아니라 현재 로그인 판매자의 매물만 반환한다.
+- 사진 수정 권한은 기존 owns_item()의 엄격한 소유권 규칙을 그대로 유지한다.
 """
 
 import asyncio
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,6 +36,7 @@ from app.domain.storage import (
     save_image,
 )
 from app.schemas.auth import UploadResponse
+from app.schemas.products import ListingListResponse, ListingOut
 from app.schemas.uploads import ImageUploadResponse
 
 logger = logging.getLogger(__name__)
@@ -53,20 +45,7 @@ router = APIRouter(prefix="/uploads", tags=["uploads"])
 
 
 async def _read_body_capped(request: Request, limit: int) -> bytes:
-    """
-    본문을 읽되 limit 바이트를 넘기면 그 자리에서 중단한다.
-
-    request.body() 는 전부 읽은 **뒤에** 길이를 알려준다. 그것을 재고 413을 돌려줘야
-    소용이 없다 — 막으려던 수백 MB는 이미 메모리에 올라와 있다. 검사가 방어가 되려면
-    읽는 도중에 끊어야 한다.
-
-    Content-Length 를 먼저 보는 것만으로는 부족하다. chunked 전송에는 그 헤더가 없고,
-    있더라도 클라이언트가 보내는 값이라 실제 본문과 일치한다는 보장이 없다. 헤더는
-    빠른 거절용으로만 쓰고, 판단은 실제로 읽은 바이트로 한다.
-
-    앞단에 프록시가 있어도 이 검사는 필요하다. 배포의 앞단인 ALB 는 본문 크기를
-    제한해 주지 않고, 앱이 프록시 없이 뜨는 로컬·CI에는 애초에 그 방어가 없다.
-    """
+    """요청 본문을 읽되 limit 바이트를 넘으면 읽는 도중 413으로 중단한다."""
     declared = request.headers.get("content-length")
 
     if declared is not None and declared.isdigit() and int(declared) > limit:
@@ -80,29 +59,64 @@ async def _read_body_capped(request: Request, limit: int) -> bytes:
 
     async for chunk in request.stream():
         size += len(chunk)
-
         if size > limit:
             raise HTTPException(
                 status_code=status.HTTP_413_CONTENT_TOO_LARGE,
                 detail=f"파일이 너무 큽니다. 최대 {limit // (1024 * 1024)}MB까지 가능합니다.",
             )
-
         chunks.append(chunk)
 
     return b"".join(chunks)
 
 
+async def _require_client_seller(session: AsyncSession, user: User) -> Seller:
+    """
+    사진/직접등록 기능을 쓰는 client 계정은 반드시 실제 Seller와 연결되어야 한다.
+
+    예전 동작은 CLIENT_SELLER_ID=0 또는 존재하지 않는 id여도 CSV 업로드를 200으로
+    성공시켰다. 그 결과 seller_id=NULL 매물이 생기고, 이후 사진 업로드는 owns_item()
+    검사에서 영구히 403이 됐다. 이제는 잘못된 상태의 데이터를 만들기 전에 거절한다.
+    """
+    if user.seller_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "기업고객 계정에 판매자가 연결되어 있지 않습니다. "
+                "CLIENT_SELLER_ID를 실제 sellers.id로 설정해 주세요."
+            ),
+        )
+
+    seller = await session.get(Seller, user.seller_id)
+    if seller is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"CLIENT_SELLER_ID={user.seller_id}에 해당하는 판매자가 없습니다. "
+                "판매자 데이터를 먼저 등록한 뒤 다시 시도해 주세요."
+            ),
+        )
+
+    return seller
+
+
+def _to_listing(item: ItemRecord) -> ListingOut:
+    """직접등록 매물을 프론트엔드 ListingOut 계약으로 변환한다."""
+    return ListingOut(
+        id=item.id,
+        source=item.source,
+        title=item.clean_title or item.title,
+        brand=item.brand,
+        category=item.category,
+        price=item.price_value,
+        image_url=item.image_url,
+        item_url=item.url,
+        seller_id=item.seller_id,
+        is_authenticated=item.is_authenticated,
+    )
+
+
 async def _reject_foreign_urls(report, session: AsyncSession, user: User) -> None:
-    """
-    report.items 중 **남의 매물 URL** 을 골라내 오류로 돌리고 목록에서 뺀다.
-
-    upsert 는 URL 이 같으면 덮어쓴다 — 그것이 크롤링 재발견을 처리하는 방식이라
-    바꿀 수 없다. 대신 그 앞에서, 이미 있는 URL 이 이 계정의 것인지 확인한다.
-    크롤링 매물 URL 을 CSV 에 적으면 여기서 걸린다. 없는 URL 은 새 매물이라 통과.
-
-    SELECT 와 upsert 사이에 크롤러가 같은 URL 을 넣는 틈은 있다. 시연 규모에서는
-    감수하고, 닫으려면 upsert 의 ON CONFLICT 에 WHERE 절을 붙이면 된다.
-    """
+    """CSV에 이미 존재하는 남의 URL이 들어오면 해당 행을 저장 대상에서 제외한다."""
     if not report.items:
         return
 
@@ -119,7 +133,11 @@ async def _reject_foreign_urls(report, session: AsyncSession, user: User) -> Non
     foreign = {
         url
         for url, source, seller_id in rows
-        if not owns_item(account_seller_id=mine, item_source=source, item_seller_id=seller_id)
+        if not owns_item(
+            account_seller_id=mine,
+            item_source=source,
+            item_seller_id=seller_id,
+        )
     }
 
     if not foreign:
@@ -128,16 +146,79 @@ async def _reject_foreign_urls(report, session: AsyncSession, user: User) -> Non
     kept = []
     for item in report.items:
         if item.url in foreign:
-            # 행 번호는 여기까지 오지 않는다. 링크로 식별할 수 있으니 그것으로 알린다.
-            # add_error 는 "N행:" 접두어를 붙이므로 쓰지 않는다.
             report.skipped += 1
             report.accepted -= 1
             if len(report.errors) < 50:
-                report.errors.append(f"다른 출처의 매물이라 수정할 수 없습니다: {item.url}")
+                report.errors.append(
+                    f"다른 출처 또는 다른 판매자의 매물이라 수정할 수 없습니다: {item.url}"
+                )
         else:
             kept.append(item)
 
     report.items = kept
+
+
+@router.get(
+    "/items",
+    response_model=ListingListResponse,
+    status_code=status.HTTP_200_OK,
+    operation_id="listMyUploadedItems",
+    summary="내 직접등록 매물 (기업고객 전용)",
+    responses={
+        401: {"description": "로그인이 필요합니다."},
+        403: {"description": "기업고객 계정만 사용할 수 있습니다."},
+        409: {"description": "계정에 판매자가 올바르게 연결되어 있지 않습니다."},
+    },
+)
+async def list_my_uploaded_items(
+    user: Annotated[User, Depends(require_role("client"))],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    search: Annotated[str, Query(max_length=200)] = "",
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Annotated[int, Query(ge=0)] = 0,
+):
+    """현재 로그인한 판매자의 직접등록 매물만 반환한다."""
+    await _require_client_seller(session, user)
+
+    conditions = [
+        ItemRecord.source == UPLOAD,
+        ItemRecord.seller_id == user.seller_id,
+        ItemRecord.is_active.is_(True),
+        ItemRecord.is_usable.is_(True),
+    ]
+    query = search.strip()
+    if query:
+        conditions.append(ItemRecord.title.ilike(f"%{query}%"))
+
+    total = (
+        await session.execute(
+            select(func.count()).select_from(ItemRecord).where(*conditions)
+        )
+    ).scalar_one()
+
+    posted = func.coalesce(ItemRecord.posted_at, ItemRecord.first_seen_at)
+    rows = (
+        (
+            await session.execute(
+                select(ItemRecord)
+                .where(*conditions)
+                .order_by(posted.desc(), ItemRecord.id.desc())
+                .limit(limit)
+                .offset(offset)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    return ListingListResponse(
+        total=total,
+        count=len(rows),
+        limit=limit,
+        offset=offset,
+        has_next=offset + len(rows) < total,
+        items=[_to_listing(row) for row in rows],
+    )
 
 
 @router.post(
@@ -150,6 +231,7 @@ async def _reject_foreign_urls(report, session: AsyncSession, user: User) -> Non
         400: {"description": "CSV를 해석할 수 없습니다."},
         401: {"description": "로그인이 필요합니다."},
         403: {"description": "기업고객 계정만 사용할 수 있습니다."},
+        409: {"description": "계정에 판매자가 올바르게 연결되어 있지 않습니다."},
         413: {"description": "파일이 너무 큽니다."},
         503: {"description": "DB에 쓸 수 없는 상태입니다. 잠시 후 다시 시도하세요."},
     },
@@ -159,16 +241,7 @@ async def upload_csv(
     user: Annotated[User, Depends(require_role("client"))],
     session: Annotated[AsyncSession, Depends(get_session)],
 ):
-    r"""
-    CSV 본문을 받아 매물로 저장한다.
-
-    첫 줄은 헤더이고 title, price, url이 반드시 있어야 한다. brand, image_url,
-    region은 선택이다. 한글 헤더(제목/가격/링크/브랜드/이미지/지역)도 받는다.
-
-    브랜드를 비워도 된다 — 제목에서 판정한다. 시트에 적힌 브랜드는 검색어 자리로만
-    쓰이고, 화면에 뜨는 브랜드는 제목 판정 결과다. 사람이 적은 값보다 같은 규칙을
-    거친 값이 목록 필터와 어긋나지 않는다.
-    """
+    """CSV 본문을 받아 직접등록 매물로 저장하고 현재 client 판매자와 연결한다."""
     raw = await _read_body_capped(request, MAX_UPLOAD_BYTES)
 
     if not raw.strip():
@@ -179,71 +252,40 @@ async def upload_csv(
 
     report = parse_csv(raw)
 
-    # 남의 매물 URL 은 저장 전에 걸러낸다. 이 조회는 읽기뿐이라 아래 쓰기
-    # 타임아웃 블록 밖에 둬도 되지만, DB 장애면 같은 503 이어야 하므로 같이 잡는다.
     try:
         async with asyncio.timeout(WRITE_TIMEOUT_SECONDS):
+            await _require_client_seller(session, user)
             await _reject_foreign_urls(report, session, user)
+    except HTTPException:
+        raise
     except (TimeoutError, SQLAlchemyError, OSError) as exc:
-        logger.warning("CSV 업로드 실패 (소유 확인): %s", type(exc).__name__)
+        logger.warning("CSV 업로드 실패 (소유/판매자 확인): %s", type(exc).__name__)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="지금은 저장할 수 없습니다. 잠시 후 다시 시도해 주세요.",
             headers={"Retry-After": "30"},
         ) from exc
 
-    # 유효한 행이 하나도 없으면 400이다. 200에 accepted=0을 담아 주면 화면이
-    # 성공으로 그리고, 사용자는 아무 일도 안 일어난 이유를 모른다.
     if report.accepted == 0:
         detail = report.errors[0] if report.errors else (
             f"저장할 행이 없습니다. 첫 줄에 {', '.join(REQUIRED_COLUMNS)} 이 있어야 합니다."
         )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
 
-    # 저장됐다고 다 보이는 것이 아니다. 제목에서 브랜드나 카테고리를 판정하지
-    # 못하면 정제 단계에서 is_usable=False가 되고 목록에서 빠진다(크롤링분과
-    # 같은 규칙이다). "3건 저장"이라고 알려놓고 2건만 보이면 사용자는 원인을
-    # 찾을 수 없으므로, 걸러진 것을 제목까지 붙여 돌려준다.
     urls = [item.url for item in report.items]
 
-    # DB 작업 전체를 한 번에 시간 제한한다.
-    #
-    # 주 DB가 페일오버하는 60~120초 동안 이 요청은 어차피 성공할 수 없다. 제한이
-    # 없으면 커넥션이 timeout 될 때까지 매달려 있고, 그동안 워커 하나를 붙잡는다.
-    # 부하 테스트 중이라면 업로드 몇 건이 워커를 다 차지해서, 정작 살아 있는
-    # 조회 경로까지 대기가 생긴다 — 읽기/쓰기를 나눈 의미가 없어진다.
-    #
-    # 빨리 실패하고 사용자에게 다시 시도하라고 말하는 편이 낫다.
     try:
         async with asyncio.timeout(WRITE_TIMEOUT_SECONDS):
-            # 세션을 넘겨 커넥션을 한 번만 맺는다. 여기서 또 열면 DB가 죽어 있을 때
-            # connect timeout 을 두 배로 기다린다(app/db/repository.py 설명 참고).
-            saved = await repository.upsert_items(report.items, session=session)
+            saved = await repository.upsert_items(
+                report.items, session=session, commit=False
+            )
 
-            # 이 계정이 판매자로 선언돼 있으면(User.seller_id), 방금 저장한 매물을
-            # 그 판매자와 연결한다. 이 연결이 있어야 화면에서 매물을 눌렀을 때
-            # 판매자 시트(연락처·약도)가 열리고, **이 계정이 나중에 이 매물을 고칠
-            # 수 있다** — 소유 검사가 seller_id 일치로만 판단하기 때문이다.
-            #
-            # upsert 계약(CrawledItem)에 seller_id를 넣지 않는 이유: 그 계약은
-            # 크롤러와 공유하는 것이고, 판매자 연결은 업로드 경로만의 사실이다.
-            # 저장 뒤 한 번의 UPDATE가 계약 확장보다 싸다.
-            if user.seller_id:
-                if await session.get(Seller, user.seller_id) is not None:
-                    await session.execute(
-                        update(ItemRecord)
-                        .where(ItemRecord.url.in_(urls), ItemRecord.source == UPLOAD)
-                        .values(seller_id=user.seller_id)
-                    )
-                    # upsert_items가 자체 커밋한 뒤라 이 UPDATE는 별도 트랜잭션이다.
-                    # 여기서 커밋하지 않으면 세션이 닫히며 조용히 롤백된다.
-                    await session.commit()
-                else:
-                    logger.warning(
-                        "CLIENT_SELLER_ID=%d 판매자가 없어 연결을 건너뜁니다. "
-                        "seed(--sellers-only)를 먼저 돌렸는지 확인하세요.",
-                        user.seller_id,
-                    )
+            await session.execute(
+                update(ItemRecord)
+                .where(ItemRecord.url.in_(urls), ItemRecord.source == UPLOAD)
+                .values(seller_id=user.seller_id)
+            )
+            await session.commit()
 
             hidden = (
                 (
@@ -268,15 +310,15 @@ async def upload_csv(
                         ItemRecord.url.in_(urls),
                         ItemRecord.is_usable.is_(True),
                         ItemRecord.is_active.is_(True),
+                        ItemRecord.seller_id == user.seller_id,
                     )
                 )
             ).scalar_one()
+    except HTTPException:
+        raise
     except (TimeoutError, SQLAlchemyError, OSError) as exc:
-        # 500이 아니라 503이다. 500은 "이 요청은 원래 안 되는 것"으로 읽히고,
-        # 503 + Retry-After 는 "지금은 안 되니 잠시 후 다시"를 뜻한다. 페일오버는
-        # 후자다. 지표에서도 앱 버그와 인프라 장애가 섞이지 않는다.
+        await session.rollback()
         logger.warning("CSV 업로드 실패 (쓰기 경로): %s", type(exc).__name__)
-
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="지금은 저장할 수 없습니다. 잠시 후 다시 시도해 주세요.",
@@ -284,8 +326,9 @@ async def upload_csv(
         ) from exc
 
     logger.info(
-        "CSV 업로드: %s가 %d행 중 %d건 저장 (%d건 제외)",
+        "CSV 업로드: %s(seller_id=%s)가 %d행 중 %d건 저장 (%d건 제외)",
         user.username,
+        user.seller_id,
         report.total_rows,
         saved,
         report.skipped,
@@ -301,6 +344,7 @@ async def upload_csv(
         filtered=list(hidden),
     )
 
+
 @router.put(
     "/items/{item_id}/image",
     response_model=ImageUploadResponse,
@@ -312,8 +356,9 @@ async def upload_csv(
         401: {"description": "로그인이 필요합니다."},
         403: {"description": "기업고객이 등록한 매물만 수정할 수 있습니다."},
         404: {"description": "해당 매물을 찾을 수 없습니다."},
+        409: {"description": "계정에 판매자가 올바르게 연결되어 있지 않습니다."},
         413: {"description": "파일이 너무 큽니다."},
-        503: {"description": "DB 또는 저장소에 쓸 수 없는 상태입니다. 잠시 후 다시 시도하세요."},
+        503: {"description": "DB 또는 저장소에 쓸 수 없는 상태입니다."},
     },
 )
 async def upload_item_image(
@@ -322,34 +367,18 @@ async def upload_item_image(
     user: Annotated[User, Depends(require_role("client"))],
     session: Annotated[AsyncSession, Depends(get_session)],
 ):
-    """
-    이미지 본문을 받아 매물 사진으로 저장한다.
-
-    CSV로 매물을 먼저 올린 뒤, 목록에서 매물을 골라 사진을 붙이는 흐름이다.
-    CSV에 이미지 주소를 적을 수 있는 판매자는 그대로 쓰면 되고, 사이트가 없어
-    올릴 곳이 없는 판매자를 위한 경로가 이쪽이다.
-
-    CSV 업로드와 마찬가지로 multipart가 아니라 본문으로 받는다. 매물 id는 경로에
-    있고 파일은 하나이며 함께 보낼 필드가 없어서, multipart가 주는 이점이 없다.
-    화면은 FileReader나 File 객체를 그대로 PUT한다.
-
-    POST가 아니라 PUT인 이유는 같은 매물에 여러 번 올리면 마지막 것만 남기 때문이다.
-    사진 컬럼이 하나뿐이라 이 연산은 멱등하다.
-    """
+    """현재 client 판매자가 소유한 직접등록 매물의 사진을 교체한다."""
     raw = await _read_body_capped(request, MAX_IMAGE_BYTES)
 
-    item = await session.get(ItemRecord, item_id)
+    await _require_client_seller(session, user)
 
+    item = await session.get(ItemRecord, item_id)
     if item is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="해당 매물을 찾을 수 없습니다.",
         )
 
-    # 주인만 고친다(app/domain/ownership.py). 크롤링 매물은 원문 사이트의 것이라
-    # 누구의 것도 아니고, 업로드 매물은 같은 판매자로 선언된 계정만 고친다.
-    # 판매자 미지정 계정은 어느 매물의 주인도 아니다 — 판매자별 계정이 생겨도
-    # 이 줄은 그대로다.
     if not owns_item(
         account_seller_id=user.seller_id,
         item_source=item.source,
@@ -360,21 +389,22 @@ async def upload_item_image(
             detail="이 계정이 등록한 매물만 수정할 수 있습니다.",
         )
 
-    # 검증과 재인코딩. 원본 바이트는 여기서 버려지고 픽셀만 새 파일로 옮겨진다.
     try:
         safe = sanitize_image(raw)
     except ImageRejected as exc:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
         ) from exc
 
     previous = item.image_url
 
-    # 저장소 실패도 DB 실패와 같은 계약이다 — 500 이 아니라 503 + Retry-After.
-    # S3 권한 누락·네트워크·로컬 디스크 권한이 여기로 온다. 앱 버그가 아니라
-    # 환경 문제이므로 "잠시 후 다시"가 맞고, 지표에서도 5xx 가 섞이면 안 된다.
     try:
-        object_name = save_image(safe.data, safe.extension)
+        object_name = await asyncio.to_thread(
+            save_image,
+            safe.data,
+            safe.extension,
+        )
     except StorageUnavailable as exc:
         logger.warning("매물 %s 사진 저장소 실패: %s", item_id, exc)
         raise HTTPException(
@@ -390,27 +420,22 @@ async def upload_item_image(
             await session.commit()
     except (TimeoutError, SQLAlchemyError) as exc:
         await session.rollback()
-
-        # 커밋이 실패했으면 방금 쓴 파일은 아무도 참조하지 않는다. 지우지 않으면
-        # 볼륨에 영영 남는다 — 어느 매물의 것도 아니라 나중에 찾아낼 방법도 없다.
-        delete_image(object_name)
+        await asyncio.to_thread(delete_image, object_name)
 
         logger.warning(
-            "매물 %s 사진 저장 실패: %s: %s", item_id, type(exc).__name__, exc
+            "매물 %s 사진 DB 저장 실패: %s: %s",
+            item_id,
+            type(exc).__name__,
+            exc,
         )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="지금은 저장할 수 없습니다. 잠시 후 다시 시도해 주세요.",
         ) from exc
 
-    # 이전 사진을 지운다. 커밋이 끝난 **뒤에** 지우는 것이 중요하다 — 먼저 지우고
-    # 커밋이 실패하면 옛 사진도 새 사진도 없는 상태가 된다.
-    #
-    # 우리가 저장한 파일만 지운다. CSV에 적어 올린 외부 주소는 남의 파일이라
-    # 지울 수도 없고 지울 대상도 아니다.
     prev_name = object_name_from_url(previous)
     if prev_name:
-        delete_image(prev_name)
+        await asyncio.to_thread(delete_image, prev_name)
 
     logger.info(
         "매물 %s 사진 등록: %dx%d, %d바이트 (%s)",

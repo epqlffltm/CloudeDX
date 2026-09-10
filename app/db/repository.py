@@ -40,6 +40,10 @@ _UPDATABLE_COLUMNS = (
     "source",
     "brand",
     "search_brand",
+    # 분류 규칙이 개선되거나 제목이 바뀌었을 때 기존 URL의 category도 같이
+    # 재판정돼야 한다. 신규 INSERT에만 category를 넣고 conflict UPDATE에서 빼면
+    # 한 번 잘못 분류된 행이 영구히 옛 카테고리에 남는다.
+    "category",
     "clean_title",
     "is_usable",
     "reject_reason",
@@ -253,6 +257,8 @@ def _dedupe_by_url(items: list[CrawledItem]) -> list[dict]:
 async def upsert_items(
     items: list[CrawledItem],
     session: AsyncSession | None = None,
+    *,
+    commit: bool = True,
 ) -> int:
     """
     크롤링 결과를 url 기준으로 insert-or-update 하고, 처리한 건수를 반환한다.
@@ -275,6 +281,9 @@ async def upsert_items(
 
     행을 하나씩 보내면 건수만큼 왕복이 생기므로 UPSERT_CHUNK_SIZE 단위로 묶어서 보낸다.
     전체가 한 트랜잭션이라, 중간에 실패하면 그 라운드 결과는 통째로 롤백된다.
+
+    caller가 넘긴 session에서 upsert 뒤 추가 UPDATE까지 원자적으로 묶어야 하는 경우
+    commit=False를 사용한다. 기본값은 기존 호출부 호환을 위해 True다.
     """
     rows = _dedupe_by_url(items)
 
@@ -282,17 +291,21 @@ async def upsert_items(
         return 0
 
     if session is not None:
-        await _upsert_rows(session, rows)
+        await _upsert_rows(session, rows, commit=commit)
         return len(rows)
 
+    # 자체 세션은 함수가 트랜잭션의 소유자이므로 항상 커밋한다.
+    # commit=False는 caller-owned session에서만 의미가 있다.
     async with async_session() as owned:
-        await _upsert_rows(owned, rows)
+        await _upsert_rows(owned, rows, commit=True)
 
     return len(rows)
 
 
-async def _upsert_rows(session: AsyncSession, rows: list[dict]) -> None:
-    """UPSERT 본체. 세션의 출처와 무관하게 같은 SQL을 돌린다."""
+async def _upsert_rows(
+    session: AsyncSession, rows: list[dict], *, commit: bool = True
+) -> None:
+    """UPSERT 본체. caller가 트랜잭션을 묶어야 하면 commit=False를 쓴다."""
     for start in range(0, len(rows), UPSERT_CHUNK_SIZE):
         chunk = rows[start : start + UPSERT_CHUNK_SIZE]
 
@@ -317,7 +330,8 @@ async def _upsert_rows(session: AsyncSession, rows: list[dict]) -> None:
 
         await session.execute(stmt)
 
-    await session.commit()
+    if commit:
+        await session.commit()
 
 
 async def sweep_missing(scope: CrawlScope, seen_urls: set[str]) -> dict[str, int]:
@@ -326,9 +340,9 @@ async def sweep_missing(scope: CrawlScope, seen_urls: set[str]) -> dict[str, int
 
     처리한 건수를 {"marked": 카운트 올린 수, "deactivated": 비활성이 된 수}로 반환한다.
 
-    **scope에 든 (수집처, 브랜드) 조합만 건드린다.** 크롤링이 실패했거나 수집 범위
-    한계에 걸린 브랜드는 scope에 없으므로 그쪽 매물은 손대지 않는다. 못 본 것을
-    사라진 것으로 오해하지 않기 위한 안전장치다.
+    **scope에 든 (수집처, 브랜드, 카테고리) 조합만 건드린다.** 크롤링이 실패했거나
+    수집 범위 한계에 걸린 범위는 scope에 없으므로 그쪽 매물은 손대지 않는다.
+    못 본 것을 사라진 것으로 오해하지 않기 위한 안전장치다.
 
     바로 지우지 않고 세는 이유:
         한 라운드에서 안 보였다는 것만으로는 판단할 수 없다. 사이트가 잠깐 느렸거나,
@@ -365,14 +379,13 @@ async def sweep_missing(scope: CrawlScope, seen_urls: set[str]) -> dict[str, int
         )
         marked = len(result.scalars().all())
 
-        # 임계값을 넘긴 것을 비활성으로 내린다. 위 UPDATE와 나눈 이유는 카운트를
-        # 올린 뒤의 값으로 판단해야 하기 때문이다.
+        # 임계값을 넘긴 것을 비활성으로 내린다. 카운트를 올린 UPDATE와 같은 scope를
+        # 반드시 재사용한다. source/brand만 다시 쓰면 다른 category의 누적 미발견
+        # 매물까지 이번 sweep에서 함께 비활성화되는 교차 카테고리 버그가 생긴다.
         result = await session.execute(
             update(ItemRecord)
             .where(
-                ItemRecord.source == scope.source,
-                ItemRecord.brand.in_(scope.brands),
-                ItemRecord.is_active.is_(True),
+                *base,
                 ItemRecord.missing_count >= MISSING_THRESHOLD,
             )
             .values(
