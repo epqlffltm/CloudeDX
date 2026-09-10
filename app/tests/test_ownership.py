@@ -152,7 +152,6 @@ async def test_image_upload_rejects_other_sellers_item(client, session, monkeypa
     seller_a = await make_seller(session, "A 상사")
     seller_b = await make_seller(session, "B 상사")
 
-    # B 로 로그인해 올린다.
     monkeypatch.setattr(auth_module, "CLIENT_SELLER_ID", seller_b)
     await _login_client(client)
     csv = "title,price,url\n샤넬 클래식 플랩백 미디움,1000000,https://ex.com/seller-b-1\n"
@@ -167,8 +166,6 @@ async def test_image_upload_rejects_other_sellers_item(client, session, monkeypa
         )
     ).scalar_one()
 
-    # 이제 계정이 A 로 선언된다. 판매자 id 는 쿠키가 아니라 매 요청 설정에서 읽으므로
-    # 재로그인 없이도 다음 요청부터 A 다. B 의 매물은 남의 것이다.
     monkeypatch.setattr(auth_module, "CLIENT_SELLER_ID", seller_a)
     res = await client.put(
         f"/api/uploads/items/{item_id}/image",
@@ -177,33 +174,33 @@ async def test_image_upload_rejects_other_sellers_item(client, session, monkeypa
     )
     assert res.status_code == 403
 
-    # B 의 CSV 재업로드도 A 는 못 한다.
     res = await client.post(
         "/api/uploads/csv", content=csv.encode(), headers={"Content-Type": "text/csv"}
     )
     assert res.status_code == 400
 
 
-async def test_unassigned_client_cannot_edit_anything(client, session, monkeypatch):
-    """판매자가 선언되지 않은 client(CLIENT_SELLER_ID=0)는 업로드는 되지만 수정은 못 한다."""
+async def test_unassigned_client_cannot_upload_items(client, session, monkeypatch):
+    """판매자가 연결되지 않은 client는 소유자 없는 매물을 만들 수 없다."""
     monkeypatch.setattr(auth_module, "CLIENT_SELLER_ID", 0)
     await _login_client(client)
 
-    csv = "title,price,url\n샤넬 클래식 플랩백 미디움,1000000,https://ex.com/unassigned-1\n"
+    csv = (
+        "title,price,url\n"
+        "샤넬 클래식 플랩백 미디움,1000000,https://ex.com/unassigned-1\n"
+    )
     res = await client.post(
-        "/api/uploads/csv", content=csv.encode(), headers={"Content-Type": "text/csv"}
+        "/api/uploads/csv",
+        content=csv.encode(),
+        headers={"Content-Type": "text/csv"},
     )
-    assert res.status_code == 200, res.text
-    await session.rollback()
-    item_id = (
-        await session.execute(
-            select(ItemRecord.id).where(ItemRecord.url == "https://ex.com/unassigned-1")
-        )
-    ).scalar_one()
 
-    res = await client.put(
-        f"/api/uploads/items/{item_id}/image",
-        content=_png_bytes(),
-        headers={"Content-Type": "image/png"},
-    )
-    assert res.status_code == 403
+    assert res.status_code == 409
+    assert "판매자가 연결되어 있지 않습니다" in res.json()["detail"]
+
+    row = (
+        await session.execute(
+            select(ItemRecord).where(ItemRecord.url == "https://ex.com/unassigned-1")
+        )
+    ).scalar_one_or_none()
+    assert row is None

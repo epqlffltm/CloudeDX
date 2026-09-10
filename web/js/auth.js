@@ -1,43 +1,54 @@
 // web/js/auth.js
 //
-// 로그인 관련 호출. 세션은 HttpOnly 쿠키라 JS가 토큰을 들고 다니지 않는다 —
-// 같은 출처라 fetch에 자동으로 실린다. 여기서는 credentials만 챙기면 된다.
+// 로그인 관련 호출.
+// 세션의 정본은 서버가 발급한 HttpOnly 쿠키다.
+// sessionStorage는 표시 편의를 위한 보조 정보일 뿐, 로그인 판정에는 사용하지 않는다.
 
-const OPTS = { credentials: 'same-origin' };
+const OPTS = {
+  credentials: 'same-origin',
+  cache: 'no-store',
+};
+
+function rememberRole(role) {
+  try {
+    if (role) {
+      sessionStorage.setItem('reverdi_role', role);
+    } else {
+      sessionStorage.removeItem('reverdi_role');
+    }
+  } catch {
+    // sessionStorage를 쓸 수 없어도 서버 세션에는 영향이 없다.
+  }
+}
 
 /**
  * 지금 로그인한 사람. 비로그인이면 null.
- * 서버가 비로그인을 401이 아니라 200 + null로 주므로 여기서도 예외가 아니다.
+ *
+ * 반드시 서버 /api/auth/me를 확인한다.
+ * URL 파라미터나 sessionStorage 값만으로 로그인 사용자 객체를 만들지 않는다.
  */
 export async function fetchMe() {
   try {
-    const urlParam = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('role') : null;
-    if (urlParam === 'admin') {
-      sessionStorage.setItem('reverdi_role', 'admin');
-    } else if (urlParam === 'client') {
-      sessionStorage.setItem('reverdi_role', 'client');
+    const res = await fetch('/api/auth/me', OPTS);
+
+    if (!res.ok) {
+      rememberRole(null);
+      return null;
     }
 
-    const storedRole = typeof window !== 'undefined' ? sessionStorage.getItem('reverdi_role') : null;
-    if (storedRole === 'admin') {
-      return { username: 'admin', role: 'admin', display_role: '관리자' };
+    const data = await res.json();
+
+    if (!data?.role) {
+      rememberRole(null);
+      return null;
     }
-    if (storedRole === 'client') {
-      return { username: 'client', role: 'client', display_role: '기업고객' };
-    }
-  } catch (err) {}
 
-  const res = await fetch('/api/auth/me', OPTS);
-
-  if (!res.ok) return null;
-
-  const data = await res.json();
-  if (data && data.role) {
-    try {
-      sessionStorage.setItem('reverdi_role', data.role);
-    } catch (err) {}
+    rememberRole(data.role);
+    return data;
+  } catch {
+    // 네트워크 오류를 로그인 성공으로 추정하지 않는다.
+    return null;
   }
-  return data;
 }
 
 export async function login(username, password) {
@@ -54,29 +65,21 @@ export async function login(username, password) {
   }
 
   const user = await res.json();
-  if (user && user.role) {
-    try {
-      sessionStorage.setItem('reverdi_role', user.role);
-    } catch (err) {}
-  }
+  rememberRole(user?.role ?? null);
   return user;
 }
 
 export async function logout() {
-  try {
-    sessionStorage.removeItem('reverdi_role');
-  } catch (err) {}
-  await fetch('/api/auth/logout', { ...OPTS, method: 'POST' });
+  rememberRole(null);
+  await fetch('/api/auth/logout', {
+    ...OPTS,
+    method: 'POST',
+  });
 }
 
 /**
- * 이 페이지에 들어올 자격이 있는지 확인하고, 아니면 돌려보낸다.
- *
- * 화면 단속은 편의일 뿐 보안이 아니다 — 진짜 방어는 서버의 require_role이다.
- * 여기서 막는 이유는 권한 없는 사람이 빈 화면과 401 오류를 보는 대신
- * 갈 곳으로 바로 가게 하려는 것이다.
- *
- * @returns 통과한 사용자. 통과하지 못하면 이동 후 null.
+ * 이 페이지에 들어올 자격이 있는지 확인하고, 아니면 적절한 페이지로 보낸다.
+ * 실제 권한 검사는 서버의 require_role이 담당한다.
  */
 export async function guard(requiredRole) {
   const me = await fetchMe();
@@ -87,8 +90,6 @@ export async function guard(requiredRole) {
   }
 
   if (me.role !== requiredRole) {
-    // 로그인은 했는데 역할이 다르다. 로그인 화면으로 보내면 다시 로그인해도
-    // 같은 곳에 막히므로, 자기 자리로 보낸다.
     location.replace(me.role === 'admin' ? 'admin.html' : 'client.html');
     return null;
   }
@@ -96,7 +97,7 @@ export async function guard(requiredRole) {
   return me;
 }
 
-/** 상단 사용자 표시줄. 계정 페이지 두 곳이 같은 모양을 쓴다. */
+/** 상단 사용자 표시줄. 관리자/기업고객 화면이 같은 모양을 쓴다. */
 export function renderAccountBar(me) {
   const box = document.getElementById('accountBar');
   if (!box || !me) return;

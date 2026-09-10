@@ -1,8 +1,9 @@
 // web/js/login.js
 //
 // 로그인 화면. 성공하면 역할에 맞는 페이지로 보낸다.
+// 이미 유효한 서버 세션이 있으면 로그인 폼을 다시 보여주지 않는다.
 
-import { login } from './auth.js';
+import { fetchMe, login } from './auth.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -15,11 +16,13 @@ function showError(message) {
 }
 
 async function init() {
-  // 로그인 화면에서는 항상 로그인 입력 폼을 표시한다 (자동 리다이렉트 금지)
+  // 유효한 서버 세션이 이미 있으면 자기 관리 화면으로 바로 이동한다.
+  const me = await fetchMe();
+  if (me) {
+    location.replace(homeFor(me.role));
+    return;
+  }
 
-  // 비밀번호 표시 토글. input의 type을 password <-> text로 바꾸는 것이 전부다.
-  // aria-pressed는 CSS가 눈/빗금눈 아이콘을 고르는 기준이자, 스크린리더에
-  // "지금 보이는 상태인가"를 알리는 값이다.
   const toggle = $('pwToggle');
 
   if (toggle) {
@@ -33,7 +36,7 @@ async function init() {
     });
   }
 
-  // 시연 계정 칸을 누르면 입력칸이 채워진다. 발표 중에 오타로 막히지 않게.
+  // 시연 계정 칸을 누르면 입력칸이 채워진다.
   for (const row of document.querySelectorAll('[data-fill]')) {
     row.addEventListener('click', () => {
       const who = row.dataset.fill;
@@ -56,7 +59,6 @@ async function init() {
       return;
     }
 
-    // 연타로 요청이 겹치는 것을 막는다.
     submit.disabled = true;
     submit.textContent = '확인 중…';
     $('loginError').hidden = true;

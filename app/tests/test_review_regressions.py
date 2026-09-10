@@ -44,11 +44,12 @@ async def test_upsert_updates_category_when_same_url_is_reclassified(session):
         await session.execute(select(ItemRecord).where(ItemRecord.url == url))
     ).scalar_one()
     assert first.category == "bag"
+    first_id = first.id
 
     await repository.upsert_items([item(url, "샤넬 J12 시계")])
 
     session.expire_all()
-    updated = await session.get(ItemRecord, first.id)
+    updated = await session.get(ItemRecord, first_id)
     assert updated.category == "watch"
 
 
@@ -57,17 +58,12 @@ async def test_sweep_does_not_deactivate_another_category(session, monkeypatch):
     watch_url = "https://example.com/watch"
 
     await repository.upsert_items(
-        [
-            item(bag_url, "샤넬 클래식 가방"),
-            item(watch_url, "샤넬 J12 시계"),
-        ]
+        [item(bag_url, "샤넬 클래식 가방"), item(watch_url, "샤넬 J12 시계")]
     )
 
     watch_obj = (
         await session.execute(select(ItemRecord).where(ItemRecord.url == watch_url))
     ).scalar_one()
-    # 다른 category가 이미 임계값에 걸려 있는 상태를 만들어 두면, 예전의 두 번째
-    # UPDATE(category 조건 누락)는 이번 bag sweep에서 이 watch까지 비활성화했다.
     watch_obj.missing_count = 1
     await session.commit()
 
