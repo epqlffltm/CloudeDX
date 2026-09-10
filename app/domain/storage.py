@@ -411,3 +411,6 @@ def delete_image(object_name: str) -> None:
     except ValueError:
         # 경로가 루트를 벗어난 값이면 우리가 만든 파일이 아니다. 지우지 않는다.
         return
+    except OSError as exc:
+        # S3와 같은 계약: 정리 실패 때문에 이미 성공한 사진 교체 요청을 실패시키지 않는다.
+        logger.warning("로컬 삭제 실패: %s (%s)", object_name, type(exc).__name__)
