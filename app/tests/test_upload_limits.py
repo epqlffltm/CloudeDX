@@ -14,6 +14,7 @@ import pytest
 from sqlalchemy.exc import OperationalError
 
 from app.config import MAX_UPLOAD_BYTES
+from app.tests.sellers import declare_client_seller
 
 CSV_HEADERS = {"Content-Type": "text/csv"}
 
@@ -24,8 +25,15 @@ VALID_CSV = (
 
 
 @pytest.fixture
-async def client_session(client):
-    """기업고객으로 로그인한 클라이언트."""
+async def client_session(client, session, monkeypatch):
+    """
+    실제 seller가 연결된 기업고객 클라이언트.
+
+    로컬 .env의 CLIENT_SELLER_ID나 개발 DB에 남아 있는 sellers 행에 의존하지 않는다.
+    CI처럼 완전히 빈 DB에서도 같은 조건으로 테스트한다.
+    """
+    await declare_client_seller(session, monkeypatch)
+
     response = await client.post(
         "/api/auth/login",
         json={"username": "client", "password": "client1234"},
@@ -36,12 +44,7 @@ async def client_session(client):
 
 
 class TestUploadSizeCap:
-    """
-    크기 제한은 다 읽은 뒤가 아니라 읽는 도중에 걸려야 한다.
-
-    request.body() 로 전부 읽고 나서 재는 방식은 방어가 아니다. 413을 돌려줄 때쯤이면
-    막으려던 수백 MB가 이미 메모리에 있다.
-    """
+    """크기 제한은 다 읽은 뒤가 아니라 읽는 도중에 걸려야 한다."""
 
     async def test_선언된_크기가_넘으면_거절한다(self, client_session):
         """Content-Length 로 즉시 거절하는 빠른 경로."""
@@ -54,12 +57,7 @@ class TestUploadSizeCap:
         assert response.status_code == 413
 
     async def test_크기를_숨겨도_거절한다(self, client_session):
-        """
-        청크 전송에는 Content-Length 가 없다. 헤더만 믿으면 그대로 통과한다.
-
-        여기서 검증하는 것은 상태 코드보다 **읽다가 끊었는가**이다. 전부 읽은 뒤에
-        쟀다면 이 테스트도 413을 받으므로, 아래 메모리 테스트와 짝으로 봐야 한다.
-        """
+        """청크 전송에도 크기 제한이 적용된다."""
 
         async def chunks():
             for _ in range(20):
@@ -74,13 +72,7 @@ class TestUploadSizeCap:
         assert response.status_code == 413
 
     async def test_큰_본문을_통째로_메모리에_올리지_않는다(self, client_session):
-        """
-        20MB를 보내도 제한(5MB) 근처에서 멈춰야 한다.
-
-        tracemalloc 은 파이썬 객체 할당만 세므로 절대값이 정밀하지는 않다. 여기서
-        보려는 것은 자릿수다 — 전부 버퍼링하면 20MB대가 나오고, 도중에 끊으면
-        한 자릿수 MB에 머문다.
-        """
+        """20MB를 보내도 제한(5MB) 근처에서 멈춰야 한다."""
         import tracemalloc
 
         async def chunks():
@@ -117,20 +109,9 @@ class TestUploadSizeCap:
 
 
 class TestWritePathFailure:
-    """
-    DB에 쓸 수 없을 때는 매달리지 말고 503으로 끊는다.
-
-    페일오버 구간에서 이 요청은 어차피 성공하지 못한다. 커넥션 타임아웃까지
-    기다리면 워커를 붙잡고, 그 사이 살아 있는 조회 경로까지 대기가 생긴다 —
-    읽기/쓰기를 나눈 의미가 없어진다.
-    """
+    """DB에 쓸 수 없을 때는 매달리지 말고 503으로 끊는다."""
 
     async def test_DB_오류는_500이_아니라_503이다(self, client_session, monkeypatch):
-        """
-        500은 "이 요청은 원래 안 되는 것"으로 읽힌다. 페일오버는 그게 아니다.
-        지표에서도 앱 버그와 인프라 장애가 섞이면 안 된다.
-        """
-
         async def boom(*args, **kwargs):
             raise OperationalError("INSERT", {}, Exception("주 DB 다운"))
 
