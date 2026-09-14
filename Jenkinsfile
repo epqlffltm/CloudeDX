@@ -83,8 +83,12 @@ pipeline {
                description: '어느 환경의 값 파일에 태그를 커밋할지')
         string(name: 'DESELECT_TESTS', defaultValue: '',
                description: '건너뛸 테스트 경로 (비우면 전부 실행)')
-        string(name: 'SONARQUBE_URL', defaultValue: 'http://192.168.56.15:9000',
-               description: 'SonarQube 서버 주소')
+        // 🔴 클러스터 안 주소다. Terraform 의 sonarqube_internal_url 출력과 같다.
+        //    로컬(Vagrant)에서 돌릴 때는 http://192.168.56.15:9000 으로 바꾼다.
+        //    비워두면 sonarqube 단계를 건너뛴다 (서버가 없을 때).
+        string(name: 'SONARQUBE_URL',
+               defaultValue: 'http://sonarqube-sonarqube.infra.svc.cluster.local:9000',
+               description: 'SonarQube 서버 주소. 비우면 해당 단계를 건너뛴다')
     }
 
     options {
@@ -161,6 +165,9 @@ pipeline {
         }
 
         stage('sonarqube') {
+            // 서버 주소가 비어 있으면 건너뛴다.
+            // Terraform 에서 enable_sonarqube = false 로 둔 경우가 그렇다.
+            when { expression { return env.SONARQUBE_URL?.trim() } }
             steps {
                 container('sonar-scanner') {
                     withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
