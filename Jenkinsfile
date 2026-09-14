@@ -15,7 +15,11 @@ spec:
       command: ["sleep"]
       args: ["99d"]
       resources:
-        requests: { cpu: "500m", memory: "800Mi" }
+        # 🔴 CPU 800m 을 유지할 것 (문제 30)
+        #    300m 일 때 asyncpg 테스트 5건이 이벤트 루프 오류로 실패했다.
+        #    커넥션 정리가 늦어져 다음 테스트가 이전 루프의 커넥션을 물고 간다.
+        #    800m 에서 376건 전부 통과했다.
+        requests: { cpu: "800m", memory: "768Mi" }
         limits:   { cpu: "2",    memory: "2Gi" }
 
     - name: postgres
@@ -25,7 +29,7 @@ spec:
         - { name: POSTGRES_PASSWORD, value: cloudedx }
         - { name: POSTGRES_DB,       value: cloudedx_test }
       resources:
-        requests: { cpu: "200m", memory: "512Mi" }
+        requests: { cpu: "100m", memory: "384Mi" }
         limits:   { cpu: "1",    memory: "1Gi" }
 
     - name: buildah
@@ -35,7 +39,7 @@ spec:
       securityContext:
         privileged: true
       resources:
-        requests: { cpu: "500m", memory: "1Gi" }
+        requests: { cpu: "400m", memory: "640Mi" }
         limits:   { cpu: "2", memory: "4Gi" }
 
     - name: tools
@@ -43,14 +47,14 @@ spec:
       command: ["sleep"]
       args: ["99d"]
       resources:
-        requests: { cpu: "100m", memory: "256Mi" }
+        requests: { cpu: "50m", memory: "192Mi" }
 
     - name: trivy
       image: aquasec/trivy:latest
       command: ["sleep"]
       args: ["99d"]
       resources:
-        requests: { cpu: "100m", memory: "256Mi" }
+        requests: { cpu: "50m", memory: "192Mi" }
         limits:   { cpu: "1",    memory: "1Gi" }
 
     - name: sonar-scanner
@@ -58,7 +62,7 @@ spec:
       command: ["sleep"]
       args: ["99d"]
       resources:
-        requests: { cpu: "100m", memory: "256Mi" }
+        requests: { cpu: "50m", memory: "192Mi" }
         limits:   { cpu: "1",    memory: "1Gi" }
 '''
 
