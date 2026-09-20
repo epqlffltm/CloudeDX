@@ -6,7 +6,8 @@
  *   Remember me     세션 유지 시간은 서버가 정한다(12시간). 체크박스를 그리면
  *                   동작하는 척하는 가짜 UI가 된다.
  *   Forgot Password 재설정 흐름이 없다. 계정은 설정 기반 시연 계정 둘뿐이다.
- *   Request Access  회원가입이 없다. 대신 시연 계정 안내 블록이 그 자리를 맡는다.
+ *   Request Access  회원가입이 없다. 공개 배포라 시연 계정 안내도 두지 않는다
+ *                   (2026-09-20 제거 — 누구나 관리자로 로그인할 수 있었다).
  */
 
 :root {
@@ -134,31 +135,6 @@ a { color: inherit; text-decoration: none; }
 }
 .auth-submit:hover:not(:disabled) { background: var(--primary); }
 .auth-submit:disabled { opacity: .5; cursor: default; }
-
-/* 시연 계정. 시안의 "Request Access" 자리 — 실제로 있는 기능만 그린다. */
-.auth-demo { margin-top: 36px; }
-.auth-demo__title {
-  margin: 0 0 12px;
-  font-size: 10.5px; font-weight: 700;
-  letter-spacing: var(--track-wide); text-transform: uppercase;
-  color: var(--ink-faint); text-align: center;
-}
-.auth-demo__row {
-  width: 100%; display: grid;
-  grid-template-columns: auto 1fr; align-items: center; gap: 2px 14px;
-  text-align: left; padding: 13px 16px; margin-bottom: 8px;
-  border: 1px solid var(--line);
-  transition: border-color .15s, background .15s;
-}
-.auth-demo__row:hover { border-color: var(--ink); }
-.auth-demo__row strong { font-size: 13px; font-weight: 700; }
-.auth-demo__row code {
-  justify-self: end; grid-column: 2;  grid-row: 1;
-  font-size: 12px; color: var(--ink-soft);
-}
-.auth-demo__row span {
-  grid-column: 1 / -1; font-size: 12px; color: var(--ink-faint);
-}
 
 /* 돌아가기 + 하단 */
 .auth-back {

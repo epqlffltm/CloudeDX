@@ -18,7 +18,7 @@
 | 화면 | 파일 | 구성 |
 |---|---|---|
 | 메인 | `index.html` + `css/reverdi.css` | 히어로 · 카테고리 · 브랜드 스포트라이트 · 검색 결과 |
-| 로그인 | `login.html` + `css/login.css` + `js/login.js` | 카드형 폼 · 비밀번호 표시 토글 · 시연 계정 블록 |
+| 로그인 | `login.html` + `css/login.css` + `js/login.js` | 카드형 폼 · 비밀번호 표시 토글 (시연 계정 안내는 공개 배포라 제거) |
 | 관리자 콘솔 | `admin.html` + `css/admin.css` + `js/admin.js` | 해시 라우팅 6화면 (대시보드 · API · DB · 크롤러 · 분포 · 메모) |
 | 기업고객 포털 | `client.html` + `css/client.css` + `js/client*.js` | 해시 라우팅 3화면 (내 매물 · 단건 등록 · CSV 일괄 등록) |
 

@@ -36,17 +36,6 @@ async function init() {
     });
   }
 
-  // 시연 계정 칸을 누르면 입력칸이 채워진다.
-  for (const row of document.querySelectorAll('[data-fill]')) {
-    row.addEventListener('click', () => {
-      const who = row.dataset.fill;
-      $('username').value = who;
-      $('password').value = `${who}1234`;
-      $('loginError').hidden = true;
-      $('password').focus();
-    });
-  }
-
   $('loginForm').addEventListener('submit', async (e) => {
     e.preventDefault();
 
