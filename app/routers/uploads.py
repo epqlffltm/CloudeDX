@@ -37,7 +37,7 @@ from app.domain.storage import (
 )
 from app.schemas.auth import UploadResponse
 from app.schemas.products import ListingListResponse, ListingOut
-from app.schemas.uploads import ImageUploadResponse
+from app.schemas.uploads import ImageUploadResponse, ItemDeleteResponse
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +97,55 @@ async def _require_client_seller(session: AsyncSession, user: User) -> Seller:
         )
 
     return seller
+
+
+async def _load_my_item(
+    session: AsyncSession, user: User, item_id: int
+) -> ItemRecord:
+    """
+    수정·삭제 대상 매물을 꺼내면서 소유권까지 확인한다.
+
+    사진 등록과 매물 내리기가 같은 판단을 해야 하므로 한 함수로 모았다. 없으면
+    404, 남의 것이면 403이다. 소유 판단은 owns_item() 하나만 쓴다 — 직접등록이
+    아니거나 판매자가 다르면 거절이다(app/domain/ownership.py).
+    """
+    item = await session.get(ItemRecord, item_id)
+    if item is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="해당 매물을 찾을 수 없습니다.",
+        )
+
+    if not owns_item(
+        account_seller_id=user.seller_id,
+        item_source=item.source,
+        item_seller_id=item.seller_id,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="이 계정이 등록한 매물만 수정할 수 있습니다.",
+        )
+
+    return item
+
+
+async def _commit_guarded(session: AsyncSession, what: str) -> None:
+    """
+    쓰기 제한시간을 걸고 커밋한다. 실패하면 롤백하고 503으로 돌린다.
+
+    제한시간을 두는 이유: DB 가 느려질 때 요청이 무한정 붙잡혀 있으면 파드의
+    커넥션이 모두 소진되어 읽기까지 멈춘다. 빨리 포기하고 재시도를 유도한다.
+    """
+    try:
+        async with asyncio.timeout(WRITE_TIMEOUT_SECONDS):
+            await session.commit()
+    except (TimeoutError, SQLAlchemyError) as exc:
+        await session.rollback()
+        logger.warning("%s 실패: %s: %s", what, type(exc).__name__, exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="지금은 저장할 수 없습니다. 잠시 후 다시 시도해 주세요.",
+        ) from exc
 
 
 def _to_listing(item: ItemRecord) -> ListingOut:
@@ -372,22 +421,7 @@ async def upload_item_image(
 
     await _require_client_seller(session, user)
 
-    item = await session.get(ItemRecord, item_id)
-    if item is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="해당 매물을 찾을 수 없습니다.",
-        )
-
-    if not owns_item(
-        account_seller_id=user.seller_id,
-        item_source=item.source,
-        item_seller_id=item.seller_id,
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="이 계정이 등록한 매물만 수정할 수 있습니다.",
-        )
+    item = await _load_my_item(session, user, item_id)
 
     try:
         safe = sanitize_image(raw)
@@ -453,3 +487,50 @@ async def upload_item_image(
         height=safe.height,
         bytes=len(safe.data),
     )
+
+
+@router.delete(
+    "/items/{item_id}",
+    response_model=ItemDeleteResponse,
+    status_code=status.HTTP_200_OK,
+    operation_id="deleteMyUploadedItem",
+    summary="내 매물 내리기 (기업고객 전용)",
+    responses={
+        401: {"description": "로그인이 필요합니다."},
+        403: {"description": "기업고객이 등록한 매물만 내릴 수 있습니다."},
+        404: {"description": "해당 매물을 찾을 수 없습니다."},
+        409: {"description": "계정에 판매자가 올바르게 연결되어 있지 않습니다."},
+        503: {"description": "DB 에 쓸 수 없는 상태입니다."},
+    },
+)
+async def delete_my_uploaded_item(
+    item_id: int,
+    user: Annotated[User, Depends(require_role("client"))],
+    session: Annotated[AsyncSession, Depends(get_session)],
+):
+    """
+    현재 client 판매자가 소유한 직접등록 매물을 화면에서 내린다.
+
+    **행을 지우지 않는다.** is_active=False 로 바꾸면 공개 목록과 '내 매물'
+    질의가 모두 그 매물을 제외한다. 행을 남기는 이유는 url 유니크 키 때문이다 —
+    같은 매물을 CSV 로 다시 올리면 새 행이 생기는 대신 이 행이 되살아난다.
+
+    사진도 S3 에 남긴다. 되살릴 때 사진까지 다시 올려야 하는 상황을 만들지
+    않으려는 것이다. 사진을 실제로 지우는 것은 사진 교체 때만 한다.
+    """
+    await _require_client_seller(session, user)
+
+    item = await _load_my_item(session, user, item_id)
+    title = item.clean_title or item.title
+
+    if not item.is_active:
+        # 이미 내려간 매물이다. 같은 결과를 돌려준다 — 화면이 두 번 눌렀을 때
+        # 에러를 보여줄 이유가 없다(멱등).
+        return ItemDeleteResponse(item_id=item_id, title=title)
+
+    item.is_active = False
+    await _commit_guarded(session, f"매물 {item_id} 내리기")
+
+    logger.info("매물 %s 내림: %s (%s)", item_id, title, user.username)
+
+    return ItemDeleteResponse(item_id=item_id, title=title)

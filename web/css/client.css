@@ -226,6 +226,19 @@ table.inv tr:hover td { background: var(--bg); }
   white-space: nowrap;
 }
 .photo-pick:hover { background: var(--ink); color: #fff; }
+
+/* 매물 내리기. 되돌릴 수 있는 동작이라 빨간 테두리까지만 쓰고 채우지는 않는다 */
+.inv-delete {
+  display: inline-flex; margin-left: 8px;
+  border: 1px solid var(--danger); background: #fff; color: var(--danger);
+  padding: 6px 13px;
+  font-size: 10.5px; font-weight: 700;
+  letter-spacing: var(--track-label); text-transform: uppercase;
+  cursor: pointer; transition: background .2s, color .2s;
+  white-space: nowrap;
+}
+.inv-delete:hover:not(:disabled) { background: var(--danger); color: #fff; }
+.inv-delete:disabled { opacity: .45; cursor: default; }
 .photo-status { display: block; margin-top: 7px; font-size: 11.5px; color: var(--ink-soft); max-width: 180px; }
 .photo-status--error { color: var(--danger); }
 

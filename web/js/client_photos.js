@@ -1,5 +1,8 @@
 // web/js/client_photos.js
-// 현재 로그인한 판매자의 직접등록 매물만 조회하고 사진을 등록한다.
+// 현재 로그인한 판매자의 직접등록 매물만 조회하고, 사진을 등록하거나 매물을 내린다.
+//
+// '내리기'는 서버에서 is_active=False 로 바꾸는 것이다. 행이 지워지지 않으므로
+// 같은 매물을 CSV 로 다시 올리면 되살아난다 (app/routers/uploads.py 참고).
 
 const PAGE = 20;
 const ACCEPTED = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
@@ -39,6 +42,8 @@ function rowHtml(item) {
         <input type="file" id="photo-${item.id}" accept="image/*" hidden
                data-photo-input="${item.id}">
         <label class="photo-pick" for="photo-${item.id}">${item.image_url ? '사진 교체' : '사진 올리기'}</label>
+        <button type="button" class="inv-delete" data-delete="${item.id}"
+                data-title="${esc(item.title)}">내리기</button>
         <span class="photo-status" data-status="${item.id}"></span>
       </td>
     </tr>`;
@@ -166,6 +171,40 @@ async function upload(itemId, file) {
   }
 }
 
+/**
+ * 매물 내리기. 서버가 is_active=False 로 바꾸면 목록에서 사라진다.
+ *
+ * 성공 후 목록을 다시 불러오는 이유: 이 페이지의 마지막 한 건을 내렸을 때
+ * 행만 지우면 빈 표가 남고 페이지 수도 틀어진다. 서버에서 다시 받아 맞춘다.
+ */
+async function removeItem(itemId, title) {
+  if (!window.confirm(`'${title}' 매물을 목록에서 내립니다.\n\n계속할까요?`)) return;
+
+  const btn = document.querySelector(`[data-delete="${itemId}"]`);
+  if (btn) btn.disabled = true;
+  setStatus(itemId, '내리는 중…');
+
+  try {
+    const res = await fetch(`/api/uploads/items/${itemId}`, {
+      method: 'DELETE',
+      credentials: 'same-origin',
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setStatus(itemId, data.detail ?? `내리지 못했습니다. (${res.status})`, true);
+      if (btn) btn.disabled = false;
+      return;
+    }
+
+    // 표와 집계(관리자 화면의 매물 수)가 같이 갱신되도록 같은 이벤트를 쏜다.
+    window.dispatchEvent(new CustomEvent('reverdi:items-changed'));
+  } catch {
+    setStatus(itemId, '네트워크 오류로 내리지 못했습니다.', true);
+    if (btn) btn.disabled = false;
+  }
+}
+
 document.addEventListener('change', (e) => {
   const input = e.target.closest('[data-photo-input]');
   if (!input || !input.files?.length) return;
@@ -174,6 +213,12 @@ document.addEventListener('change', (e) => {
 });
 
 document.addEventListener('click', (e) => {
+  const del = e.target.closest('[data-delete]');
+  if (del && !del.disabled) {
+    removeItem(del.dataset.delete, del.dataset.title);
+    return;
+  }
+
   const btn = e.target.closest('[data-inv-page]');
   if (!btn || btn.disabled) return;
   state.offset = btn.dataset.invPage === 'next'

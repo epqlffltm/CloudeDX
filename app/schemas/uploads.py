@@ -1,6 +1,6 @@
 # app/schemas/uploads.py
 
-"""매물 사진 등록 응답."""
+"""매물 사진 등록·매물 내리기 응답."""
 
 from pydantic import BaseModel, Field
 
@@ -20,3 +20,20 @@ class ImageUploadResponse(BaseModel):
     width: int = Field(description="저장된 이미지의 가로 픽셀. 원본과 다를 수 있다")
     height: int
     bytes: int = Field(description="저장된 파일 크기. 재인코딩 후 값이다")
+
+
+class ItemDeleteResponse(BaseModel):
+    """
+    내린 매물의 정보.
+
+    행을 지우지 않고 is_active=False 로 내린다. url 이 유니크 키라서 행이 남아
+    있어야 같은 매물을 다시 올렸을 때 새 매물로 중복 집계되지 않고 기존 행이
+    되살아난다 — 크롤링 매물의 미발견 처리와 같은 규칙이다(ItemRecord.is_active
+    주석 참고). 화면에서는 목록 질의가 is_active 를 보므로 즉시 사라진다.
+
+    title 을 함께 돌려주는 이유는 화면이 "'…' 를 내렸습니다" 라고 확인 문구를
+    띄울 수 있게 하려는 것이다.
+    """
+
+    item_id: int
+    title: str = Field(description="내린 매물의 제목. 확인 문구에 쓴다")
